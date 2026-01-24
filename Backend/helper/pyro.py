@@ -55,20 +55,95 @@ def get_readable_file_size(size_in_bytes):
 
 
 def clean_filename(filename):
+    """
+    Enhanced filename cleaner for messy Telegram filenames.
+    Removes emojis, channel watermarks, promotional text, and normalizes for PTN parsing.
+    """
     if not filename:
         return "unknown_file"
     
-    pattern = r'_@[A-Za-z]+_|@[A-Za-z]+_|[\[\]\s@]*@[^.\s\[\]]+[\]\[\s@]*'
-    cleaned_filename = re.sub(pattern, '', filename)
+    cleaned = filename
     
-    cleaned_filename = re.sub(
-        r'(?<=\W)(org|AMZN|DDP|DD|NF|AAC|TVDL|5\.1|2\.1|2\.0|7\.0|7\.1|5\.0|~|\b\w+kbps\b)(?=\W)', 
-        ' ', cleaned_filename, flags=re.IGNORECASE
+    # 1. Remove emojis and special unicode symbols
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F680-\U0001F6FF"  # transport & map symbols
+        "\U0001F1E0-\U0001F1FF"  # flags
+        "\U00002702-\U000027B0"  # dingbats
+        "\U000024C2-\U0001F251"  # misc
+        "\U0001F900-\U0001F9FF"  # supplemental symbols
+        "\U0001FA00-\U0001FA6F"  # chess symbols
+        "\U0001FA70-\U0001FAFF"  # symbols extended
+        "\U00002600-\U000026FF"  # misc symbols
+        "\U00002700-\U000027BF"  # dingbats
+        "\U0001F018-\U0001F0FF"  # playing cards and more
+        "🎗️🎬🎥📺🎞️🎦🔥💥⚡✨🌟⭐💫🎭🏆🔴🟢🟡❤️💙💚💛🧡💜🖤🤍🤎"  # common media emojis
+        "]+"
+    , re.UNICODE)
+    cleaned = emoji_pattern.sub(' ', cleaned)
+    
+    # 2. Remove common promotional prefixes/suffixes in brackets
+    # Handles: [JOIN NOW @CHANNEL], [Subscribe @xyz], etc.
+    bracket_promo = re.compile(
+        r'\[.*?(?:JOIN|SUBSCRIBE|DOWNLOAD|GET|VISIT|FROM|@|telegram|channel|group).*?\]',
+        re.IGNORECASE
+    )
+    cleaned = bracket_promo.sub(' ', cleaned)
+    
+    # 3. Remove standalone promotional phrases (not in brackets)
+    promo_phrases = re.compile(
+        r'(?:^|\s)(?:JOIN\s*NOW|SUBSCRIBE\s*NOW|DOWNLOAD\s*NOW|GET\s*NOW|'
+        r'VISIT\s*NOW|JOIN\s*US|SUBSCRIBE\s*TO|DOWNLOAD\s*FROM|'
+        r'@\w+|FROM\s*@\w+|POWERED\s*BY|PRESENTED\s*BY|'
+        r'NMX\s*NAVARASA\s*SIGMA\s*IBA\s*WEBSERIES)[\s\-:]*',
+        re.IGNORECASE
+    )
+    cleaned = promo_phrases.sub(' ', cleaned)
+    
+    # 4. Remove @username patterns anywhere
+    cleaned = re.sub(r'@[A-Za-z0-9_]+', '', cleaned)
+    
+    # 5. Remove common Telegram channel watermarks in various formats
+    # Handles: _@CHANNEL_, @CHANNEL_, [CHANNEL], etc.
+    watermark_pattern = r'_@[A-Za-z0-9]+_|@[A-Za-z0-9]+_|[\[\]\s@]*@[^.\s\[\]]+[\]\[\s@]*'
+    cleaned = re.sub(watermark_pattern, ' ', cleaned)
+    
+    # 6. Remove streaming service tags that don't affect title parsing
+    cleaned = re.sub(
+        r'(?:^|\s)(?:org|AMZN|DDP|DD|NF|AAC|TVDL|ESub|ESubs|HDHub4u|'
+        r'HDHub|FilmCorner|MovieHub|TvShows|WebSeries|FILMCORNERMAIN|'
+        r'5\.1|2\.1|2\.0|7\.0|7\.1|5\.0|~|\d+kbps)(?:\s|$)',
+        ' ', cleaned, flags=re.IGNORECASE
     )
     
-    cleaned_filename = re.sub(r'\s+', ' ', cleaned_filename).strip().replace(' .', '.')
+    # 7. Remove brackets that only contain junk (emojis, @mentions, etc.)
+    cleaned = re.sub(r'\[\s*\]|\(\s*\)', '', cleaned)
     
-    return cleaned_filename if cleaned_filename else "unknown_file"
+    # 8. Clean up parentheses with just year or junk
+    # But preserve (2025) style year markers
+    cleaned = re.sub(r'\(\s*(?!\d{4}\s*\))[^)]*@[^)]*\)', '', cleaned)
+    
+    # 9. Remove leading/trailing special characters and normalize spaces
+    cleaned = re.sub(r'^[\s\-_.:]+|[\s\-_.:]+$', '', cleaned)
+    cleaned = re.sub(r'[\s\-_.]+', ' ', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    
+    # 10. If filename starts with common junk words, remove them
+    junk_start = re.compile(
+        r'^(?:DOWNLOAD|WATCH|STREAM|NEW|LATEST|HD|FULL|FREE)[\s\-:]+',
+        re.IGNORECASE
+    )
+    cleaned = junk_start.sub('', cleaned)
+    
+    # 11. Restore periods before file extensions
+    cleaned = cleaned.replace(' .', '.')
+    
+    # 12. Final cleanup - ensure we have something useful
+    cleaned = cleaned.strip()
+    
+    return cleaned if cleaned and len(cleaned) > 2 else "unknown_file"
 
 
 def get_readable_time(seconds: int) -> str:
