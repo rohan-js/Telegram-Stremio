@@ -39,14 +39,19 @@ async def send_reply_messages():
             media_type = metadata_info.get('media_type', 'movie')
             movie_title = metadata_info.get('title', 'Unknown')
             year = metadata_info.get('year', '')
+            encoded_string = metadata_info.get('encoded_string', '')
             
             # Build the Stremio link
             if imdb_id:
                 stremio_link = f"stremio://detail/{media_type}/{imdb_id}"
-                web_link = f"{base_url}/stremio/stream/{media_type}/{imdb_id}.json"
             else:
                 stremio_link = f"{base_url}/stremio/manifest.json"
-                web_link = stremio_link
+            
+            # Build the direct stream link (playable in VLC/browser)
+            if encoded_string:
+                direct_stream = f"{base_url}/stream/{encoded_string}"
+            else:
+                direct_stream = "N/A"
             
             # Create reply message
             reply_text = (
@@ -55,10 +60,10 @@ async def send_reply_messages():
                 f"{f' ({year})' if year else ''}\n"
                 f"📁 Size: {size}\n"
                 f"🆔 IMDB: `{imdb_id}`\n\n"
+                f"▶️ **Direct Stream Link (VLC/Browser):**\n"
+                f"`{direct_stream}`\n\n"
                 f"🔗 **Open in Stremio:**\n"
-                f"`{stremio_link}`\n\n"
-                f"📺 Stream API:\n"
-                f"`{web_link}`"
+                f"`{stremio_link}`"
             )
             
             # Import StreamBot for sending reply
