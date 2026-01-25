@@ -58,12 +58,9 @@ async def send_reply_messages():
                 f"✅ **Added to Stremio!**\n\n"
                 f"🎬 **{movie_title}**"
                 f"{f' ({year})' if year else ''}\n"
-                f"📁 Size: {size}\n"
-                f"🆔 IMDB: `{imdb_id}`\n\n"
-                f"▶️ **Direct Stream Link (VLC/Browser):**\n"
-                f"`{direct_stream}`\n\n"
-                f"🔗 **Open in Stremio:**\n"
-                f"`{stremio_link}`"
+                f"📁 Size: {size}\n\n"
+                f"▶️ **Direct Stream Link:**\n"
+                f"`{direct_stream}`"
             )
             
             # Import StreamBot for sending reply
