@@ -49,7 +49,7 @@ async def send_reply_messages():
             
             # Build the direct stream link (playable in VLC/browser)
             if encoded_string:
-                direct_stream = f"{base_url}/stream/{encoded_string}"
+                direct_stream = f"{base_url}/dl/{encoded_string}/video.mkv"
             else:
                 direct_stream = "N/A"
             
