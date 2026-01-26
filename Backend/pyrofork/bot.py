@@ -27,3 +27,4 @@ Helper = Client(
 
 multi_clients = {}
 work_loads = {}
+client_dc_map = {}
