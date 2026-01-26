@@ -8,8 +8,9 @@ from Backend.logger import LOGGER
 async def announce_addon(client: Client, message: Message):
     """Send addon install message to all AUTH_CHANNEL channels"""
     
-    addon_url = f"{Telegram.BASE_URL}/stremio/manifest.json"
-    stremio_url = addon_url.replace("https://", "stremio://").replace("http://", "stremio://")
+    # Use cloudflare tunnel URL
+    stremio_url = "stremio://herb-planning-photography-though.trycloudflare.com/stremio/manifest.json"
+    addon_url = "https://herb-planning-photography-though.trycloudflare.com/stremio/manifest.json"
     
     text = (
         "🎬 <b>Telegram Stremio Addon</b>\n\n"
