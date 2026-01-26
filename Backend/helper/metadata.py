@@ -183,8 +183,9 @@ async def metadata(filename: str, channel: int, msg_id) -> dict | None:
         LOGGER.warning(f"Missing episode in {filename}: {parsed}")
         return None
     if not quality:
-        LOGGER.warning(f"Skipping {filename}: No resolution (parsed={parsed})")
-        return None
+        # Don't skip files without resolution - just use a default
+        quality = "Unknown"
+        LOGGER.info(f"No resolution found for {filename}, using default")
     if not title:
         LOGGER.info(f"No title parsed from: {filename} (parsed={parsed})")
         return None
