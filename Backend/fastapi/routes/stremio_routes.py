@@ -1,11 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from typing import Optional
 from urllib.parse import unquote
 from Backend.config import Telegram
 from Backend import db, __version__
 import PTN
 from datetime import datetime, timezone, timedelta
-from Backend.fastapi.security.tokens import verify_token
 
 
 # --- Configuration ---
@@ -107,8 +106,8 @@ def get_resolution_priority(stream_name: str) -> int:
     return 1
 
 # --- Routes ---
-@router.get("/{token}/manifest.json")
-async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
+@router.get("/manifest.json")
+async def get_manifest():
     if Telegram.HIDE_CATALOG:
         resources = ["stream"]
         catalogs = []
@@ -178,9 +177,9 @@ async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
 
 
 
-@router.get("/{token}/catalog/{media_type}/{id}/{extra:path}.json")
-@router.get("/{token}/catalog/{media_type}/{id}.json")
-async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str] = None, token_data: dict = Depends(verify_token)):
+@router.get("/catalog/{media_type}/{id}/{extra:path}.json")
+@router.get("/catalog/{media_type}/{id}.json")
+async def get_catalog(media_type: str, id: str, extra: Optional[str] = None):
     if Telegram.HIDE_CATALOG:
         raise HTTPException(status_code=404, detail="Catalog disabled")
 
@@ -233,8 +232,8 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
     return {"metas": metas}
 
 
-@router.get("/{token}/meta/{media_type}/{id}.json")
-async def get_meta(token: str, media_type: str, id: str, token_data: dict = Depends(verify_token)):
+@router.get("/meta/{media_type}/{id}.json")
+async def get_meta(media_type: str, id: str):
     if Telegram.HIDE_CATALOG:
         raise HTTPException(status_code=404, detail="Catalog disabled")
     try:
@@ -295,34 +294,11 @@ async def get_meta(token: str, media_type: str, id: str, token_data: dict = Depe
         meta_obj["videos"] = videos
     return {"meta": meta_obj}
 
-@router.get("/{token}/stream/{media_type}/{id}.json")
+@router.get("/stream/{media_type}/{id}.json")
 async def get_streams(
-    token: str,
     media_type: str,
     id: str,
-    token_data: dict = Depends(verify_token)
 ):
-
-    if token_data.get("limit_exceeded"):
-        limit_type = token_data["limit_exceeded"]
-
-        title = (
-            "🚫 Daily Limit Reached – Upgrade Required"
-            if limit_type == "daily"
-            else "🚫 Monthly Limit Reached – Upgrade Required"
-        )
-
-        return {
-            "streams": [
-                {
-                    "name": "Limit Reached",
-                    "title": title,
-                    "url": token_data["limit_video"]
-                }
-            ]
-        }
-
-
     try:
         parts = id.split(":")
         imdb_id = parts[0]
@@ -354,7 +330,7 @@ async def get_streams(
             streams.append({
                 "name": stream_name,
                 "title": stream_title,
-                "url": f"{BASE_URL}/dl/{token}/{quality.get('id')}/video.mkv"
+                "url": f"{BASE_URL}/dl/{quality.get('id')}/video.mkv"
             })
 
     streams.sort(
