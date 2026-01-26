@@ -79,68 +79,96 @@ def clean_filename(filename):
         "\U00002600-\U000026FF"  # misc symbols
         "\U00002700-\U000027BF"  # dingbats
         "\U0001F018-\U0001F0FF"  # playing cards and more
-        "🎗️🎬🎥📺🎞️🎦🔥💥⚡✨🌟⭐💫🎭🏆🔴🟢🟡❤️💙💚💛🧡💜🖤🤍🤎"  # common media emojis
+        "\U0001F170-\U0001F1FF"  # enclosed characters
+        "\U0001F004"  # mahjong
+        "\U0001F0CF"  # playing card
+        "\U0001F18E"  # AB button
+        "\U00003030"  # wavy dash
+        "\U000000A9"  # copyright
+        "\U000000AE"  # registered
+        "\U0000203C-\U00003299"  # misc symbols
+        "🎗️🎬🎥📺🎞️🎦🔥💥⚡✨🌟⭐💫🎭🏆🔴🟢🟡❤️💙💚💛🧡💜🖤🤍🤎🚫⛔"  # common media emojis
         "]+"
     , re.UNICODE)
     cleaned = emoji_pattern.sub(' ', cleaned)
     
-    # 2. Remove common promotional prefixes/suffixes in brackets
+    # 2. Remove release group tags in brackets at start: [CK], [MX], [TG], etc.
+    cleaned = re.sub(r'^\s*\[[A-Z]{1,4}\]\s*[-:]?\s*', '', cleaned, flags=re.IGNORECASE)
+    
+    # 3. Remove common promotional prefixes/suffixes in brackets
     # Handles: [JOIN NOW @CHANNEL], [Subscribe @xyz], etc.
     bracket_promo = re.compile(
-        r'\[.*?(?:JOIN|SUBSCRIBE|DOWNLOAD|GET|VISIT|FROM|@|telegram|channel|group).*?\]',
+        r'\[.*?(?:JOIN|SUBSCRIBE|DOWNLOAD|GET|VISIT|FROM|@|telegram|channel|group|NOW).*?\]',
         re.IGNORECASE
     )
     cleaned = bracket_promo.sub(' ', cleaned)
     
-    # 3. Remove standalone promotional phrases (not in brackets)
+    # 4. Remove standalone promotional phrases (not in brackets)
     promo_phrases = re.compile(
         r'(?:^|\s)(?:JOIN\s*NOW|SUBSCRIBE\s*NOW|DOWNLOAD\s*NOW|GET\s*NOW|'
         r'VISIT\s*NOW|JOIN\s*US|SUBSCRIBE\s*TO|DOWNLOAD\s*FROM|'
         r'@\w+|FROM\s*@\w+|POWERED\s*BY|PRESENTED\s*BY|'
-        r'NMX\s*NAVARASA\s*SIGMA\s*IBA\s*WEBSERIES)[\s\-:]*',
+        r'NMX\s*NAVARASA\s*SIGMA\s*IBA\s*WEBSERIES|'
+        r'NMX\s*NAVARASA|SIGMA\s*IBA)[\s\-:]*',
         re.IGNORECASE
     )
     cleaned = promo_phrases.sub(' ', cleaned)
     
-    # 4. Remove @username patterns anywhere
+    # 5. Remove @username patterns anywhere
     cleaned = re.sub(r'@[A-Za-z0-9_]+', '', cleaned)
     
-    # 5. Remove common Telegram channel watermarks in various formats
-    # Handles: _@CHANNEL_, @CHANNEL_, [CHANNEL], etc.
+    # 6. Remove common Telegram channel watermarks in various formats
     watermark_pattern = r'_@[A-Za-z0-9]+_|@[A-Za-z0-9]+_|[\[\]\s@]*@[^.\s\[\]]+[\]\[\s@]*'
     cleaned = re.sub(watermark_pattern, ' ', cleaned)
     
-    # 6. Remove streaming service tags that don't affect title parsing
+    # 7. Remove language and quality tags that don't help with title matching
     cleaned = re.sub(
-        r'(?:^|\s)(?:org|AMZN|DDP|DD|NF|AAC|TVDL|ESub|ESubs|HDHub4u|'
-        r'HDHub|FilmCorner|MovieHub|TvShows|WebSeries|FILMCORNERMAIN|'
-        r'5\.1|2\.1|2\.0|7\.0|7\.1|5\.0|~|\d+kbps)(?:\s|$)',
+        r'\b(?:Telugu|Tamil|Hindi|Malayalam|Kannada|Bengali|Marathi|Punjabi|'
+        r'English|Dubbed|Dual\s*Audio|Multi\s*Audio|'
+        r'HQ|HDRi|HDRip|HDR|WEB-DL|WEBRip|BluRay|BRRip|DVDRip|HDTV|'
+        r'CAMRip|HDCAM|HDCAMRip|PreDVD|DVDScr|'
+        r'720p|1080p|2160p|4K|UHD|FHD|HD|SD|'
+        r'x264|x265|HEVC|H\.264|H\.265|AVC|'
+        r'AAC|AC3|DTS|MP3|FLAC|'
+        r'ESub|ESubs|HardSub|SoftSub|SubsIncluded)\b',
         ' ', cleaned, flags=re.IGNORECASE
     )
     
-    # 7. Remove brackets that only contain junk (emojis, @mentions, etc.)
+    # 8. Remove streaming service and release group tags
+    cleaned = re.sub(
+        r'\b(?:org|AMZN|Amazon|NF|Netflix|DDP|DD|TVDL|HDHub4u|'
+        r'HDHub|FilmCorner|MovieHub|TvShows|WebSeries|FILMCORNERMAIN|'
+        r'YTS|YIFY|RARBG|PSA|Pahe|TamilRockers|Tamilmv|'
+        r'5\.1|2\.1|2\.0|7\.0|7\.1|5\.0|~|\d+kbps|'
+        r'CK|MX|TG|MKVKING|MkvHub)\b',
+        ' ', cleaned, flags=re.IGNORECASE
+    )
+    
+    # 9. Remove brackets that only contain junk (emojis, @mentions, etc.)
     cleaned = re.sub(r'\[\s*\]|\(\s*\)', '', cleaned)
     
-    # 8. Clean up parentheses with just year or junk
-    # But preserve (2025) style year markers
+    # 10. Clean up parentheses with junk but preserve year markers like (2025)
     cleaned = re.sub(r'\(\s*(?!\d{4}\s*\))[^)]*@[^)]*\)', '', cleaned)
     
-    # 9. Remove leading/trailing special characters and normalize spaces
+    # 11. Remove leading/trailing special characters and normalize spaces
     cleaned = re.sub(r'^[\s\-_.:]+|[\s\-_.:]+$', '', cleaned)
     cleaned = re.sub(r'[\s\-_.]+', ' ', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     
-    # 10. If filename starts with common junk words, remove them
+    # 12. If filename starts with common junk words, remove them
     junk_start = re.compile(
         r'^(?:DOWNLOAD|WATCH|STREAM|NEW|LATEST|HD|FULL|FREE)[\s\-:]+',
         re.IGNORECASE
     )
     cleaned = junk_start.sub('', cleaned)
     
-    # 11. Restore periods before file extensions
+    # 13. Restore periods before file extensions
     cleaned = cleaned.replace(' .', '.')
     
-    # 12. Final cleanup - ensure we have something useful
+    # 14. Remove file extension for cleaner title matching
+    cleaned = re.sub(r'\.(mkv|mp4|avi|mov|wmv|flv|webm)$', '', cleaned, flags=re.IGNORECASE)
+    
+    # 15. Final cleanup - ensure we have something useful
     cleaned = cleaned.strip()
     
     return cleaned if cleaned and len(cleaned) > 2 else "unknown_file"
