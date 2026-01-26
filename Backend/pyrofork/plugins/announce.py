@@ -16,12 +16,12 @@ async def announce_addon(client: Client, message: Message):
         "To install the Stremio addon, copy the URL below and add it in the Stremio addons:\n\n"
         f"<b>Your Addon URL:</b>\n"
         f"<code>{stremio_url}</code>\n\n"
-        "Or click the button below to install directly! 👇"
+        "👆 Copy the URL above and paste in Stremio → Addons → Install from URL"
     )
     
+    # Use https:// URLs for buttons (Telegram doesn't allow custom protocols like stremio://)
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📺 Install Addon", url=stremio_url)],
-        [InlineKeyboardButton("🌐 Web Link", url=addon_url)]
+        [InlineKeyboardButton("🌐 Open Addon Page", url=addon_url)]
     ])
     
     success_count = 0
