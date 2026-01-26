@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import Optional
 from urllib.parse import unquote
 from Backend.config import Telegram
 from Backend import db, __version__
+from Backend.fastapi.security.tokens import verify_token
 import PTN
 from datetime import datetime, timezone, timedelta
 
@@ -105,9 +106,14 @@ def get_resolution_priority(stream_name: str) -> int:
             return res_value
     return 1
 
-# --- Routes ---
-@router.get("/manifest.json")
-async def get_manifest():
+
+# --- Token-based Manifest (Per-user addon) ---
+@router.get("/{token}/manifest.json")
+async def get_manifest_with_token(token: str):
+    """Per-user manifest with token embedded in all stream URLs"""
+    # Verify token (will raise 401 if invalid)
+    await verify_token(token)
+    
     if Telegram.HIDE_CATALOG:
         resources = ["stream"]
         catalogs = []
@@ -159,7 +165,7 @@ async def get_manifest():
         ]
 
     return {
-        "id": "telegram.media",
+        "id": f"telegram.media.{token[:8]}",
         "version": ADDON_VERSION,
         "name": ADDON_NAME,
         "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
@@ -175,12 +181,45 @@ async def get_manifest():
     }
 
 
+# --- Legacy public manifest (redirects to subscription page) ---
+@router.get("/manifest.json")
+async def get_manifest():
+    """Public manifest - limited functionality, prompts for subscription"""
+    return {
+        "id": "telegram.media",
+        "version": ADDON_VERSION,
+        "name": f"{ADDON_NAME} (Subscribe Required)",
+        "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
+        "description": "Subscribe via Telegram bot to get your personal addon link.",
+        "types": ["movie", "series"],
+        "resources": ["stream"],
+        "catalogs": [],
+        "idPrefixes": ["tt"],
+        "behaviorHints": {
+            "configurable": False,
+            "configurationRequired": True
+        }
+    }
+
+
+@router.get("/{token}/catalog/{media_type}/{id}/{extra:path}.json")
+@router.get("/{token}/catalog/{media_type}/{id}.json")
+async def get_catalog_with_token(token: str, media_type: str, id: str, extra: Optional[str] = None):
+    """Token-protected catalog"""
+    await verify_token(token)
+    return await _get_catalog(media_type, id, extra)
+
+
 @router.get("/catalog/{media_type}/{id}/{extra:path}.json")
 @router.get("/catalog/{media_type}/{id}.json")
 async def get_catalog(media_type: str, id: str, extra: Optional[str] = None):
     if Telegram.HIDE_CATALOG:
         raise HTTPException(status_code=404, detail="Catalog disabled")
-    
+    return await _get_catalog(media_type, id, extra)
+
+
+async def _get_catalog(media_type: str, id: str, extra: Optional[str] = None):
+    """Internal catalog implementation"""
     if media_type not in ["movie", "series"]:
         raise HTTPException(status_code=404, detail="Invalid catalog type")
 
@@ -230,10 +269,22 @@ async def get_catalog(media_type: str, id: str, extra: Optional[str] = None):
     return {"metas": metas}
 
 
+@router.get("/{token}/meta/{media_type}/{id}.json")
+async def get_meta_with_token(token: str, media_type: str, id: str):
+    """Token-protected meta"""
+    await verify_token(token)
+    return await _get_meta(media_type, id)
+
+
 @router.get("/meta/{media_type}/{id}.json")
 async def get_meta(media_type: str, id: str):
     if Telegram.HIDE_CATALOG:
         raise HTTPException(status_code=404, detail="Meta disabled")
+    return await _get_meta(media_type, id)
+
+
+async def _get_meta(media_type: str, id: str):
+    """Internal meta implementation"""
     try:
         imdb_id = id
     except (ValueError, IndexError):
@@ -292,8 +343,29 @@ async def get_meta(media_type: str, id: str):
         meta_obj["videos"] = videos
     return {"meta": meta_obj}
 
+
+# --- Token-protected streams (includes token in URL) ---
+@router.get("/{token}/stream/{media_type}/{id}.json")
+async def get_streams_with_token(token: str, media_type: str, id: str):
+    """Token-protected streams with token embedded in URLs"""
+    await verify_token(token)
+    return await _get_streams(media_type, id, token)
+
+
 @router.get("/stream/{media_type}/{id}.json")
 async def get_streams(media_type: str, id: str):
+    """Public stream endpoint - returns subscription prompt"""
+    return {
+        "streams": [{
+            "name": "⚠️ Subscription Required",
+            "title": "Get your addon link from the Telegram bot\n\nUse /trial for a free trial",
+            "externalUrl": f"https://t.me/rohanjs_tg_stremio_bot"
+        }]
+    }
+
+
+async def _get_streams(media_type: str, id: str, token: str):
+    """Internal streams implementation with token"""
     try:
         parts = id.split(":")
         imdb_id = parts[0]
@@ -321,10 +393,11 @@ async def get_streams(media_type: str, id: str):
 
             stream_name, stream_title = format_stream_details(filename, quality_str, size)
 
+            # Include token in stream URL
             streams.append({
                 "name": stream_name,
                 "title": stream_title,
-                "url": f"{BASE_URL}/dl/{quality.get('id')}/video.mkv"
+                "url": f"{BASE_URL}/dl/{token}/{quality.get('id')}/video.mkv"
             })
 
     streams.sort(key=lambda s: get_resolution_priority(s.get("name", "")), reverse=True)

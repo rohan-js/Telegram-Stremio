@@ -2,18 +2,21 @@ import math
 import secrets
 import mimetypes
 import time
+import asyncio
 from typing import Dict
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 from collections import deque
 
+from Backend import db
 from Backend.helper.encrypt import decode_string
 from Backend.helper.exceptions import InvalidHash
 from Backend.helper.custom_dl import ByteStreamer, ACTIVE_STREAMS, RECENT_STREAMS
 from Backend.pyrofork.bot import StreamBot, work_loads, multi_clients, client_dc_map
 from Backend.config import Telegram
 from Backend.logger import LOGGER
+from Backend.fastapi.security.tokens import verify_token
 
 router = APIRouter(tags=["Streaming"])
 
@@ -72,9 +75,52 @@ def select_best_client(target_dc: int) -> int:
     return 0
 
 
-@router.get("/dl/{id}/{name}")
-@router.head("/dl/{id}/{name}")
-async def stream_handler(request: Request, id: str, name: str):
+async def track_usage(stream_id: str, token: str):
+    """Track streaming usage in background"""
+    await asyncio.sleep(2)
+    last_tracked = 0
+    
+    try:
+        while True:
+            await asyncio.sleep(10)
+            stream_info = ACTIVE_STREAMS.get(stream_id)
+            
+            if not stream_info:
+                # Stream ended, check recent streams for final bytes
+                for rec in RECENT_STREAMS:
+                    if rec.get("stream_id") == stream_id:
+                        final_bytes = rec.get("total_bytes", 0)
+                        delta = final_bytes - last_tracked
+                        if delta > 0:
+                            await db.update_token_usage(token, delta)
+                        break
+                return
+            
+            current_bytes = stream_info.get("total_bytes", 0)
+            delta = current_bytes - last_tracked
+            
+            if delta > 0:
+                await db.update_token_usage(token, delta)
+                last_tracked = current_bytes
+                
+    except asyncio.CancelledError:
+        pass
+
+
+# Token-protected streaming endpoint
+@router.get("/dl/{token}/{id}/{name}")
+@router.head("/dl/{token}/{id}/{name}")
+async def stream_handler(request: Request, token: str, id: str, name: str):
+    # Verify token
+    token_data = await verify_token(token)
+    
+    # Check if daily limit exceeded
+    if token_data.get("limit_exceeded"):
+        raise HTTPException(
+            status_code=429,
+            detail="Daily streaming limit exceeded. Try again tomorrow!"
+        )
+    
     decoded = await decode_string(id)
     msg_id = decoded.get("msg_id")
     if not msg_id:
@@ -90,6 +136,7 @@ async def stream_handler(request: Request, id: str, name: str):
         chat_id=chat_id,
         msg_id=int(msg_id),
         secure_hash=secure_hash,
+        token=token,
     )
 
 
@@ -98,6 +145,7 @@ async def media_streamer(
     chat_id: int,
     msg_id: int,
     secure_hash: str,
+    token: str,
 ):
     temp_client = multi_clients[min(work_loads, key=work_loads.get)]
     if temp_client not in _streamer_by_client:
@@ -134,6 +182,7 @@ async def media_streamer(
     meta = {
         "request_path": str(request.url.path),
         "client_host": request.client.host if request.client else None,
+        "token": token[:8] + "...",  # Partial token for logging
     }
 
     prefetch_count = Telegram.PARALLEL
@@ -153,6 +202,9 @@ async def media_streamer(
         parallelism=parallelism,
         request=request,
     )
+
+    # Track usage in background
+    asyncio.create_task(track_usage(stream_id, token))
 
     file_name = file_id.file_name or f"{secrets.token_hex(4)}.bin"
     mime_type = file_id.mime_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
