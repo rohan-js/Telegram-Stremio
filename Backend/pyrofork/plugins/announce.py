@@ -1,4 +1,4 @@
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from Backend.config import Telegram
 from Backend.logger import LOGGER
@@ -36,7 +36,7 @@ async def announce_addon(client: Client, message: Message):
             sent_msg = await client.send_message(
                 chat_id=chat_id,
                 text=text,
-                parse_mode="HTML",
+                parse_mode=enums.ParseMode.HTML,
                 reply_markup=keyboard,
                 disable_web_page_preview=True
             )
