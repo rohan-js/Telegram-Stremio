@@ -327,9 +327,17 @@ async def get_streams(
                 filename, quality_str, size
             )
 
+            # Add HLS stream (adaptive quality - YouTube-like)
             streams.append({
-                "name": stream_name,
-                "title": stream_title,
+                "name": f"🎬 HLS {quality_str}",
+                "title": f"📺 Adaptive Streaming\n{stream_title}",
+                "url": f"{BASE_URL}/hls/{quality.get('id')}/master.m3u8"
+            })
+            
+            # Also add direct stream as fallback
+            streams.append({
+                "name": f"📥 Direct {stream_name}",
+                "title": f"⬇️ Direct Download\n{stream_title}",
                 "url": f"{BASE_URL}/dl/{quality.get('id')}/video.mkv"
             })
 
