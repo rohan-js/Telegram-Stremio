@@ -410,7 +410,7 @@ async def hls_segment(request: Request, id: str, quality: str, segment_num: int)
             raise HTTPException(status_code=400, detail=f"Invalid quality: {quality}")
         
         # Check cache first
-        cache_key = get_cache_key(id, quality, segment_num)
+        cache_key = get_cache_key(id, segment_num)
         cached = get_cached_segment(cache_key)
         if cached:
             LOGGER.debug(f"HLS cache hit: {cache_key}")
@@ -490,7 +490,7 @@ async def hls_segment(request: Request, id: str, quality: str, segment_num: int)
         )
         
         if not segment_data:
-            raise HTTPException(status_code=500, detail="Transcoding failed")
+            raise HTTPException(status_code=500, detail="Remux failed")
         
         # Cache the segment
         cache_segment(cache_key, segment_data)
