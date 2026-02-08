@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException
-from typing import Optional
+from typing import Optional, List
 from urllib.parse import unquote
 from Backend.config import Telegram
 from Backend import db, __version__
+from Backend.helper.audio_tracks import format_audio_track_label
 import PTN
 from datetime import datetime, timezone, timedelta
 
@@ -59,11 +60,19 @@ def convert_to_stremio_meta(item: dict) -> dict:
     return meta
 
 
-def format_stream_details(filename: str, quality: str, size: str) -> tuple[str, str]:
+def format_stream_details(
+    filename: str, 
+    quality: str, 
+    size: str,
+    audio_track: dict = None
+) -> tuple[str, str]:
     try:
         parsed = PTN.parse(filename)
     except Exception:
-        return (f"Telegram {quality}", f"📁 {filename}\n💾 {size}")
+        base_name = f"Telegram {quality}"
+        if audio_track:
+            base_name += f" - {format_audio_track_label(audio_track)}"
+        return (base_name, f"📁 {filename}\n💾 {size}")
 
     codec_parts = []
     if parsed.get("codec"):
@@ -80,6 +89,11 @@ def format_stream_details(filename: str, quality: str, size: str) -> tuple[str, 
     resolution = parsed.get("resolution", quality)
     quality_type = parsed.get("quality", "")
     stream_name = f"Telegram {resolution} {quality_type}".strip()
+    
+    # Add audio track info to stream name
+    if audio_track:
+        audio_label = format_audio_track_label(audio_track)
+        stream_name += f" - {audio_label}"
 
     stream_title_parts = [
         f"📁 {filename}",
@@ -87,6 +101,11 @@ def format_stream_details(filename: str, quality: str, size: str) -> tuple[str, 
     ]
     if codec_info:
         stream_title_parts.append(codec_info)
+    
+    # Add audio track detail to title
+    if audio_track:
+        audio_detail = f"🔊 {audio_track.get('display_name', 'Audio')} {audio_track.get('channel_str', '')}"
+        stream_title_parts.append(audio_detail)
 
     stream_title = "\n".join(stream_title_parts)
     return (stream_name, stream_title)
@@ -322,17 +341,32 @@ async def get_streams(
             filename = quality.get("name", "")
             quality_str = quality.get("quality", "HD")
             size = quality.get("size", "")
-
-            stream_name, stream_title = format_stream_details(
-                filename, quality_str, size
-            )
-
-            # Direct stream only (HLS removed - was too slow)
-            streams.append({
-                "name": stream_name,
-                "title": stream_title,
-                "url": f"{BASE_URL}/dl/{quality.get('id')}/video.mkv"
-            })
+            audio_tracks = quality.get("audio_tracks", [])
+            
+            # If audio tracks exist, create separate stream per track
+            if audio_tracks and len(audio_tracks) > 1:
+                for track in audio_tracks:
+                    stream_name, stream_title = format_stream_details(
+                        filename, quality_str, size, audio_track=track
+                    )
+                    
+                    # Add audio track index to URL
+                    audio_idx = track.get("stream_index", 0)
+                    streams.append({
+                        "name": stream_name,
+                        "title": stream_title,
+                        "url": f"{BASE_URL}/dl/{quality.get('id')}/video.mkv?audio={audio_idx}"
+                    })
+            else:
+                # Single or no audio track - show as normal
+                stream_name, stream_title = format_stream_details(
+                    filename, quality_str, size
+                )
+                streams.append({
+                    "name": stream_name,
+                    "title": stream_title,
+                    "url": f"{BASE_URL}/dl/{quality.get('id')}/video.mkv"
+                })
 
     streams.sort(
         key=lambda s: get_resolution_priority(s.get("name", "")),

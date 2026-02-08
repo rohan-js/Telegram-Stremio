@@ -12,6 +12,11 @@ from collections import deque
 from Backend.helper.encrypt import decode_string
 from Backend.helper.exceptions import InvalidHash
 from Backend.helper.custom_dl import ByteStreamer, ACTIVE_STREAMS, RECENT_STREAMS
+from Backend.helper.audio_tracks import (
+    probe_audio_tracks_from_stream,
+    get_cached_audio_tracks,
+    cache_audio_tracks,
+)
 from Backend.helper.hls_transcoder import (
     generate_master_playlist,
     generate_variant_playlist,
@@ -509,3 +514,83 @@ async def hls_segment(request: Request, id: str, quality: str, segment_num: int)
     except Exception as e:
         LOGGER.exception(f"HLS segment error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# AUDIO TRACK PROBE ENDPOINT
+# =============================================================================
+
+@router.get("/probe/audio/{id}")
+async def probe_audio_tracks(request: Request, id: str):
+    """
+    Probe a video file and return its audio tracks.
+    This helps identify multi-audio files for the Stremio UI.
+    """
+    try:
+        # Check cache first
+        cached = get_cached_audio_tracks(id)
+        if cached is not None:
+            return JSONResponse({
+                "file_id": id,
+                "audio_tracks": cached,
+                "cached": True
+            })
+        
+        # Decode ID and get file info
+        decoded = await decode_string(id)
+        msg_id = decoded.get("msg_id")
+        if not msg_id:
+            raise HTTPException(status_code=400, detail="Missing id")
+
+        chat_id = int(f"-100{decoded['chat_id']}")
+        
+        # Get file info
+        index = min(work_loads, key=work_loads.get)
+        tg_client = multi_clients[index]
+        
+        if tg_client not in _streamer_by_client:
+            _streamer_by_client[tg_client] = ByteStreamer(tg_client)
+        streamer: ByteStreamer = _streamer_by_client[tg_client]
+        
+        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=int(msg_id))
+        
+        # Create generator to stream file data for probing
+        async def video_data_generator():
+            chunk_size = streamer.CHUNK_SIZE
+            offset = 0
+            part_count = max(10, file_id.file_size // chunk_size)  # Get first 10MB for probing
+            
+            async for _, chunk_data in await streamer.prefetch_stream(
+                file_id=file_id,
+                client_index=index,
+                offset=offset,
+                first_part_cut=0,
+                last_part_cut=chunk_size,
+                part_count=min(part_count, 10),  # Limit to first 10 chunks
+                chunk_size=chunk_size,
+                prefetch=3,
+                parallelism=2,
+            ):
+                yield chunk_data
+        
+        # Probe audio tracks
+        audio_tracks = await probe_audio_tracks_from_stream(
+            input_generator=video_data_generator(),
+            file_size=file_id.file_size,
+        )
+        
+        # Cache the result
+        cache_audio_tracks(id, audio_tracks)
+        
+        return JSONResponse({
+            "file_id": id,
+            "audio_tracks": audio_tracks,
+            "cached": False
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.exception(f"Audio probe error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
