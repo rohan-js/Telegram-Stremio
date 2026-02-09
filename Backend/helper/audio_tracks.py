@@ -38,7 +38,12 @@ async def probe_audio_tracks_from_stream(
         downloaded = 0
         
         with open(input_path, "wb") as f:
-            async for chunk in input_generator:
+            async for item in input_generator:
+                # Handle both tuple (offset, chunk) and plain chunk
+                if isinstance(item, tuple):
+                    _, chunk = item
+                else:
+                    chunk = item
                 f.write(chunk)
                 downloaded += len(chunk)
                 if downloaded >= max_probe_size:
