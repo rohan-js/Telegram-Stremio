@@ -373,3 +373,93 @@ async def get_streams(
         reverse=True
     )
     return {"streams": streams}
+
+
+@router.get("/open/{media_type}/{id}")
+async def stremio_open(media_type: str, id: str, season: int = None, episode: int = None):
+    """
+    Redirect to Stremio app via HTML page with JavaScript.
+    Telegram doesn't allow stremio:// in button URLs, so we use HTTP redirect.
+    """
+    from fastapi.responses import HTMLResponse
+    
+    # Build the stremio:// deep link
+    if media_type == "series" or media_type == "tv":
+        if season and episode:
+            stremio_url = f"stremio://detail/series/{id}/{id}:{season}:{episode}"
+        else:
+            stremio_url = f"stremio://detail/series/{id}"
+    else:
+        stremio_url = f"stremio://detail/movie/{id}/{id}"
+    
+    # Return HTML that redirects to stremio://
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Opening Stremio...</title>
+        <style>
+            body {{
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                margin: 0;
+                color: white;
+            }}
+            .container {{
+                text-align: center;
+                padding: 40px;
+                background: rgba(255,255,255,0.1);
+                border-radius: 20px;
+                backdrop-filter: blur(10px);
+            }}
+            h1 {{ margin-bottom: 20px; }}
+            .spinner {{
+                width: 50px;
+                height: 50px;
+                border: 4px solid rgba(255,255,255,0.3);
+                border-top-color: white;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin: 20px auto;
+            }}
+            @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+            .fallback {{
+                margin-top: 30px;
+                padding: 15px 30px;
+                background: white;
+                color: #667eea;
+                border-radius: 10px;
+                text-decoration: none;
+                font-weight: bold;
+                display: inline-block;
+            }}
+            .fallback:hover {{ opacity: 0.9; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎬 Opening Stremio...</h1>
+            <div class="spinner"></div>
+            <p>If Stremio doesn't open automatically:</p>
+            <a href="{stremio_url}" class="fallback">Click here to open Stremio</a>
+        </div>
+        <script>
+            // Try to open Stremio
+            window.location.href = "{stremio_url}";
+            
+            // Fallback: try again after a short delay
+            setTimeout(function() {{
+                window.location.href = "{stremio_url}";
+            }}, 1000);
+        </script>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content)

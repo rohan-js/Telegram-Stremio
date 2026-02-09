@@ -61,16 +61,16 @@ async def send_reply_messages():
             encoded_string = metadata_info.get('encoded_string', '')
             rating = metadata_info.get('rate', '')
             
-            # Build the Stremio deep link
+            # Build the Stremio redirect link (uses HTTP, redirects to stremio://)
             if imdb_id:
                 if media_type == 'tv':
                     season = metadata_info.get('season_number', 1)
                     episode = metadata_info.get('episode_number', 1)
-                    stremio_link = f"stremio://detail/series/{imdb_id}/{imdb_id}:{season}:{episode}"
+                    stremio_link = f"{base_url}/stremio/open/series/{imdb_id}?season={season}&episode={episode}"
                 else:
-                    stremio_link = f"stremio://detail/movie/{imdb_id}/{imdb_id}"
+                    stremio_link = f"{base_url}/stremio/open/movie/{imdb_id}"
             else:
-                stremio_link = f"{base_url}/stremio/manifest.json"
+                stremio_link = f"{base_url}/stremio"
             
             # Build the browser player link
             if encoded_string:
