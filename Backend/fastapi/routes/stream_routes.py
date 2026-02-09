@@ -641,7 +641,7 @@ async def probe_subtitles(id: str):
             _streamer_by_client[index] = streamer
         
         # Get file info
-        file_id = await streamer.get_file_properties(msg_id=msg_id, chat_id=chat_id)
+        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=msg_id)
         
         # For subtitle probing, we need to download more of the file
         # since subtitle tracks may be at different positions
@@ -733,7 +733,7 @@ async def get_subtitle(id: str, track: int):
             _streamer_by_client[index] = streamer
         
         # Get file info
-        file_id = await streamer.get_file_properties(msg_id=msg_id, chat_id=chat_id)
+        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=msg_id)
         
         # Download file and extract subtitle
         import tempfile
