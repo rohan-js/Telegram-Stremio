@@ -209,6 +209,8 @@ async def player_page(request: Request, id: str):
             "request": request,
             "theme": theme,
             "stream_url": stream_url,
+            "file_id": id,
+            "base_url": base_url,
             "title": decoded.get("title", "Now Playing"),
             "quality": decoded.get("quality", ""),
             "size": decoded.get("size", ""),
@@ -222,6 +224,8 @@ async def player_page(request: Request, id: str):
             "request": request,
             "theme": theme,
             "stream_url": "",
+            "file_id": id,
+            "base_url": base_url,
             "title": "Error",
             "error": str(e)
         })

@@ -17,6 +17,13 @@ from Backend.helper.audio_tracks import (
     get_cached_audio_tracks,
     cache_audio_tracks,
 )
+from Backend.helper.subtitle_tracks import (
+    probe_subtitle_tracks,
+    extract_subtitle_to_vtt,
+    get_cached_subtitle_tracks,
+    cache_subtitle_tracks,
+    format_subtitle_track_label,
+)
 from Backend.helper.hls_transcoder import (
     generate_master_playlist,
     generate_variant_playlist,
@@ -601,3 +608,233 @@ async def probe_audio_tracks(request: Request, id: str):
         LOGGER.exception(f"Audio probe error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/probe/subtitles/{id}")
+async def probe_subtitles(id: str):
+    """
+    Probe subtitle tracks for a video file.
+    Returns list of available subtitle tracks with language and format info.
+    """
+    # Check cache first
+    cached = get_cached_subtitle_tracks(id)
+    if cached is not None:
+        return JSONResponse({
+            "file_id": id,
+            "subtitle_tracks": cached,
+            "cached": True
+        })
+    
+    try:
+        decoded_string = await decode_string(id)
+        msg_id = decoded_string.get("msg_id")
+        chat_id = decoded_string.get("chat_id")
+        
+        if not msg_id or not chat_id:
+            raise HTTPException(status_code=400, detail="Invalid file ID")
+        
+        # Get streamer
+        index = min(work_loads, key=work_loads.get)
+        streamer = _streamer_by_client.get(index)
+        if not streamer:
+            client = multi_clients[index]
+            streamer = ByteStreamer(client)
+            _streamer_by_client[index] = streamer
+        
+        # Get file info
+        file_id = await streamer.get_file_properties(msg_id=msg_id, chat_id=chat_id)
+        
+        # For subtitle probing, we need to download more of the file
+        # since subtitle tracks may be at different positions
+        import tempfile
+        import os
+        
+        temp_dir = tempfile.mkdtemp(prefix="sub_probe_")
+        input_path = os.path.join(temp_dir, "input.mkv")
+        
+        try:
+            # Download enough for probing (first 50MB or full file if smaller)
+            max_probe_size = min(50 * 1024 * 1024, file_id.file_size)
+            downloaded = 0
+            
+            with open(input_path, "wb") as f:
+                gen = await streamer.prefetch_stream(
+                    file_id=file_id,
+                    client_index=index,
+                    offset=0,
+                    first_part_cut=0,
+                    last_part_cut=max_probe_size,
+                    part_count=50,
+                    chunk_size=1024 * 1024,
+                    prefetch=3,
+                    parallelism=2,
+                )
+                async for item in gen:
+                    if isinstance(item, tuple) and len(item) >= 2:
+                        chunk = item[1]
+                    else:
+                        chunk = item
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if downloaded >= max_probe_size:
+                            break
+            
+            # Probe subtitle tracks
+            subtitle_tracks = await probe_subtitle_tracks(input_path)
+            
+            # Cache the result
+            cache_subtitle_tracks(id, subtitle_tracks)
+            
+            return JSONResponse({
+                "file_id": id,
+                "subtitle_tracks": subtitle_tracks,
+                "cached": False
+            })
+            
+        finally:
+            # Cleanup
+            try:
+                if os.path.exists(input_path):
+                    os.remove(input_path)
+                os.rmdir(temp_dir)
+            except Exception:
+                pass
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.exception(f"Subtitle probe error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/subtitles/{id}/{track}.vtt")
+async def get_subtitle(id: str, track: int):
+    """
+    Extract and return a subtitle track as WebVTT.
+    
+    Args:
+        id: File ID
+        track: Subtitle track index (0-based)
+    """
+    try:
+        decoded_string = await decode_string(id)
+        msg_id = decoded_string.get("msg_id")
+        chat_id = decoded_string.get("chat_id")
+        
+        if not msg_id or not chat_id:
+            raise HTTPException(status_code=400, detail="Invalid file ID")
+        
+        # Get streamer
+        index = min(work_loads, key=work_loads.get)
+        streamer = _streamer_by_client.get(index)
+        if not streamer:
+            client = multi_clients[index]
+            streamer = ByteStreamer(client)
+            _streamer_by_client[index] = streamer
+        
+        # Get file info
+        file_id = await streamer.get_file_properties(msg_id=msg_id, chat_id=chat_id)
+        
+        # Download file and extract subtitle
+        import tempfile
+        import os
+        
+        temp_dir = tempfile.mkdtemp(prefix="sub_extract_")
+        input_path = os.path.join(temp_dir, "input.mkv")
+        output_path = os.path.join(temp_dir, "output.vtt")
+        
+        try:
+            # Download entire file for subtitle extraction
+            with open(input_path, "wb") as f:
+                gen = await streamer.prefetch_stream(
+                    file_id=file_id,
+                    client_index=index,
+                    offset=0,
+                    first_part_cut=0,
+                    last_part_cut=file_id.file_size,
+                    part_count=1000,
+                    chunk_size=1024 * 1024,
+                    prefetch=5,
+                    parallelism=3,
+                )
+                async for item in gen:
+                    if isinstance(item, tuple) and len(item) >= 2:
+                        chunk = item[1]
+                    else:
+                        chunk = item
+                    if chunk:
+                        f.write(chunk)
+            
+            # Extract subtitle using FFmpeg
+            import asyncio
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", input_path,
+                "-map", f"0:s:{track}",
+                "-c:s", "webvtt",
+                output_path
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            _, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=120
+            )
+            
+            if process.returncode != 0:
+                LOGGER.warning(f"FFmpeg subtitle error: {stderr.decode()[:500]}")
+                raise HTTPException(status_code=500, detail="Failed to extract subtitle")
+            
+            # Read and return VTT content
+            if os.path.exists(output_path):
+                with open(output_path, "r", encoding="utf-8") as f:
+                    vtt_content = f.read()
+                
+                return Response(
+                    content=vtt_content,
+                    media_type="text/vtt",
+                    headers={
+                        "Content-Disposition": f"inline; filename=subtitle_{track}.vtt"
+                    }
+                )
+            else:
+                raise HTTPException(status_code=404, detail="Subtitle track not found")
+            
+        finally:
+            # Cleanup
+            try:
+                if os.path.exists(input_path):
+                    os.remove(input_path)
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                os.rmdir(temp_dir)
+            except Exception:
+                pass
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.exception(f"Subtitle extraction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tracks/{id}")
+async def get_all_tracks(id: str):
+    """
+    Get both audio and subtitle tracks for a video file.
+    Convenience endpoint for the web player.
+    """
+    audio_tracks = get_cached_audio_tracks(id) or []
+    subtitle_tracks = get_cached_subtitle_tracks(id) or []
+    
+    return JSONResponse({
+        "file_id": id,
+        "audio_tracks": audio_tracks,
+        "subtitle_tracks": subtitle_tracks
+    })

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,29 +12,29 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
             min-height: 100vh;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             color: #fff;
         }
-        
+
         .player-container {
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
         }
-        
+
         .header {
             display: flex;
             align-items: center;
             justify-content: space-between;
             padding: 15px 0;
             margin-bottom: 20px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
-        
+
         .logo {
             display: flex;
             align-items: center;
@@ -42,53 +43,53 @@
             font-weight: bold;
             color: #a855f7;
         }
-        
+
         .logo svg {
             width: 32px;
             height: 32px;
         }
-        
+
         .media-info {
-            background: rgba(255,255,255,0.05);
+            background: rgba(255, 255, 255, 0.05);
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 20px;
             backdrop-filter: blur(10px);
         }
-        
+
         .media-title {
             font-size: 1.8rem;
             font-weight: 600;
             margin-bottom: 10px;
         }
-        
+
         .media-meta {
             display: flex;
             gap: 20px;
-            color: rgba(255,255,255,0.7);
+            color: rgba(255, 255, 255, 0.7);
             font-size: 0.9rem;
         }
-        
+
         .media-meta span {
             display: flex;
             align-items: center;
             gap: 5px;
         }
-        
+
         .video-wrapper {
             position: relative;
             width: 100%;
             border-radius: 12px;
             overflow: hidden;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
         }
-        
+
         .video-js {
             width: 100%;
             height: auto;
             aspect-ratio: 16/9;
         }
-        
+
         .vjs-big-play-button {
             background: rgba(168, 85, 247, 0.9) !important;
             border: none !important;
@@ -101,18 +102,84 @@
             top: 50% !important;
             transform: translate(-50%, -50%) !important;
         }
-        
+
         .vjs-big-play-button:hover {
             background: rgba(168, 85, 247, 1) !important;
         }
-        
+
+        /* Track Selection Panel */
+        .track-panel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+            backdrop-filter: blur(10px);
+        }
+
+        .track-panel h3 {
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            color: #a855f7;
+        }
+
+        .track-section {
+            margin-bottom: 20px;
+        }
+
+        .track-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .track-section h4 {
+            margin-bottom: 10px;
+            font-size: 0.95rem;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .track-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .track-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+        }
+
+        .track-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: #a855f7;
+        }
+
+        .track-btn.active {
+            background: linear-gradient(135deg, #a855f7, #8b5cf6);
+            border-color: #a855f7;
+        }
+
+        .track-btn.loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .no-tracks {
+            color: rgba(255, 255, 255, 0.5);
+            font-style: italic;
+        }
+
         .controls-bar {
             display: flex;
             gap: 15px;
             margin-top: 20px;
             flex-wrap: wrap;
         }
-        
+
         .control-btn {
             display: flex;
             align-items: center;
@@ -126,48 +193,48 @@
             text-decoration: none;
             border: none;
         }
-        
+
         .btn-primary {
             background: linear-gradient(135deg, #a855f7, #8b5cf6);
             color: #fff;
         }
-        
+
         .btn-primary:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 20px rgba(168, 85, 247, 0.3);
         }
-        
+
         .btn-secondary {
-            background: rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.1);
             color: #fff;
         }
-        
+
         .btn-secondary:hover {
-            background: rgba(255,255,255,0.15);
+            background: rgba(255, 255, 255, 0.15);
         }
-        
-        .loading {
+
+        .loading-tracks {
             display: flex;
-            flex-direction: column;
             align-items: center;
-            justify-content: center;
-            height: 60vh;
-            gap: 20px;
+            gap: 10px;
+            color: rgba(255, 255, 255, 0.6);
         }
-        
-        .spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid rgba(168, 85, 247, 0.2);
+
+        .loading-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(168, 85, 247, 0.2);
             border-top-color: #a855f7;
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
-        
+
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
-        
+
         .error-container {
             background: rgba(239, 68, 68, 0.1);
             border: 1px solid rgba(239, 68, 68, 0.3);
@@ -175,40 +242,73 @@
             padding: 40px;
             text-align: center;
         }
-        
+
         .error-icon {
             font-size: 4rem;
             margin-bottom: 20px;
         }
-        
+
+        /* Toast notifications */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            padding: 15px 25px;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            z-index: 1000;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success {
+            border-left: 4px solid #22c55e;
+        }
+
+        .toast.error {
+            border-left: 4px solid #ef4444;
+        }
+
         @media (max-width: 768px) {
             .media-title {
                 font-size: 1.3rem;
             }
+
             .media-meta {
                 flex-wrap: wrap;
                 gap: 10px;
             }
+
             .controls-bar {
                 flex-direction: column;
             }
+
             .control-btn {
                 justify-content: center;
             }
         }
     </style>
 </head>
+
 <body>
     <div class="player-container">
         <header class="header">
             <div class="logo">
                 <svg viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z"/>
+                    <path d="M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z" />
                 </svg>
                 Telegram Stremio
             </div>
         </header>
-        
+
         {% if error %}
         <div class="error-container">
             <div class="error-icon">⚠️</div>
@@ -216,7 +316,7 @@
             <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">{{ error }}</p>
         </div>
         {% else %}
-        
+
         <div class="media-info">
             <h1 class="media-title">{{ title or 'Now Playing' }}</h1>
             <div class="media-meta">
@@ -225,22 +325,45 @@
                 {% if year %}<span>📅 {{ year }}</span>{% endif %}
             </div>
         </div>
-        
+
         <div class="video-wrapper">
-            <video
-                id="player"
-                class="video-js vjs-big-play-centered vjs-theme-fantasy"
-                controls
-                preload="auto"
-                data-setup='{"fluid": true}'
-            >
+            <video id="player" class="video-js vjs-big-play-centered vjs-theme-fantasy" controls preload="auto"
+                data-setup='{"fluid": true}'>
                 <source src="{{ stream_url }}" type="video/mp4">
                 <p class="vjs-no-js">
-                    To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video.
+                    To view this video please enable JavaScript, and consider upgrading to a web browser that supports
+                    HTML5 video.
                 </p>
             </video>
         </div>
-        
+
+        <!-- Track Selection Panel -->
+        <div class="track-panel">
+            <h3>🎛️ Track Selection</h3>
+
+            <!-- Audio Tracks -->
+            <div class="track-section">
+                <h4>🔊 Audio Tracks</h4>
+                <div id="audio-tracks" class="track-list">
+                    <div class="loading-tracks">
+                        <div class="loading-spinner"></div>
+                        <span>Loading audio tracks...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Subtitle Tracks -->
+            <div class="track-section">
+                <h4>💬 Subtitles</h4>
+                <div id="subtitle-tracks" class="track-list">
+                    <div class="loading-tracks">
+                        <div class="loading-spinner"></div>
+                        <span>Loading subtitles...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="controls-bar">
             <a href="{{ stream_url }}" class="control-btn btn-primary" download>
                 📥 Download
@@ -257,13 +380,25 @@
             </a>
             {% endif %}
         </div>
-        
+
         {% endif %}
     </div>
-    
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script>
-        var player = videojs('player', {
+        const fileId = '{{ file_id }}';
+        const baseUrl = '{{ base_url }}';
+        let player;
+        let currentAudioTrack = 0;
+        let currentSubtitleTrack = -1; // -1 = off
+        let subtitleTracks = [];
+        let audioTracks = [];
+
+        // Initialize Video.js player
+        player = videojs('player', {
             controls: true,
             autoplay: false,
             preload: 'auto',
@@ -276,7 +411,16 @@
                 }
             }
         });
-        
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type + ' show';
+            setTimeout(() => {
+                toast.className = 'toast';
+            }, 3000);
+        }
+
         function toggleFullscreen() {
             if (player.isFullscreen()) {
                 player.exitFullscreen();
@@ -284,17 +428,166 @@
                 player.requestFullscreen();
             }
         }
-        
+
         function copyLink() {
-            navigator.clipboard.writeText('{{ stream_url }}').then(function() {
-                alert('Stream link copied to clipboard!');
+            navigator.clipboard.writeText('{{ stream_url }}').then(function () {
+                showToast('Stream link copied to clipboard!');
             });
         }
-        
+
+        // Fetch and display audio tracks
+        async function loadAudioTracks() {
+            const container = document.getElementById('audio-tracks');
+            try {
+                const response = await fetch(`${baseUrl}/probe/audio/${fileId}`);
+                const data = await response.json();
+                audioTracks = data.audio_tracks || [];
+
+                if (audioTracks.length === 0) {
+                    container.innerHTML = '<span class="no-tracks">No audio tracks detected</span>';
+                    return;
+                }
+
+                container.innerHTML = audioTracks.map((track, i) => {
+                    const label = formatAudioLabel(track);
+                    const isActive = i === currentAudioTrack ? 'active' : '';
+                    return `<button class="track-btn ${isActive}" onclick="selectAudioTrack(${i})">${label}</button>`;
+                }).join('');
+
+            } catch (error) {
+                console.error('Failed to load audio tracks:', error);
+                container.innerHTML = '<span class="no-tracks">Failed to load audio tracks</span>';
+            }
+        }
+
+        function formatAudioLabel(track) {
+            let label = track.language_name || track.language || 'Unknown';
+            if (track.channels) {
+                label += ` (${track.channels}ch)`;
+            }
+            if (track.codec) {
+                label += ` - ${track.codec.toUpperCase()}`;
+            }
+            return label;
+        }
+
+        function selectAudioTrack(index) {
+            // Note: Browser video players don't support switching audio tracks in MKV
+            // This would require server-side extraction with ?audio=N parameter
+            const newUrl = `${baseUrl}/dl/${fileId}/video.mkv?audio=${index}`;
+            const currentTime = player.currentTime();
+
+            showToast('Audio track switching requires reloading video...', 'info');
+
+            // Update active button
+            document.querySelectorAll('#audio-tracks .track-btn').forEach((btn, i) => {
+                btn.classList.toggle('active', i === index);
+            });
+
+            currentAudioTrack = index;
+
+            // Note: Full audio switching would require transcoding on server
+            // For now, show a message explaining the limitation
+            showToast('Audio track selection: Use VLC for full support', 'info');
+        }
+
+        // Fetch and display subtitle tracks
+        async function loadSubtitleTracks() {
+            const container = document.getElementById('subtitle-tracks');
+            try {
+                const response = await fetch(`${baseUrl}/probe/subtitles/${fileId}`);
+                const data = await response.json();
+                subtitleTracks = data.subtitle_tracks || [];
+
+                // Add "Off" option
+                let html = `<button class="track-btn ${currentSubtitleTrack === -1 ? 'active' : ''}" onclick="selectSubtitleTrack(-1)">Off</button>`;
+
+                if (subtitleTracks.length === 0) {
+                    container.innerHTML = html + '<span class="no-tracks" style="margin-left: 10px;">No embedded subtitles</span>';
+                    return;
+                }
+
+                html += subtitleTracks.map((track, i) => {
+                    const label = formatSubtitleLabel(track);
+                    const isActive = i === currentSubtitleTrack ? 'active' : '';
+                    return `<button class="track-btn ${isActive}" onclick="selectSubtitleTrack(${i})">${label}</button>`;
+                }).join('');
+
+                container.innerHTML = html;
+
+            } catch (error) {
+                console.error('Failed to load subtitle tracks:', error);
+                container.innerHTML = '<span class="no-tracks">Failed to load subtitles</span>';
+            }
+        }
+
+        function formatSubtitleLabel(track) {
+            let label = track.language_name || track.language || 'Unknown';
+            if (track.title) {
+                label += ` - ${track.title}`;
+            }
+            if (track.forced) {
+                label += ' [Forced]';
+            }
+            return label;
+        }
+
+        async function selectSubtitleTrack(index) {
+            // Update active button
+            document.querySelectorAll('#subtitle-tracks .track-btn').forEach((btn, i) => {
+                btn.classList.toggle('active', i === index);
+            });
+
+            // Remove existing text tracks
+            const tracks = player.textTracks();
+            for (let i = tracks.length - 1; i >= 0; i--) {
+                if (tracks[i].kind === 'subtitles') {
+                    tracks[i].mode = 'disabled';
+                }
+            }
+
+            if (index === -1) {
+                currentSubtitleTrack = -1;
+                showToast('Subtitles disabled');
+                return;
+            }
+
+            // Load and add the selected subtitle track
+            const subtitleUrl = `${baseUrl}/subtitles/${fileId}/${index}.vtt`;
+
+            try {
+                showToast('Loading subtitle...', 'info');
+
+                // Add new text track
+                player.addRemoteTextTrack({
+                    kind: 'subtitles',
+                    label: formatSubtitleLabel(subtitleTracks[index]),
+                    src: subtitleUrl,
+                    default: true,
+                    mode: 'showing'
+                }, false);
+
+                currentSubtitleTrack = index;
+                showToast('Subtitle loaded successfully!');
+
+            } catch (error) {
+                console.error('Failed to load subtitle:', error);
+                showToast('Failed to load subtitle', 'error');
+            }
+        }
+
         // Handle errors
-        player.on('error', function() {
+        player.on('error', function () {
             console.error('Video playback error:', player.error());
+            showToast('Video playback error', 'error');
+        });
+
+        // Load tracks on page load
+        document.addEventListener('DOMContentLoaded', function () {
+            loadAudioTracks();
+            loadSubtitleTracks();
         });
     </script>
 </body>
+
 </html>
