@@ -10,6 +10,8 @@ class QualityDetail(BaseModel):
     id: str
     name: str
     size: str
+    audio_tracks: Optional[List[dict]] = None  # Audio track info from FFprobe
+
 
 
 # ---------------------------

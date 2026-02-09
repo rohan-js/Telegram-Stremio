@@ -6,6 +6,7 @@ from Backend import db
 from Backend.config import Telegram
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
 from Backend.helper.metadata import metadata
+from Backend.helper.audio_tracks import probe_audio_from_telegram
 from pyrogram import filters, Client
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
@@ -20,7 +21,21 @@ async def process_file():
     while True:
         metadata_info, channel, msg_id, size, title, chat_id, original_msg_id = await file_queue.get()
         async with db_lock:
-            updated_id = await db.insert_media(metadata_info, channel=channel, msg_id=msg_id, size=size, name=title)
+            # Probe audio tracks before inserting
+            audio_tracks = None
+            try:
+                encoded_string = metadata_info.get('encoded_string')
+                if encoded_string:
+                    audio_tracks = await probe_audio_from_telegram(encoded_string)
+                    if audio_tracks:
+                        LOGGER.info(f"Detected {len(audio_tracks)} audio tracks for: {title}")
+            except Exception as e:
+                LOGGER.warning(f"Audio probe failed for {title}: {e}")
+            
+            updated_id = await db.insert_media(
+                metadata_info, channel=channel, msg_id=msg_id, 
+                size=size, name=title, audio_tracks=audio_tracks
+            )
             if updated_id:
                 LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
                 # Queue the reply info for sending
@@ -28,6 +43,7 @@ async def process_file():
             else:
                 LOGGER.info("Update failed due to validation errors.")
         file_queue.task_done()
+
 
 async def send_reply_messages():
     """Background task to send reply messages with stream links"""

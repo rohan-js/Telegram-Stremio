@@ -173,7 +173,8 @@ class Database:
 
     async def insert_media(
         self, metadata_info: dict,
-        channel: int, msg_id: int, size: str, name: str
+        channel: int, msg_id: int, size: str, name: str,
+        audio_tracks: list = None
     ) -> Optional[ObjectId]:
         
         if metadata_info['media_type'] == "movie":
@@ -196,7 +197,8 @@ class Database:
                     quality=metadata_info['quality'],
                     id=metadata_info['encoded_string'],
                     name=name,
-                    size=size
+                    size=size,
+                    audio_tracks=audio_tracks
                 )]
             )
             return await self.update_movie(media)
@@ -228,7 +230,8 @@ class Database:
                             quality=metadata_info['quality'],
                             id=metadata_info['encoded_string'],
                             name=name,
-                            size=size
+                            size=size,
+                            audio_tracks=audio_tracks
                         )]
                     )]
                 )]

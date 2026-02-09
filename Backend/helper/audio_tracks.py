@@ -164,6 +164,42 @@ async def probe_audio_tracks_from_stream(
             pass
 
 
+async def probe_audio_from_telegram(encoded_string: str) -> List[dict]:
+    """
+    Probe audio tracks from a Telegram file using the API endpoint.
+    This is simpler than streaming - just makes HTTP request.
+    
+    Args:
+        encoded_string: The encoded file ID string
+        
+    Returns:
+        List of audio track dicts
+    """
+    import httpx
+    from Backend.config import Telegram
+    
+    try:
+        base_url = Telegram.BASE_URL.rstrip('/')
+        url = f"{base_url}/probe/audio/{encoded_string}"
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(url)
+            
+            if response.status_code != 200:
+                LOGGER.warning(f"Audio probe API returned {response.status_code}")
+                return []
+            
+            data = response.json()
+            tracks = data.get("audio_tracks", [])
+            
+            LOGGER.debug(f"API returned {len(tracks)} audio tracks")
+            return tracks
+            
+    except Exception as e:
+        LOGGER.warning(f"Audio probe API error: {e}")
+        return []
+
+
 def get_cached_audio_tracks(file_id: str) -> Optional[List[dict]]:
     """Get cached audio track info"""
     return AUDIO_TRACK_CACHE.get(file_id)
