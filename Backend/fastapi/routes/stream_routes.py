@@ -560,7 +560,7 @@ async def probe_audio_tracks(request: Request, id: str):
             offset = 0
             part_count = max(10, file_id.file_size // chunk_size)  # Get first 10MB for probing
             
-            async for _, chunk_data in await streamer.prefetch_stream(
+            gen = await streamer.prefetch_stream(
                 file_id=file_id,
                 client_index=index,
                 offset=offset,
@@ -570,8 +570,15 @@ async def probe_audio_tracks(request: Request, id: str):
                 chunk_size=chunk_size,
                 prefetch=3,
                 parallelism=2,
-            ):
-                yield chunk_data
+            )
+            async for item in gen:
+                # Handle both tuple (offset, chunk) and other formats
+                if isinstance(item, tuple) and len(item) >= 2:
+                    _, chunk_data = item[0], item[1]
+                    if chunk_data:
+                        yield chunk_data
+                elif item:
+                    yield item
         
         # Probe audio tracks
         audio_tracks = await probe_audio_tracks_from_stream(
