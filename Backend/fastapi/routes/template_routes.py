@@ -187,3 +187,42 @@ async def stremio_guide_page(request: Request):
         "current_theme": theme_name,
         "is_authenticated": is_authenticated(request)
     })
+
+
+async def player_page(request: Request, id: str):
+    """Web video player page for browser playback"""
+    from Backend.config import Telegram
+    from Backend.helper.encrypt import decode_string
+    
+    theme_name = request.session.get("theme", "purple_gradient")
+    theme = get_theme(theme_name)
+    base_url = Telegram.BASE_URL.rstrip('/')
+    
+    try:
+        # Decode the file ID to get metadata
+        decoded = await decode_string(id)
+        
+        # Build stream URL
+        stream_url = f"{base_url}/dl/{id}/video.mkv"
+        
+        return templates.TemplateResponse("player.html", {
+            "request": request,
+            "theme": theme,
+            "stream_url": stream_url,
+            "title": decoded.get("title", "Now Playing"),
+            "quality": decoded.get("quality", ""),
+            "size": decoded.get("size", ""),
+            "year": decoded.get("year", ""),
+            "stremio_link": "",
+            "error": None
+        })
+        
+    except Exception as e:
+        return templates.TemplateResponse("player.html", {
+            "request": request,
+            "theme": theme,
+            "stream_url": "",
+            "title": "Error",
+            "error": str(e)
+        })
+

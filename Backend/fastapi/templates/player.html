@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title or 'Video Player' }} - Telegram Stremio</title>
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #fff;
+        }
+        
+        .player-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px 0;
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #a855f7;
+        }
+        
+        .logo svg {
+            width: 32px;
+            height: 32px;
+        }
+        
+        .media-info {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .media-title {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        
+        .media-meta {
+            display: flex;
+            gap: 20px;
+            color: rgba(255,255,255,0.7);
+            font-size: 0.9rem;
+        }
+        
+        .media-meta span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+        
+        .video-js {
+            width: 100%;
+            height: auto;
+            aspect-ratio: 16/9;
+        }
+        
+        .vjs-big-play-button {
+            background: rgba(168, 85, 247, 0.9) !important;
+            border: none !important;
+            border-radius: 50% !important;
+            width: 80px !important;
+            height: 80px !important;
+            line-height: 80px !important;
+            font-size: 40px !important;
+            left: 50% !important;
+            top: 50% !important;
+            transform: translate(-50%, -50%) !important;
+        }
+        
+        .vjs-big-play-button:hover {
+            background: rgba(168, 85, 247, 1) !important;
+        }
+        
+        .controls-bar {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .control-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            border: none;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #a855f7, #8b5cf6);
+            color: #fff;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(168, 85, 247, 0.3);
+        }
+        
+        .btn-secondary {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(255,255,255,0.15);
+        }
+        
+        .loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 60vh;
+            gap: 20px;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(168, 85, 247, 0.2);
+            border-top-color: #a855f7;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .error-container {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .error-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .media-title {
+                font-size: 1.3rem;
+            }
+            .media-meta {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .controls-bar {
+                flex-direction: column;
+            }
+            .control-btn {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="player-container">
+        <header class="header">
+            <div class="logo">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z"/>
+                </svg>
+                Telegram Stremio
+            </div>
+        </header>
+        
+        {% if error %}
+        <div class="error-container">
+            <div class="error-icon">⚠️</div>
+            <h2>Unable to Load Video</h2>
+            <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">{{ error }}</p>
+        </div>
+        {% else %}
+        
+        <div class="media-info">
+            <h1 class="media-title">{{ title or 'Now Playing' }}</h1>
+            <div class="media-meta">
+                {% if quality %}<span>📺 {{ quality }}</span>{% endif %}
+                {% if size %}<span>📁 {{ size }}</span>{% endif %}
+                {% if year %}<span>📅 {{ year }}</span>{% endif %}
+            </div>
+        </div>
+        
+        <div class="video-wrapper">
+            <video
+                id="player"
+                class="video-js vjs-big-play-centered vjs-theme-fantasy"
+                controls
+                preload="auto"
+                data-setup='{"fluid": true}'
+            >
+                <source src="{{ stream_url }}" type="video/mp4">
+                <p class="vjs-no-js">
+                    To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video.
+                </p>
+            </video>
+        </div>
+        
+        <div class="controls-bar">
+            <a href="{{ stream_url }}" class="control-btn btn-primary" download>
+                📥 Download
+            </a>
+            <button class="control-btn btn-secondary" onclick="toggleFullscreen()">
+                🖥️ Fullscreen
+            </button>
+            <button class="control-btn btn-secondary" onclick="copyLink()">
+                🔗 Copy Link
+            </button>
+            {% if stremio_link %}
+            <a href="{{ stremio_link }}" class="control-btn btn-secondary">
+                ▶️ Open in Stremio
+            </a>
+            {% endif %}
+        </div>
+        
+        {% endif %}
+    </div>
+    
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script>
+        var player = videojs('player', {
+            controls: true,
+            autoplay: false,
+            preload: 'auto',
+            responsive: true,
+            fluid: true,
+            playbackRates: [0.5, 1, 1.25, 1.5, 2],
+            controlBar: {
+                volumePanel: {
+                    inline: false
+                }
+            }
+        });
+        
+        function toggleFullscreen() {
+            if (player.isFullscreen()) {
+                player.exitFullscreen();
+            } else {
+                player.requestFullscreen();
+            }
+        }
+        
+        function copyLink() {
+            navigator.clipboard.writeText('{{ stream_url }}').then(function() {
+                alert('Stream link copied to clipboard!');
+            });
+        }
+        
+        // Handle errors
+        player.on('error', function() {
+            console.error('Video playback error:', player.error());
+        });
+    </script>
+</body>
+</html>

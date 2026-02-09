@@ -9,7 +9,8 @@ from Backend.fastapi.routes.stream_routes import router as stream_router
 from Backend.fastapi.routes.stremio_routes import router as stremio_router
 from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
-    media_management_page, edit_media_page, public_status_page, stremio_guide_page
+    media_management_page, edit_media_page, public_status_page, stremio_guide_page,
+    player_page
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
@@ -66,6 +67,10 @@ async def public_status(request: Request):
 @app.get("/stremio", response_class=HTMLResponse)
 async def stremio_guide(request: Request):
     return await stremio_guide_page(request)
+
+@app.get("/player/{id}", response_class=HTMLResponse)
+async def player(request: Request, id: str):
+    return await player_page(request, id)
 
 # --- Protected Routes (Authentication Required) ---
 @app.get("/", response_class=HTMLResponse)

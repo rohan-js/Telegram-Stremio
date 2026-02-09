@@ -46,7 +46,9 @@ async def process_file():
 
 
 async def send_reply_messages():
-    """Background task to send reply messages with stream links"""
+    """Background task to send reply messages with instant play buttons"""
+    from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    
     while True:
         chat_id, msg_id, metadata_info, title, size = await reply_queue.get()
         try:
@@ -55,29 +57,65 @@ async def send_reply_messages():
             media_type = metadata_info.get('media_type', 'movie')
             movie_title = metadata_info.get('title', 'Unknown')
             year = metadata_info.get('year', '')
+            quality = metadata_info.get('quality', '')
             encoded_string = metadata_info.get('encoded_string', '')
+            rating = metadata_info.get('rate', '')
             
-            # Build the Stremio link
+            # Build the Stremio deep link
             if imdb_id:
-                stremio_link = f"stremio://detail/{media_type}/{imdb_id}"
+                if media_type == 'tv':
+                    season = metadata_info.get('season_number', 1)
+                    episode = metadata_info.get('episode_number', 1)
+                    stremio_link = f"stremio://detail/series/{imdb_id}/{imdb_id}:{season}:{episode}"
+                else:
+                    stremio_link = f"stremio://detail/movie/{imdb_id}/{imdb_id}"
             else:
                 stremio_link = f"{base_url}/stremio/manifest.json"
             
-            # Build the direct stream link (playable in VLC/browser)
+            # Build the browser player link
             if encoded_string:
+                browser_player = f"{base_url}/player/{encoded_string}"
                 direct_stream = f"{base_url}/dl/{encoded_string}/video.mkv"
             else:
+                browser_player = base_url
                 direct_stream = "N/A"
             
-            # Create reply message
-            reply_text = (
-                f"✅ **Added to Stremio!**\n\n"
-                f"🎬 **{movie_title}**"
-                f"{f' ({year})' if year else ''}\n"
-                f"📁 Size: {size}\n\n"
-                f"▶️ **Direct Stream Link:**\n"
-                f"`{direct_stream}`"
-            )
+            # Format rating
+            rating_str = f"⭐ {rating}" if rating else ""
+            
+            # Create rich reply message
+            if media_type == 'tv':
+                season = metadata_info.get('season_number', '')
+                episode = metadata_info.get('episode_number', '')
+                ep_title = metadata_info.get('episode_title', '')
+                reply_text = (
+                    f"🎬 **{movie_title}**"
+                    f"{f' ({year})' if year else ''}\n"
+                    f"📺 S{season:02d}E{episode:02d}"
+                    f"{f' - {ep_title}' if ep_title else ''}\n"
+                    f"{rating_str}"
+                    f"{f' | {quality}' if quality else ''}"
+                    f" | {size}\n"
+                )
+            else:
+                reply_text = (
+                    f"🎬 **{movie_title}**"
+                    f"{f' ({year})' if year else ''}\n"
+                    f"{rating_str}"
+                    f"{f' | {quality}' if quality else ''}"
+                    f" | {size}\n"
+                )
+            
+            # Create inline keyboard with instant play buttons
+            buttons = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("▶️ Watch in Stremio", url=stremio_link),
+                    InlineKeyboardButton("🌐 Watch in Browser", url=browser_player),
+                ],
+                [
+                    InlineKeyboardButton("📥 Direct Download", url=direct_stream),
+                ]
+            ])
             
             # Import StreamBot for sending reply
             from Backend.pyrofork.bot import StreamBot
@@ -86,7 +124,8 @@ async def send_reply_messages():
                 text=reply_text,
                 reply_to_message_id=msg_id,
                 parse_mode=ParseMode.MARKDOWN,
-                disable_web_page_preview=True
+                disable_web_page_preview=True,
+                reply_markup=buttons
             )
             LOGGER.info(f"Sent stream link reply for: {movie_title}")
             
