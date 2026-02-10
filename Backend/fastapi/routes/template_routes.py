@@ -236,24 +236,34 @@ async def player_page(request: Request, id: str):
 
 
 async def vlc_redirect(request: Request, id: str):
-    """Redirect page that opens the stream in VLC via vlc:// protocol."""
+    """Return an M3U playlist file that opens the stream in VLC."""
+    from fastapi.responses import Response
+    from Backend.helper.encrypt import decode_string
+    
     base_url = Telegram.BASE_URL.rstrip('/')
     stream_url = f"{base_url}/dl/{id}/video.mkv"
-    html = (
-        '<!DOCTYPE html><html><head><meta charset="UTF-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-        '<title>Opening in VLC...</title>'
-        '<style>body{background:#0a0a1a;color:#fff;font-family:sans-serif;'
-        'display:flex;align-items:center;justify-content:center;height:100vh;'
-        'text-align:center}a{color:#a855f7}</style></head><body><div>'
-        '<h2>🎬 Opening in VLC...</h2>'
-        f'<p>If VLC doesn\'t open automatically, <a href="vlc://{stream_url}">click here</a>.</p>'
-        '<p style="margin-top:20px;opacity:0.5;font-size:0.85rem">'
-        'Make sure VLC is installed on your device.</p></div>'
-        f'<script>window.location.href="vlc://{stream_url}";</script>'
-        '</body></html>'
+    
+    # Try to get a nice filename from metadata
+    try:
+        decoded = await decode_string(id)
+        title = decoded.get("title", "stream")
+        quality = decoded.get("quality", "")
+        filename = f"{title}_{quality}.m3u" if quality else f"{title}.m3u"
+        # Clean filename
+        filename = "".join(c for c in filename if c.isalnum() or c in "._- ").strip()
+        if not filename.endswith(".m3u"):
+            filename += ".m3u"
+    except Exception:
+        filename = "play.m3u"
+    
+    content = f"#EXTM3U\n#EXTINF:-1,Telegram Stream\n{stream_url}\n"
+    
+    return Response(
+        content=content,
+        media_type="audio/x-mpegurl",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
     )
-    from fastapi.responses import HTMLResponse
-    return HTMLResponse(content=html)
 
 
