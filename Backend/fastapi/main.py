@@ -10,7 +10,7 @@ from Backend.fastapi.routes.stremio_routes import router as stremio_router
 from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page, public_status_page, stremio_guide_page,
-    player_page
+    player_page, vlc_redirect
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
@@ -71,6 +71,10 @@ async def stremio_guide(request: Request):
 @app.get("/player/{id}", response_class=HTMLResponse)
 async def player(request: Request, id: str):
     return await player_page(request, id)
+
+@app.get("/vlc/{id}", response_class=HTMLResponse)
+async def vlc(request: Request, id: str):
+    return await vlc_redirect(request, id)
 
 # --- Protected Routes (Authentication Required) ---
 @app.get("/", response_class=HTMLResponse)

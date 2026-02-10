@@ -233,7 +233,7 @@ async def player_page(request: Request, id: str):
         })
 
 
-@router.get("/vlc/{id}")
+
 async def vlc_redirect(request: Request, id: str):
     """Redirect page that opens the stream in VLC via vlc:// protocol."""
     base_url = Telegram.BASE_URL.rstrip('/')
