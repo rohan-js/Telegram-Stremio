@@ -625,35 +625,33 @@ async def probe_subtitles(id: str):
         })
     
     try:
-        decoded_string = await decode_string(id)
-        msg_id = decoded_string.get("msg_id")
-        chat_id = decoded_string.get("chat_id")
-        
-        if not msg_id or not chat_id:
-            raise HTTPException(status_code=400, detail="Invalid file ID")
-        
-        # Get streamer
-        index = min(work_loads, key=work_loads.get)
-        streamer = _streamer_by_client.get(index)
-        if not streamer:
-            client = multi_clients[index]
-            streamer = ByteStreamer(client)
-            _streamer_by_client[index] = streamer
-        
-        # Get file info
-        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=msg_id)
-        
-        # For subtitle probing, we need to download more of the file
-        # since subtitle tracks may be at different positions
         import tempfile
         import os
+        
+        decoded = await decode_string(id)
+        msg_id = decoded.get("msg_id")
+        if not msg_id:
+            raise HTTPException(status_code=400, detail="Missing id")
+
+        chat_id = int(f"-100{decoded['chat_id']}")
+        
+        # Use same pattern as audio probe
+        index = min(work_loads, key=work_loads.get)
+        tg_client = multi_clients[index]
+        
+        if tg_client not in _streamer_by_client:
+            _streamer_by_client[tg_client] = ByteStreamer(tg_client)
+        streamer: ByteStreamer = _streamer_by_client[tg_client]
+        
+        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=int(msg_id))
         
         temp_dir = tempfile.mkdtemp(prefix="sub_probe_")
         input_path = os.path.join(temp_dir, "input.mkv")
         
         try:
-            # Download enough for probing (first 50MB or full file if smaller)
-            max_probe_size = min(50 * 1024 * 1024, file_id.file_size)
+            # Download first ~10MB for probing (subtitle metadata is in file headers)
+            chunk_size = streamer.CHUNK_SIZE
+            max_probe_chunks = 10
             downloaded = 0
             
             with open(input_path, "wb") as f:
@@ -662,9 +660,9 @@ async def probe_subtitles(id: str):
                     client_index=index,
                     offset=0,
                     first_part_cut=0,
-                    last_part_cut=max_probe_size,
-                    part_count=50,
-                    chunk_size=1024 * 1024,
+                    last_part_cut=chunk_size,
+                    part_count=max_probe_chunks,
+                    chunk_size=chunk_size,
                     prefetch=3,
                     parallelism=2,
                 )
@@ -676,8 +674,8 @@ async def probe_subtitles(id: str):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-                        if downloaded >= max_probe_size:
-                            break
+            
+            LOGGER.info(f"Downloaded {downloaded} bytes for subtitle probing")
             
             # Probe subtitle tracks
             subtitle_tracks = await probe_subtitle_tracks(input_path)
@@ -692,7 +690,6 @@ async def probe_subtitles(id: str):
             })
             
         finally:
-            # Cleanup
             try:
                 if os.path.exists(input_path):
                     os.remove(input_path)
@@ -717,43 +714,45 @@ async def get_subtitle(id: str, track: int):
         track: Subtitle track index (0-based)
     """
     try:
-        decoded_string = await decode_string(id)
-        msg_id = decoded_string.get("msg_id")
-        chat_id = decoded_string.get("chat_id")
-        
-        if not msg_id or not chat_id:
-            raise HTTPException(status_code=400, detail="Invalid file ID")
-        
-        # Get streamer
-        index = min(work_loads, key=work_loads.get)
-        streamer = _streamer_by_client.get(index)
-        if not streamer:
-            client = multi_clients[index]
-            streamer = ByteStreamer(client)
-            _streamer_by_client[index] = streamer
-        
-        # Get file info
-        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=msg_id)
-        
-        # Download file and extract subtitle
         import tempfile
         import os
+        import asyncio as aio
+        
+        decoded = await decode_string(id)
+        msg_id = decoded.get("msg_id")
+        if not msg_id:
+            raise HTTPException(status_code=400, detail="Missing id")
+
+        chat_id = int(f"-100{decoded['chat_id']}")
+        
+        # Use same pattern as audio probe
+        index = min(work_loads, key=work_loads.get)
+        tg_client = multi_clients[index]
+        
+        if tg_client not in _streamer_by_client:
+            _streamer_by_client[tg_client] = ByteStreamer(tg_client)
+        streamer: ByteStreamer = _streamer_by_client[tg_client]
+        
+        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=int(msg_id))
         
         temp_dir = tempfile.mkdtemp(prefix="sub_extract_")
         input_path = os.path.join(temp_dir, "input.mkv")
         output_path = os.path.join(temp_dir, "output.vtt")
         
         try:
-            # Download entire file for subtitle extraction
+            # Download the file for extraction
+            chunk_size = streamer.CHUNK_SIZE
+            part_count = max(1, file_id.file_size // chunk_size)
+            
             with open(input_path, "wb") as f:
                 gen = await streamer.prefetch_stream(
                     file_id=file_id,
                     client_index=index,
                     offset=0,
                     first_part_cut=0,
-                    last_part_cut=file_id.file_size,
-                    part_count=1000,
-                    chunk_size=1024 * 1024,
+                    last_part_cut=chunk_size,
+                    part_count=part_count,
+                    chunk_size=chunk_size,
                     prefetch=5,
                     parallelism=3,
                 )
@@ -766,7 +765,6 @@ async def get_subtitle(id: str, track: int):
                         f.write(chunk)
             
             # Extract subtitle using FFmpeg
-            import asyncio
             cmd = [
                 "ffmpeg",
                 "-y",
@@ -776,13 +774,13 @@ async def get_subtitle(id: str, track: int):
                 output_path
             ]
             
-            process = await asyncio.create_subprocess_exec(
+            process = await aio.create_subprocess_exec(
                 *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stdout=aio.subprocess.PIPE,
+                stderr=aio.subprocess.PIPE
             )
             
-            _, stderr = await asyncio.wait_for(
+            _, stderr = await aio.wait_for(
                 process.communicate(),
                 timeout=120
             )
@@ -791,7 +789,6 @@ async def get_subtitle(id: str, track: int):
                 LOGGER.warning(f"FFmpeg subtitle error: {stderr.decode()[:500]}")
                 raise HTTPException(status_code=500, detail="Failed to extract subtitle")
             
-            # Read and return VTT content
             if os.path.exists(output_path):
                 with open(output_path, "r", encoding="utf-8") as f:
                     vtt_content = f.read()
@@ -800,14 +797,14 @@ async def get_subtitle(id: str, track: int):
                     content=vtt_content,
                     media_type="text/vtt",
                     headers={
-                        "Content-Disposition": f"inline; filename=subtitle_{track}.vtt"
+                        "Content-Disposition": f"inline; filename=subtitle_{track}.vtt",
+                        "Access-Control-Allow-Origin": "*"
                     }
                 )
             else:
                 raise HTTPException(status_code=404, detail="Subtitle track not found")
             
         finally:
-            # Cleanup
             try:
                 if os.path.exists(input_path):
                     os.remove(input_path)

@@ -14,219 +14,253 @@
         }
 
         body {
-            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            background: #0a0a1a;
             min-height: 100vh;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             color: #fff;
+            display: flex;
+            flex-direction: column;
         }
 
-        .player-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .header {
+        /* Top bar */
+        .top-bar {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            padding: 15px 0;
-            margin-bottom: 20px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 12px 20px;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 10;
         }
 
-        .logo {
+        .back-btn {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 1.4rem;
+            cursor: pointer;
+            margin-right: 15px;
+            opacity: 0.8;
+        }
+
+        .back-btn:hover {
+            opacity: 1;
+        }
+
+        .top-title {
+            font-size: 1rem;
+            font-weight: 500;
+            opacity: 0.9;
+        }
+
+        .top-right {
+            margin-left: auto;
             display: flex;
-            align-items: center;
             gap: 10px;
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #a855f7;
         }
 
-        .logo svg {
-            width: 32px;
-            height: 32px;
+        .top-icon-btn {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 1.2rem;
+            cursor: pointer;
+            opacity: 0.7;
+            padding: 5px;
         }
 
-        .media-info {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-            backdrop-filter: blur(10px);
+        .top-icon-btn:hover {
+            opacity: 1;
         }
 
-        .media-title {
-            font-size: 1.8rem;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-
-        .media-meta {
-            display: flex;
-            gap: 20px;
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 0.9rem;
-        }
-
-        .media-meta span {
+        /* Video container - fills remaining space */
+        .video-container {
+            flex: 1;
+            position: relative;
+            background: #000;
             display: flex;
             align-items: center;
-            gap: 5px;
-        }
-
-        .video-wrapper {
-            position: relative;
-            width: 100%;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            justify-content: center;
         }
 
         .video-js {
             width: 100%;
-            height: auto;
-            aspect-ratio: 16/9;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
         }
 
         .vjs-big-play-button {
-            background: rgba(168, 85, 247, 0.9) !important;
+            background: rgba(168, 85, 247, 0.85) !important;
             border: none !important;
             border-radius: 50% !important;
-            width: 80px !important;
-            height: 80px !important;
-            line-height: 80px !important;
-            font-size: 40px !important;
-            left: 50% !important;
-            top: 50% !important;
-            transform: translate(-50%, -50%) !important;
+            width: 70px !important;
+            height: 70px !important;
+            line-height: 70px !important;
+            font-size: 36px !important;
         }
 
-        .vjs-big-play-button:hover {
-            background: rgba(168, 85, 247, 1) !important;
+        /* Custom control bar styling */
+        .video-js .vjs-control-bar {
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.85)) !important;
+            height: 60px !important;
+            padding: 0 10px;
         }
 
-        /* Track Selection Panel */
-        .track-panel {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
+        .video-js .vjs-progress-control {
+            position: absolute;
+            top: -8px;
+            left: 0;
+            right: 0;
+            width: 100%;
+            height: 8px;
+        }
+
+        .video-js .vjs-play-progress {
+            background: #a855f7 !important;
+        }
+
+        .video-js .vjs-slider {
+            background: rgba(255, 255, 255, 0.2) !important;
+        }
+
+        /* Side panel for track selection */
+        .side-panel {
+            position: fixed;
+            top: 0;
+            right: -380px;
+            width: 380px;
+            height: 100vh;
+            background: rgba(15, 12, 41, 0.97);
+            backdrop-filter: blur(20px);
+            z-index: 100;
+            transition: right 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            border-left: 1px solid rgba(168, 85, 247, 0.3);
+        }
+
+        .side-panel.open {
+            right: 0;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             padding: 20px;
-            margin-top: 20px;
-            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        .track-panel h3 {
-            margin-bottom: 15px;
+        .panel-header h3 {
             font-size: 1.1rem;
             color: #a855f7;
         }
 
-        .track-section {
-            margin-bottom: 20px;
-        }
-
-        .track-section:last-child {
-            margin-bottom: 0;
-        }
-
-        .track-section h4 {
-            margin-bottom: 10px;
-            font-size: 0.95rem;
-            color: rgba(255, 255, 255, 0.8);
-        }
-
-        .track-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-
-        .track-btn {
-            padding: 8px 16px;
-            border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            background: rgba(255, 255, 255, 0.05);
-            color: #fff;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 0.9rem;
-        }
-
-        .track-btn:hover {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: #a855f7;
-        }
-
-        .track-btn.active {
-            background: linear-gradient(135deg, #a855f7, #8b5cf6);
-            border-color: #a855f7;
-        }
-
-        .track-btn.loading {
-            opacity: 0.6;
-            pointer-events: none;
-        }
-
-        .no-tracks {
-            color: rgba(255, 255, 255, 0.5);
-            font-style: italic;
-        }
-
-        .controls-bar {
-            display: flex;
-            gap: 15px;
-            margin-top: 20px;
-            flex-wrap: wrap;
-        }
-
-        .control-btn {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 0.95rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-decoration: none;
+        .panel-close {
+            background: none;
             border: none;
+            color: #fff;
+            font-size: 1.5rem;
+            cursor: pointer;
+            opacity: 0.7;
         }
 
-        .btn-primary {
-            background: linear-gradient(135deg, #a855f7, #8b5cf6);
+        .panel-close:hover {
+            opacity: 1;
+        }
+
+        .panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .panel-section {
+            margin-bottom: 25px;
+        }
+
+        .panel-section h4 {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: rgba(255, 255, 255, 0.5);
+            margin-bottom: 12px;
+        }
+
+        .track-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 6px;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .track-item:hover {
+            background: rgba(168, 85, 247, 0.15);
+        }
+
+        .track-item.active {
+            background: rgba(168, 85, 247, 0.25);
+            border-left: 3px solid #a855f7;
+        }
+
+        .track-item .track-radio {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            margin-right: 14px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .track-item.active .track-radio {
+            border-color: #a855f7;
+        }
+
+        .track-item.active .track-radio::after {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #a855f7;
+        }
+
+        .track-label {
+            font-size: 0.95rem;
+            color: rgba(255, 255, 255, 0.85);
+        }
+
+        .track-item.active .track-label {
             color: #fff;
         }
 
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(168, 85, 247, 0.3);
+        .track-meta {
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.4);
+            margin-top: 2px;
         }
 
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.1);
-            color: #fff;
-        }
-
-        .btn-secondary:hover {
-            background: rgba(255, 255, 255, 0.15);
-        }
-
-        .loading-tracks {
+        .loading-indicator {
             display: flex;
             align-items: center;
             gap: 10px;
-            color: rgba(255, 255, 255, 0.6);
+            padding: 12px;
+            color: rgba(255, 255, 255, 0.5);
         }
 
-        .loading-spinner {
-            width: 20px;
-            height: 20px;
+        .spinner {
+            width: 18px;
+            height: 18px;
             border: 2px solid rgba(168, 85, 247, 0.2);
             border-top-color: #a855f7;
             border-radius: 50%;
-            animation: spin 1s linear infinite;
+            animation: spin 0.8s linear infinite;
         }
 
         @keyframes spin {
@@ -235,11 +269,87 @@
             }
         }
 
+        /* Overlay when panel is open */
+        .overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 99;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+        }
+
+        .overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Bottom controls bar */
+        .bottom-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.6);
+        }
+
+        .bottom-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.08);
+            border: none;
+            color: #fff;
+            font-size: 0.85rem;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+
+        .bottom-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .bottom-btn.primary {
+            background: rgba(168, 85, 247, 0.3);
+        }
+
+        .bottom-btn.primary:hover {
+            background: rgba(168, 85, 247, 0.5);
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            z-index: 1000;
+            opacity: 0;
+            transition: all 0.3s;
+            pointer-events: none;
+            border-left: 3px solid #a855f7;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Error state */
         .error-container {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            border-radius: 12px;
-            padding: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
             text-align: center;
         }
 
@@ -248,143 +358,94 @@
             margin-bottom: 20px;
         }
 
-        /* Toast notifications */
-        .toast {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.9);
-            color: #fff;
-            padding: 15px 25px;
-            border-radius: 10px;
-            font-size: 0.9rem;
-            z-index: 1000;
-            transform: translateY(100px);
-            opacity: 0;
-            transition: all 0.3s;
-        }
-
-        .toast.show {
-            transform: translateY(0);
-            opacity: 1;
-        }
-
-        .toast.success {
-            border-left: 4px solid #22c55e;
-        }
-
-        .toast.error {
-            border-left: 4px solid #ef4444;
-        }
-
-        @media (max-width: 768px) {
-            .media-title {
-                font-size: 1.3rem;
+        /* Responsive */
+        @media (max-width: 600px) {
+            .side-panel {
+                width: 100%;
+                right: -100%;
             }
 
-            .media-meta {
+            .top-title {
+                font-size: 0.9rem;
+            }
+
+            .bottom-bar {
                 flex-wrap: wrap;
-                gap: 10px;
+                gap: 6px;
             }
 
-            .controls-bar {
-                flex-direction: column;
-            }
-
-            .control-btn {
-                justify-content: center;
+            .bottom-btn {
+                font-size: 0.8rem;
+                padding: 7px 12px;
             }
         }
     </style>
 </head>
 
 <body>
-    <div class="player-container">
-        <header class="header">
-            <div class="logo">
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z" />
-                </svg>
-                Telegram Stremio
-            </div>
-        </header>
+    <!-- Top Bar -->
+    <div class="top-bar">
+        <button class="back-btn" onclick="history.back()">←</button>
+        <span class="top-title">{{ title or 'Now Playing' }}{% if quality %} · {{ quality }}{% endif %}</span>
+        <div class="top-right">
+            <button class="top-icon-btn" onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
+        </div>
+    </div>
 
-        {% if error %}
-        <div class="error-container">
+    {% if error %}
+    <div class="error-container">
+        <div>
             <div class="error-icon">⚠️</div>
             <h2>Unable to Load Video</h2>
             <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">{{ error }}</p>
         </div>
-        {% else %}
+    </div>
+    {% else %}
 
-        <div class="media-info">
-            <h1 class="media-title">{{ title or 'Now Playing' }}</h1>
-            <div class="media-meta">
-                {% if quality %}<span>📺 {{ quality }}</span>{% endif %}
-                {% if size %}<span>📁 {{ size }}</span>{% endif %}
-                {% if year %}<span>📅 {{ year }}</span>{% endif %}
-            </div>
-        </div>
+    <!-- Video Player -->
+    <div class="video-container">
+        <video id="player" class="video-js vjs-big-play-centered" controls preload="auto">
+            <source src="{{ stream_url }}" type="video/mp4">
+        </video>
+    </div>
 
-        <div class="video-wrapper">
-            <video id="player" class="video-js vjs-big-play-centered vjs-theme-fantasy" controls preload="auto"
-                data-setup='{"fluid": true}'>
-                <source src="{{ stream_url }}" type="video/mp4">
-                <p class="vjs-no-js">
-                    To view this video please enable JavaScript, and consider upgrading to a web browser that supports
-                    HTML5 video.
-                </p>
-            </video>
-        </div>
-
-        <!-- Track Selection Panel -->
-        <div class="track-panel">
-            <h3>🎛️ Track Selection</h3>
-
-            <!-- Audio Tracks -->
-            <div class="track-section">
-                <h4>🔊 Audio Tracks</h4>
-                <div id="audio-tracks" class="track-list">
-                    <div class="loading-tracks">
-                        <div class="loading-spinner"></div>
-                        <span>Loading audio tracks...</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Subtitle Tracks -->
-            <div class="track-section">
-                <h4>💬 Subtitles</h4>
-                <div id="subtitle-tracks" class="track-list">
-                    <div class="loading-tracks">
-                        <div class="loading-spinner"></div>
-                        <span>Loading subtitles...</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="controls-bar">
-            <a href="{{ stream_url }}" class="control-btn btn-primary" download>
-                📥 Download
-            </a>
-            <button class="control-btn btn-secondary" onclick="toggleFullscreen()">
-                🖥️ Fullscreen
-            </button>
-            <button class="control-btn btn-secondary" onclick="copyLink()">
-                🔗 Copy Link
-            </button>
-            {% if stremio_link %}
-            <a href="{{ stremio_link }}" class="control-btn btn-secondary">
-                ▶️ Open in Stremio
-            </a>
-            {% endif %}
-        </div>
-
+    <!-- Bottom Controls -->
+    <div class="bottom-bar">
+        <button class="bottom-btn primary" onclick="openPanel('subtitles')">
+            💬 Subtitles
+            <span id="sub-badge"
+                style="display:none;background:#a855f7;padding:2px 6px;border-radius:4px;font-size:0.7rem;margin-left:4px;"></span>
+        </button>
+        <button class="bottom-btn primary" onclick="openPanel('audio')">
+            🔊 Audio
+            <span id="audio-badge"
+                style="display:none;background:#a855f7;padding:2px 6px;border-radius:4px;font-size:0.7rem;margin-left:4px;"></span>
+        </button>
+        <div style="flex:1"></div>
+        <a href="{{ stream_url }}" class="bottom-btn" download>📥 Download</a>
+        <button class="bottom-btn" onclick="copyLink()">🔗 Copy Link</button>
+        {% if stremio_link %}
+        <a href="{{ stremio_link }}" class="bottom-btn">▶️ Stremio</a>
         {% endif %}
     </div>
 
-    <!-- Toast Notification -->
+    <!-- Overlay -->
+    <div class="overlay" id="overlay" onclick="closePanel()"></div>
+
+    <!-- Side Panel -->
+    <div class="side-panel" id="sidePanel">
+        <div class="panel-header">
+            <h3 id="panelTitle">Track Selection</h3>
+            <button class="panel-close" onclick="closePanel()">✕</button>
+        </div>
+        <div class="panel-body" id="panelBody">
+            <!-- Dynamic content -->
+        </div>
+    </div>
+
+    {% endif %}
+
+    <!-- Toast -->
     <div id="toast" class="toast"></div>
 
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
@@ -392,152 +453,136 @@
         const fileId = '{{ file_id }}';
         const baseUrl = '{{ base_url }}';
         let player;
-        let currentAudioTrack = 0;
-        let currentSubtitleTrack = -1; // -1 = off
+        let currentSubtitleTrack = -1;
         let subtitleTracks = [];
         let audioTracks = [];
+        let currentPanel = null;
 
-        // Initialize Video.js player
+        // Init player
         player = videojs('player', {
             controls: true,
             autoplay: false,
             preload: 'auto',
             responsive: true,
-            fluid: true,
+            fluid: false,
+            fill: true,
             playbackRates: [0.5, 1, 1.25, 1.5, 2],
-            controlBar: {
-                volumePanel: {
-                    inline: false
-                }
-            }
         });
 
-        function showToast(message, type = 'success') {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.className = 'toast ' + type + ' show';
-            setTimeout(() => {
-                toast.className = 'toast';
-            }, 3000);
+        // Toast
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2500);
         }
 
         function toggleFullscreen() {
-            if (player.isFullscreen()) {
-                player.exitFullscreen();
-            } else {
-                player.requestFullscreen();
-            }
+            if (player.isFullscreen()) player.exitFullscreen();
+            else player.requestFullscreen();
         }
 
         function copyLink() {
-            navigator.clipboard.writeText('{{ stream_url }}').then(function () {
-                showToast('Stream link copied to clipboard!');
-            });
+            navigator.clipboard.writeText('{{ stream_url }}').then(() => showToast('Link copied!'));
         }
 
-        // Fetch and display audio tracks
-        async function loadAudioTracks() {
-            const container = document.getElementById('audio-tracks');
-            try {
-                const response = await fetch(`${baseUrl}/probe/audio/${fileId}`);
-                const data = await response.json();
-                audioTracks = data.audio_tracks || [];
+        // Panel
+        function openPanel(type) {
+            const panel = document.getElementById('sidePanel');
+            const overlay = document.getElementById('overlay');
+            const title = document.getElementById('panelTitle');
+            const body = document.getElementById('panelBody');
+            currentPanel = type;
 
-                if (audioTracks.length === 0) {
-                    container.innerHTML = '<span class="no-tracks">No audio tracks detected</span>';
-                    return;
-                }
-
-                container.innerHTML = audioTracks.map((track, i) => {
-                    const label = formatAudioLabel(track);
-                    const isActive = i === currentAudioTrack ? 'active' : '';
-                    return `<button class="track-btn ${isActive}" onclick="selectAudioTrack(${i})">${label}</button>`;
-                }).join('');
-
-            } catch (error) {
-                console.error('Failed to load audio tracks:', error);
-                container.innerHTML = '<span class="no-tracks">Failed to load audio tracks</span>';
+            if (type === 'subtitles') {
+                title.textContent = '💬 Subtitles';
+                renderSubtitlePanel(body);
+            } else if (type === 'audio') {
+                title.textContent = '🔊 Audio Tracks';
+                renderAudioPanel(body);
             }
+
+            panel.classList.add('open');
+            overlay.classList.add('show');
         }
 
-        function formatAudioLabel(track) {
-            let label = track.language_name || track.language || 'Unknown';
-            if (track.channels) {
-                label += ` (${track.channels}ch)`;
-            }
-            if (track.codec) {
-                label += ` - ${track.codec.toUpperCase()}`;
-            }
-            return label;
+        function closePanel() {
+            document.getElementById('sidePanel').classList.remove('open');
+            document.getElementById('overlay').classList.remove('show');
+            currentPanel = null;
         }
 
-        function selectAudioTrack(index) {
-            // Note: Browser video players don't support switching audio tracks in MKV
-            // This would require server-side extraction with ?audio=N parameter
-            const newUrl = `${baseUrl}/dl/${fileId}/video.mkv?audio=${index}`;
-            const currentTime = player.currentTime();
+        // Subtitle panel
+        function renderSubtitlePanel(container) {
+            if (subtitleTracks.length === 0 && !subtitleTracks._loaded) {
+                container.innerHTML = '<div class="loading-indicator"><div class="spinner"></div>Loading subtitles...</div>';
+                return;
+            }
 
-            showToast('Audio track switching requires reloading video...', 'info');
+            let html = '<div class="panel-section"><h4>Subtitle Tracks</h4>';
 
-            // Update active button
-            document.querySelectorAll('#audio-tracks .track-btn').forEach((btn, i) => {
-                btn.classList.toggle('active', i === index);
-            });
+            // Off option
+            html += `<div class="track-item ${currentSubtitleTrack === -1 ? 'active' : ''}" onclick="selectSubtitle(-1)">
+                <div class="track-radio"></div>
+                <div><div class="track-label">Off</div></div>
+            </div>`;
 
-            currentAudioTrack = index;
+            if (subtitleTracks.length === 0) {
+                html += '<div style="padding:12px;color:rgba(255,255,255,0.4);font-style:italic;">No embedded subtitles found</div>';
+            } else {
+                subtitleTracks.forEach((track, i) => {
+                    const label = track.language_name || track.language || 'Unknown';
+                    const meta = [track.codec, track.title, track.forced ? 'Forced' : '', track.default ? 'Default' : '']
+                        .filter(Boolean).join(' · ');
+                    html += `<div class="track-item ${currentSubtitleTrack === i ? 'active' : ''}" onclick="selectSubtitle(${i})">
+                        <div class="track-radio"></div>
+                        <div>
+                            <div class="track-label">${label}</div>
+                            ${meta ? `<div class="track-meta">${meta}</div>` : ''}
+                        </div>
+                    </div>`;
+                });
+            }
 
-            // Note: Full audio switching would require transcoding on server
-            // For now, show a message explaining the limitation
-            showToast('Audio track selection: Use VLC for full support', 'info');
+            html += '</div>';
+            container.innerHTML = html;
         }
 
-        // Fetch and display subtitle tracks
-        async function loadSubtitleTracks() {
-            const container = document.getElementById('subtitle-tracks');
-            try {
-                const response = await fetch(`${baseUrl}/probe/subtitles/${fileId}`);
-                const data = await response.json();
-                subtitleTracks = data.subtitle_tracks || [];
-
-                // Add "Off" option
-                let html = `<button class="track-btn ${currentSubtitleTrack === -1 ? 'active' : ''}" onclick="selectSubtitleTrack(-1)">Off</button>`;
-
-                if (subtitleTracks.length === 0) {
-                    container.innerHTML = html + '<span class="no-tracks" style="margin-left: 10px;">No embedded subtitles</span>';
-                    return;
-                }
-
-                html += subtitleTracks.map((track, i) => {
-                    const label = formatSubtitleLabel(track);
-                    const isActive = i === currentSubtitleTrack ? 'active' : '';
-                    return `<button class="track-btn ${isActive}" onclick="selectSubtitleTrack(${i})">${label}</button>`;
-                }).join('');
-
-                container.innerHTML = html;
-
-            } catch (error) {
-                console.error('Failed to load subtitle tracks:', error);
-                container.innerHTML = '<span class="no-tracks">Failed to load subtitles</span>';
+        // Audio panel
+        function renderAudioPanel(container) {
+            if (audioTracks.length === 0 && !audioTracks._loaded) {
+                container.innerHTML = '<div class="loading-indicator"><div class="spinner"></div>Loading audio tracks...</div>';
+                return;
             }
+
+            let html = '<div class="panel-section"><h4>Audio Tracks</h4>';
+
+            if (audioTracks.length === 0) {
+                html += '<div style="padding:12px;color:rgba(255,255,255,0.4);font-style:italic;">No audio track info available</div>';
+            } else {
+                audioTracks.forEach((track, i) => {
+                    const label = track.language_name || track.language || 'Unknown';
+                    const meta = [
+                        track.channels ? `${track.channels}ch` : '',
+                        track.codec ? track.codec.toUpperCase() : '',
+                        track.bit_rate ? `${Math.round(track.bit_rate / 1000)}kbps` : ''
+                    ].filter(Boolean).join(' · ');
+                    html += `<div class="track-item ${i === 0 ? 'active' : ''}">
+                        <div class="track-radio"></div>
+                        <div>
+                            <div class="track-label">${label}</div>
+                            ${meta ? `<div class="track-meta">${meta}</div>` : ''}
+                        </div>
+                    </div>`;
+                });
+            }
+
+            html += '</div>';
+            container.innerHTML = html;
         }
 
-        function formatSubtitleLabel(track) {
-            let label = track.language_name || track.language || 'Unknown';
-            if (track.title) {
-                label += ` - ${track.title}`;
-            }
-            if (track.forced) {
-                label += ' [Forced]';
-            }
-            return label;
-        }
-
-        async function selectSubtitleTrack(index) {
-            // Update active button
-            document.querySelectorAll('#subtitle-tracks .track-btn').forEach((btn, i) => {
-                btn.classList.toggle('active', i === index);
-            });
-
+        // Subtitle selection
+        async function selectSubtitle(index) {
             // Remove existing text tracks
             const tracks = player.textTracks();
             for (let i = tracks.length - 1; i >= 0; i--) {
@@ -545,48 +590,99 @@
                     tracks[i].mode = 'disabled';
                 }
             }
+            // Remove remote text tracks
+            const rtt = player.remoteTextTracks();
+            for (let i = rtt.length - 1; i >= 0; i--) {
+                player.removeRemoteTextTrack(rtt[i]);
+            }
+
+            currentSubtitleTrack = index;
+
+            // Update badge
+            const badge = document.getElementById('sub-badge');
+            if (index >= 0 && subtitleTracks[index]) {
+                badge.textContent = subtitleTracks[index].language_name || 'On';
+                badge.style.display = 'inline';
+            } else {
+                badge.style.display = 'none';
+            }
 
             if (index === -1) {
-                currentSubtitleTrack = -1;
-                showToast('Subtitles disabled');
+                showToast('Subtitles off');
+                if (currentPanel === 'subtitles') renderSubtitlePanel(document.getElementById('panelBody'));
                 return;
             }
 
-            // Load and add the selected subtitle track
-            const subtitleUrl = `${baseUrl}/subtitles/${fileId}/${index}.vtt`;
+            showToast('Loading subtitle...');
+            const url = `${baseUrl}/subtitles/${fileId}/${index}.vtt`;
 
+            player.addRemoteTextTrack({
+                kind: 'subtitles',
+                label: subtitleTracks[index].language_name || 'Subtitle',
+                src: url,
+                default: true,
+                mode: 'showing'
+            }, false);
+
+            // Enable the newly added track
+            const newTracks = player.textTracks();
+            for (let i = 0; i < newTracks.length; i++) {
+                if (newTracks[i].kind === 'subtitles') {
+                    newTracks[i].mode = 'showing';
+                }
+            }
+
+            showToast(`Subtitle: ${subtitleTracks[index].language_name || 'Track ' + index}`);
+            if (currentPanel === 'subtitles') renderSubtitlePanel(document.getElementById('panelBody'));
+        }
+
+        // Load tracks
+        async function loadAudioTracks() {
             try {
-                showToast('Loading subtitle...', 'info');
+                const res = await fetch(`${baseUrl}/probe/audio/${fileId}`);
+                const data = await res.json();
+                audioTracks = data.audio_tracks || [];
+                audioTracks._loaded = true;
 
-                // Add new text track
-                player.addRemoteTextTrack({
-                    kind: 'subtitles',
-                    label: formatSubtitleLabel(subtitleTracks[index]),
-                    src: subtitleUrl,
-                    default: true,
-                    mode: 'showing'
-                }, false);
+                const badge = document.getElementById('audio-badge');
+                if (audioTracks.length > 0) {
+                    badge.textContent = audioTracks.length;
+                    badge.style.display = 'inline';
+                }
 
-                currentSubtitleTrack = index;
-                showToast('Subtitle loaded successfully!');
-
-            } catch (error) {
-                console.error('Failed to load subtitle:', error);
-                showToast('Failed to load subtitle', 'error');
+                if (currentPanel === 'audio') renderAudioPanel(document.getElementById('panelBody'));
+            } catch (e) {
+                console.error('Audio probe failed:', e);
+                audioTracks._loaded = true;
             }
         }
 
-        // Handle errors
+        async function loadSubtitleTracks() {
+            try {
+                const res = await fetch(`${baseUrl}/probe/subtitles/${fileId}`);
+                const data = await res.json();
+                subtitleTracks = data.subtitle_tracks || [];
+                subtitleTracks._loaded = true;
+
+                const badge = document.getElementById('sub-badge');
+                if (subtitleTracks.length > 0 && currentSubtitleTrack === -1) {
+                    // Don't set badge until user selects
+                }
+
+                if (currentPanel === 'subtitles') renderSubtitlePanel(document.getElementById('panelBody'));
+            } catch (e) {
+                console.error('Subtitle probe failed:', e);
+                subtitleTracks._loaded = true;
+            }
+        }
+
         player.on('error', function () {
-            console.error('Video playback error:', player.error());
-            showToast('Video playback error', 'error');
+            showToast('Playback error');
         });
 
-        // Load tracks on page load
-        document.addEventListener('DOMContentLoaded', function () {
-            loadAudioTracks();
-            loadSubtitleTracks();
-        });
+        // Load on start
+        loadAudioTracks();
+        loadSubtitleTracks();
     </script>
 </body>
 
