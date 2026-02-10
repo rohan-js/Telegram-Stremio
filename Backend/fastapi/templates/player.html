@@ -422,7 +422,7 @@
                 style="display:none;background:#a855f7;padding:2px 6px;border-radius:4px;font-size:0.7rem;margin-left:4px;"></span>
         </button>
         <div style="flex:1"></div>
-        <a href="{{ stream_url }}" class="bottom-btn" download>📥 Download</a>
+        <a href="{{ download_url }}" class="bottom-btn" download>📥 Download</a>
         <button class="bottom-btn" onclick="copyLink()">🔗 Copy Link</button>
         {% if stremio_link %}
         <a href="{{ stremio_link }}" class="bottom-btn">▶️ Stremio</a>
@@ -452,8 +452,10 @@
     <script>
         const fileId = '{{ file_id }}';
         const baseUrl = '{{ base_url }}';
+        const downloadUrl = '{{ download_url }}';
         let player;
         let currentSubtitleTrack = -1;
+        let currentAudioTrack = 0;
         let subtitleTracks = [];
         let audioTracks = [];
         let currentPanel = null;
@@ -483,7 +485,7 @@
         }
 
         function copyLink() {
-            navigator.clipboard.writeText('{{ stream_url }}').then(() => showToast('Link copied!'));
+            navigator.clipboard.writeText(downloadUrl).then(() => showToast('Link copied!'));
         }
 
         // Panel
@@ -567,7 +569,7 @@
                         track.codec ? track.codec.toUpperCase() : '',
                         track.bit_rate ? `${Math.round(track.bit_rate / 1000)}kbps` : ''
                     ].filter(Boolean).join(' · ');
-                    html += `<div class="track-item ${i === 0 ? 'active' : ''}">
+                    html += `<div class="track-item ${i === currentAudioTrack ? 'active' : ''}" onclick="selectAudio(${i})">
                         <div class="track-radio"></div>
                         <div>
                             <div class="track-label">${label}</div>
@@ -634,6 +636,38 @@
 
             showToast(`Subtitle: ${subtitleTracks[index].language_name || 'Track ' + index}`);
             if (currentPanel === 'subtitles') renderSubtitlePanel(document.getElementById('panelBody'));
+        }
+
+        // Audio selection - reloads stream with selected audio track
+        function selectAudio(index) {
+            if (index === currentAudioTrack) return;
+            currentAudioTrack = index;
+
+            const currentTime = player.currentTime();
+            const wasPlaying = !player.paused();
+            const newUrl = `${baseUrl}/stream/${fileId}?audio=${index}`;
+
+            showToast(`Switching to: ${audioTracks[index].language_name || 'Track ' + index}...`);
+
+            // Update audio badge
+            const badge = document.getElementById('audio-badge');
+            badge.textContent = audioTracks[index].language_name || audioTracks[index].language || `Track ${index}`;
+            badge.style.display = 'inline';
+
+            // Change source and reload
+            player.src({ type: 'video/mp4', src: newUrl });
+            player.load();
+            player.one('loadedmetadata', function () {
+                // Note: seeking may not work perfectly with fragmented MP4,
+                // but we try to restore position
+                if (currentTime > 0) {
+                    player.currentTime(currentTime);
+                }
+                if (wasPlaying) player.play();
+                showToast(`Audio: ${audioTracks[index].language_name || 'Track ' + index}`);
+            });
+
+            if (currentPanel === 'audio') renderAudioPanel(document.getElementById('panelBody'));
         }
 
         // Load tracks

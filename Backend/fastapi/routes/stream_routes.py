@@ -120,6 +120,129 @@ async def stream_handler(request: Request, id: str, name: str):
     )
 
 
+@router.get("/stream/{id}")
+async def transcoded_stream(request: Request, id: str, audio: int = 0):
+    """
+    Stream video with transcoded audio for browser compatibility.
+    FFmpeg copies video (no re-encode), transcodes audio to AAC,
+    outputs fragmented MP4 that browsers can play.
+    
+    Args:
+        id: File ID
+        audio: Audio track index (0-based, default 0)
+    """
+    import asyncio as aio
+    
+    decoded = await decode_string(id)
+    msg_id = decoded.get("msg_id")
+    if not msg_id:
+        raise HTTPException(status_code=400, detail="Missing id")
+
+    chat_id = int(f"-100{decoded['chat_id']}")
+    
+    # Get file properties
+    index = min(work_loads, key=work_loads.get)
+    tg_client = multi_clients[index]
+    if tg_client not in _streamer_by_client:
+        _streamer_by_client[tg_client] = ByteStreamer(tg_client)
+    streamer: ByteStreamer = _streamer_by_client[tg_client]
+    
+    file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=int(msg_id))
+    file_size = file_id.file_size
+    chunk_size = streamer.CHUNK_SIZE
+    
+    # FFmpeg command: pipe input, copy video, transcode audio to AAC, fragmented MP4 output
+    ffmpeg_cmd = [
+        "ffmpeg",
+        "-i", "pipe:0",           # Read from stdin
+        "-map", "0:v:0",          # First video stream
+        "-map", f"0:a:{audio}",   # Selected audio track
+        "-c:v", "copy",           # Copy video (no re-encode)
+        "-c:a", "aac",            # Transcode audio to AAC
+        "-b:a", "192k",           # Audio bitrate
+        "-ac", "2",               # Stereo output
+        "-f", "mp4",              # MP4 container
+        "-movflags", "frag_keyframe+empty_moov+faststart",  # Fragmented for streaming
+        "pipe:1"                  # Output to stdout
+    ]
+    
+    async def generate():
+        process = None
+        try:
+            # Start FFmpeg process
+            process = await aio.create_subprocess_exec(
+                *ffmpeg_cmd,
+                stdin=aio.subprocess.PIPE,
+                stdout=aio.subprocess.PIPE,
+                stderr=aio.subprocess.PIPE,
+            )
+            
+            # Feed data to FFmpeg in background
+            async def feed_input():
+                try:
+                    part_count = max(1, file_size // chunk_size)
+                    gen = await streamer.prefetch_stream(
+                        file_id=file_id,
+                        client_index=index,
+                        offset=0,
+                        first_part_cut=0,
+                        last_part_cut=chunk_size,
+                        part_count=part_count,
+                        chunk_size=chunk_size,
+                        prefetch=5,
+                        parallelism=3,
+                    )
+                    async for item in gen:
+                        if isinstance(item, tuple) and len(item) >= 2:
+                            data = item[1]
+                        else:
+                            data = item
+                        if data and process.stdin:
+                            process.stdin.write(data)
+                            await process.stdin.drain()
+                except Exception as e:
+                    LOGGER.warning(f"Feed input error: {e}")
+                finally:
+                    if process.stdin:
+                        process.stdin.close()
+            
+            # Start feeding input
+            feed_task = aio.create_task(feed_input())
+            
+            # Read FFmpeg output and yield
+            while True:
+                chunk = await process.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+            
+            await feed_task
+            
+            # Check for errors
+            stderr_data = await process.stderr.read()
+            if process.returncode and process.returncode != 0:
+                LOGGER.warning(f"FFmpeg transcode stderr: {stderr_data.decode()[:500]}")
+            
+        except Exception as e:
+            LOGGER.exception(f"Transcode stream error: {e}")
+        finally:
+            if process and process.returncode is None:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+    
+    return StreamingResponse(
+        generate(),
+        media_type="video/mp4",
+        headers={
+            "Content-Type": "video/mp4",
+            "Accept-Ranges": "none",
+            "Cache-Control": "no-cache",
+        }
+    )
+
+
 async def media_streamer(
     request: Request,
     chat_id: int,

@@ -202,13 +202,15 @@ async def player_page(request: Request, id: str):
         # Decode the file ID to get metadata
         decoded = await decode_string(id)
         
-        # Build stream URL
-        stream_url = f"{base_url}/dl/{id}/video.mkv"
+        # Build stream URLs
+        stream_url = f"{base_url}/stream/{id}"  # Transcoded for browser
+        download_url = f"{base_url}/dl/{id}/video.mkv"  # Raw download
         
         return templates.TemplateResponse("player.html", {
             "request": request,
             "theme": theme,
             "stream_url": stream_url,
+            "download_url": download_url,
             "file_id": id,
             "base_url": base_url,
             "title": decoded.get("title", "Now Playing"),
