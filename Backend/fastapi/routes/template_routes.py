@@ -7,6 +7,7 @@ from Backend import db
 from Backend.pyrofork.bot import work_loads, multi_clients, StreamBot
 from Backend.helper.pyro import get_readable_time
 from Backend import StartTime, __version__
+from Backend.config import Telegram
 from time import time
 
 
