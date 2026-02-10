@@ -3,9 +3,10 @@ from typing import Optional, List
 from urllib.parse import unquote
 from Backend.config import Telegram
 from Backend import db, __version__
-from Backend.helper.audio_tracks import format_audio_track_label
+from Backend.helper.audio_tracks import format_audio_track_label, probe_audio_from_telegram
 import PTN
 from datetime import datetime, timezone, timedelta
+from Backend.logger import LOGGER
 
 
 # --- Configuration ---
@@ -342,6 +343,16 @@ async def get_streams(
             quality_str = quality.get("quality", "HD")
             size = quality.get("size", "")
             audio_tracks = quality.get("audio_tracks", [])
+            
+            # On-demand audio probing: if no audio_tracks in DB, probe now
+            if not audio_tracks:
+                try:
+                    probed = await probe_audio_from_telegram(quality.get("id"))
+                    if probed and len(probed) > 0:
+                        audio_tracks = probed
+                        LOGGER.info(f"On-demand probe found {len(probed)} audio tracks for {filename}")
+                except Exception as e:
+                    LOGGER.warning(f"On-demand audio probe failed: {e}")
             
             # If audio tracks exist, create separate stream per track
             if audio_tracks and len(audio_tracks) > 1:
