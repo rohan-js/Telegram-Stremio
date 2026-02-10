@@ -203,7 +203,7 @@ async def player_page(request: Request, id: str):
         decoded = await decode_string(id)
         
         # Build stream URLs
-        stream_url = f"{base_url}/stream/{id}"  # Transcoded for browser
+        stream_url = f"{base_url}/hls/{id}/0/index.m3u8"  # HLS for browser
         download_url = f"{base_url}/dl/{id}/video.mkv"  # Raw download
         
         return templates.TemplateResponse("player.html", {

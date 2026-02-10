@@ -405,7 +405,7 @@
     <!-- Video Player -->
     <div class="video-container">
         <video id="player" class="video-js vjs-big-play-centered" controls preload="auto">
-            <source src="{{ stream_url }}" type="video/mp4">
+            <source src="{{ stream_url }}" type="application/x-mpegURL">
         </video>
     </div>
 
@@ -460,15 +460,21 @@
         let audioTracks = [];
         let currentPanel = null;
 
-        // Init player
+        // Init player with HLS support
         player = videojs('player', {
             controls: true,
-            autoplay: false,
+            autoplay: true,
             preload: 'auto',
             responsive: true,
             fluid: false,
             fill: true,
             playbackRates: [0.5, 1, 1.25, 1.5, 2],
+            html5: {
+                vhs: {
+                    overrideNative: true,
+                    enableLowInitialPlaylist: true,
+                },
+            },
         });
 
         // Toast
@@ -638,14 +644,12 @@
             if (currentPanel === 'subtitles') renderSubtitlePanel(document.getElementById('panelBody'));
         }
 
-        // Audio selection - reloads stream with selected audio track
+        // Audio selection - switches HLS stream to different audio track
         function selectAudio(index) {
             if (index === currentAudioTrack) return;
             currentAudioTrack = index;
 
-            const currentTime = player.currentTime();
-            const wasPlaying = !player.paused();
-            const newUrl = `${baseUrl}/stream/${fileId}?audio=${index}`;
+            const newUrl = `${baseUrl}/hls/${fileId}/${index}/index.m3u8`;
 
             showToast(`Switching to: ${audioTracks[index].language_name || 'Track ' + index}...`);
 
@@ -654,16 +658,11 @@
             badge.textContent = audioTracks[index].language_name || audioTracks[index].language || `Track ${index}`;
             badge.style.display = 'inline';
 
-            // Change source and reload
-            player.src({ type: 'video/mp4', src: newUrl });
-            player.load();
+            // Change source to new HLS manifest
+            player.src({ type: 'application/x-mpegURL', src: newUrl });
+            player.play();
+
             player.one('loadedmetadata', function () {
-                // Note: seeking may not work perfectly with fragmented MP4,
-                // but we try to restore position
-                if (currentTime > 0) {
-                    player.currentTime(currentTime);
-                }
-                if (wasPlaying) player.play();
                 showToast(`Audio: ${audioTracks[index].language_name || 'Track ' + index}`);
             });
 
