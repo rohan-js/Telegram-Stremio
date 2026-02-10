@@ -5,7 +5,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title or 'Video Player' }} - Telegram Stremio</title>
-    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     <style>
         * {
             margin: 0;
@@ -71,7 +70,7 @@
             opacity: 1;
         }
 
-        /* Video container - fills remaining space */
+        /* Video container */
         .video-container {
             flex: 1;
             position: relative;
@@ -81,7 +80,7 @@
             justify-content: center;
         }
 
-        .video-js {
+        video {
             width: 100%;
             height: 100%;
             position: absolute;
@@ -89,200 +88,74 @@
             left: 0;
         }
 
-        .vjs-big-play-button {
-            background: rgba(168, 85, 247, 0.85) !important;
-            border: none !important;
-            border-radius: 50% !important;
-            width: 70px !important;
-            height: 70px !important;
-            line-height: 70px !important;
-            font-size: 36px !important;
-        }
-
-        /* Custom control bar styling */
-        .video-js .vjs-control-bar {
-            background: linear-gradient(transparent, rgba(0, 0, 0, 0.85)) !important;
-            height: 60px !important;
-            padding: 0 10px;
-        }
-
-        .video-js .vjs-progress-control {
+        /* Error overlay */
+        .error-overlay {
             position: absolute;
-            top: -8px;
-            left: 0;
-            right: 0;
-            width: 100%;
-            height: 8px;
-        }
-
-        .video-js .vjs-play-progress {
-            background: #a855f7 !important;
-        }
-
-        .video-js .vjs-slider {
-            background: rgba(255, 255, 255, 0.2) !important;
-        }
-
-        /* Side panel for track selection */
-        .side-panel {
-            position: fixed;
-            top: 0;
-            right: -380px;
-            width: 380px;
-            height: 100vh;
-            background: rgba(15, 12, 41, 0.97);
-            backdrop-filter: blur(20px);
-            z-index: 100;
-            transition: right 0.3s ease;
-            display: flex;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.9);
+            display: none;
             flex-direction: column;
-            border-left: 1px solid rgba(168, 85, 247, 0.3);
-        }
-
-        .side-panel.open {
-            right: 0;
-        }
-
-        .panel-header {
-            display: flex;
             align-items: center;
-            justify-content: space-between;
-            padding: 20px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            justify-content: center;
+            text-align: center;
+            padding: 30px;
+            z-index: 5;
         }
 
-        .panel-header h3 {
-            font-size: 1.1rem;
-            color: #a855f7;
-        }
-
-        .panel-close {
-            background: none;
-            border: none;
-            color: #fff;
-            font-size: 1.5rem;
-            cursor: pointer;
-            opacity: 0.7;
-        }
-
-        .panel-close:hover {
-            opacity: 1;
-        }
-
-        .panel-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-        }
-
-        .panel-section {
-            margin-bottom: 25px;
-        }
-
-        .panel-section h4 {
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: rgba(255, 255, 255, 0.5);
-            margin-bottom: 12px;
-        }
-
-        .track-item {
+        .error-overlay.show {
             display: flex;
-            align-items: center;
-            padding: 12px 16px;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-            margin-bottom: 6px;
-            background: rgba(255, 255, 255, 0.03);
         }
 
-        .track-item:hover {
-            background: rgba(168, 85, 247, 0.15);
+        .error-overlay .error-icon {
+            font-size: 3.5rem;
+            margin-bottom: 15px;
         }
 
-        .track-item.active {
-            background: rgba(168, 85, 247, 0.25);
-            border-left: 3px solid #a855f7;
+        .error-overlay h3 {
+            font-size: 1.2rem;
+            margin-bottom: 8px;
         }
 
-        .track-item .track-radio {
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            margin-right: 14px;
-            flex-shrink: 0;
+        .error-overlay p {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+            max-width: 400px;
+        }
+
+        .error-actions {
             display: flex;
-            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
             justify-content: center;
         }
 
-        .track-item.active .track-radio {
-            border-color: #a855f7;
-        }
-
-        .track-item.active .track-radio::after {
-            content: '';
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #a855f7;
-        }
-
-        .track-label {
-            font-size: 0.95rem;
-            color: rgba(255, 255, 255, 0.85);
-        }
-
-        .track-item.active .track-label {
-            color: #fff;
-        }
-
-        .track-meta {
-            font-size: 0.75rem;
-            color: rgba(255, 255, 255, 0.4);
-            margin-top: 2px;
-        }
-
-        .loading-indicator {
-            display: flex;
+        .error-actions a {
+            display: inline-flex;
             align-items: center;
-            gap: 10px;
-            padding: 12px;
-            color: rgba(255, 255, 255, 0.5);
+            gap: 6px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            color: #fff;
+            font-size: 0.9rem;
+            transition: background 0.2s;
         }
 
-        .spinner {
-            width: 18px;
-            height: 18px;
-            border: 2px solid rgba(168, 85, 247, 0.2);
-            border-top-color: #a855f7;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
+        .error-actions .primary-action {
+            background: rgba(168, 85, 247, 0.6);
         }
 
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
+        .error-actions .primary-action:hover {
+            background: rgba(168, 85, 247, 0.8);
         }
 
-        /* Overlay when panel is open */
-        .overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 99;
-            opacity: 0;
-            visibility: hidden;
-            transition: all 0.3s;
+        .error-actions .secondary-action {
+            background: rgba(255, 255, 255, 0.1);
         }
 
-        .overlay.show {
-            opacity: 1;
-            visibility: visible;
+        .error-actions .secondary-action:hover {
+            background: rgba(255, 255, 255, 0.2);
         }
 
         /* Bottom controls bar */
@@ -353,18 +226,13 @@
             text-align: center;
         }
 
-        .error-icon {
+        .error-icon-big {
             font-size: 4rem;
             margin-bottom: 20px;
         }
 
         /* Responsive */
         @media (max-width: 600px) {
-            .side-panel {
-                width: 100%;
-                right: -100%;
-            }
-
             .top-title {
                 font-size: 0.9rem;
             }
@@ -395,7 +263,7 @@
     {% if error %}
     <div class="error-container">
         <div>
-            <div class="error-icon">⚠️</div>
+            <div class="error-icon-big">⚠️</div>
             <h2>Unable to Load Video</h2>
             <p style="margin-top: 10px; color: rgba(255,255,255,0.7);">{{ error }}</p>
         </div>
@@ -404,44 +272,33 @@
 
     <!-- Video Player -->
     <div class="video-container">
-        <video id="player" class="video-js vjs-big-play-centered" controls preload="auto">
+        <video id="player" controls preload="auto" autoplay>
             <source src="{{ stream_url }}" type="video/mp4">
+            Your browser does not support video playback.
         </video>
+
+        <!-- Error overlay (shown when codec is unsupported) -->
+        <div class="error-overlay" id="errorOverlay">
+            <div class="error-icon">🎬</div>
+            <h3>Codec Not Supported</h3>
+            <p>This video uses a format your browser can't play (HEVC/EAC3). Use one of the options below:</p>
+            <div class="error-actions">
+                <a href="{{ download_url }}" class="primary-action" download>📥 Download</a>
+                <a href="{{ stream_url }}" class="secondary-action" id="copyLinkBtn"
+                    onclick="event.preventDefault(); copyLink()">🔗 Copy Link</a>
+            </div>
+        </div>
     </div>
 
     <!-- Bottom Controls -->
     <div class="bottom-bar">
-        <button class="bottom-btn primary" onclick="openPanel('subtitles')">
-            💬 Subtitles
-            <span id="sub-badge"
-                style="display:none;background:#a855f7;padding:2px 6px;border-radius:4px;font-size:0.7rem;margin-left:4px;"></span>
-        </button>
-        <button class="bottom-btn primary" onclick="openPanel('audio')">
-            🔊 Audio
-            <span id="audio-badge"
-                style="display:none;background:#a855f7;padding:2px 6px;border-radius:4px;font-size:0.7rem;margin-left:4px;"></span>
-        </button>
-        <div style="flex:1"></div>
-        <a href="{{ download_url }}" class="bottom-btn" download>📥 Download</a>
-        <button class="bottom-btn" onclick="openVLC()">🎬 Watch in VLC</button>
+        <a href="{{ download_url }}" class="bottom-btn primary" download>📥 Download</a>
         <button class="bottom-btn" onclick="copyLink()">🔗 Copy Link</button>
         {% if stremio_link %}
         <a href="{{ stremio_link }}" class="bottom-btn">▶️ Stremio</a>
         {% endif %}
-    </div>
-
-    <!-- Overlay -->
-    <div class="overlay" id="overlay" onclick="closePanel()"></div>
-
-    <!-- Side Panel -->
-    <div class="side-panel" id="sidePanel">
-        <div class="panel-header">
-            <h3 id="panelTitle">Track Selection</h3>
-            <button class="panel-close" onclick="closePanel()">✕</button>
-        </div>
-        <div class="panel-body" id="panelBody">
-            <!-- Dynamic content -->
-        </div>
+        <div style="flex:1"></div>
+        <span style="font-size:0.75rem;opacity:0.4;">{% if size %}{{ size }}{% endif %}</span>
     </div>
 
     {% endif %}
@@ -449,40 +306,10 @@
     <!-- Toast -->
     <div id="toast" class="toast"></div>
 
-    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script>
-        const fileId = '{{ file_id }}';
-        const baseUrl = '{{ base_url }}';
-        const downloadUrl = '{{ download_url }}';
-        let player;
-        let currentSubtitleTrack = -1;
-        let currentAudioTrack = 0;
-        let subtitleTracks = [];
-        let audioTracks = [];
-        let currentPanel = null;
+        const streamUrl = '{{ stream_url }}';
+        const player = document.getElementById('player');
 
-        // Init player
-        player = videojs('player', {
-            controls: true,
-            autoplay: false,
-            preload: 'auto',
-            responsive: true,
-            fluid: false,
-            fill: true,
-            playbackRates: [0.5, 1, 1.25, 1.5, 2],
-            liveui: false,
-            liveTracker: false,
-        });
-
-        // Remove live display if present
-        player.ready(function () {
-            var liveDisplay = player.controlBar.getChild('liveDisplay');
-            if (liveDisplay) liveDisplay.hide();
-            var seekToLive = player.controlBar.getChild('seekToLive');
-            if (seekToLive) seekToLive.hide();
-        });
-
-        // Toast
         function showToast(msg) {
             const t = document.getElementById('toast');
             t.textContent = msg;
@@ -491,243 +318,35 @@
         }
 
         function toggleFullscreen() {
-            if (player.isFullscreen()) player.exitFullscreen();
-            else player.requestFullscreen();
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
         }
 
         function copyLink() {
-            navigator.clipboard.writeText(downloadUrl).then(() => showToast('Link copied!'));
+            navigator.clipboard.writeText(streamUrl).then(() => showToast('Link copied!'));
         }
 
-        function openVLC() {
-            const streamUrl = downloadUrl;
-            // Try vlc:// protocol (works on mobile and desktop with VLC installed)
-            window.location.href = 'vlc://' + streamUrl;
-            showToast('Opening in VLC...');
-        }
-
-        // Panel
-        function openPanel(type) {
-            const panel = document.getElementById('sidePanel');
-            const overlay = document.getElementById('overlay');
-            const title = document.getElementById('panelTitle');
-            const body = document.getElementById('panelBody');
-            currentPanel = type;
-
-            if (type === 'subtitles') {
-                title.textContent = '💬 Subtitles';
-                renderSubtitlePanel(body);
-            } else if (type === 'audio') {
-                title.textContent = '🔊 Audio Tracks';
-                renderAudioPanel(body);
-            }
-
-            panel.classList.add('open');
-            overlay.classList.add('show');
-        }
-
-        function closePanel() {
-            document.getElementById('sidePanel').classList.remove('open');
-            document.getElementById('overlay').classList.remove('show');
-            currentPanel = null;
-        }
-
-        // Subtitle panel
-        function renderSubtitlePanel(container) {
-            if (subtitleTracks.length === 0 && !subtitleTracks._loaded) {
-                container.innerHTML = '<div class="loading-indicator"><div class="spinner"></div>Loading subtitles...</div>';
-                return;
-            }
-
-            let html = '<div class="panel-section"><h4>Subtitle Tracks</h4>';
-
-            // Off option
-            html += `<div class="track-item ${currentSubtitleTrack === -1 ? 'active' : ''}" onclick="selectSubtitle(-1)">
-                <div class="track-radio"></div>
-                <div><div class="track-label">Off</div></div>
-            </div>`;
-
-            if (subtitleTracks.length === 0) {
-                html += '<div style="padding:12px;color:rgba(255,255,255,0.4);font-style:italic;">No embedded subtitles found</div>';
-            } else {
-                subtitleTracks.forEach((track, i) => {
-                    const label = track.language_name || track.language || 'Unknown';
-                    const meta = [track.codec, track.title, track.forced ? 'Forced' : '', track.default ? 'Default' : '']
-                        .filter(Boolean).join(' · ');
-                    html += `<div class="track-item ${currentSubtitleTrack === i ? 'active' : ''}" onclick="selectSubtitle(${i})">
-                        <div class="track-radio"></div>
-                        <div>
-                            <div class="track-label">${label}</div>
-                            ${meta ? `<div class="track-meta">${meta}</div>` : ''}
-                        </div>
-                    </div>`;
-                });
-            }
-
-            html += '</div>';
-            container.innerHTML = html;
-        }
-
-        // Audio panel
-        function renderAudioPanel(container) {
-            if (audioTracks.length === 0 && !audioTracks._loaded) {
-                container.innerHTML = '<div class="loading-indicator"><div class="spinner"></div>Loading audio tracks...</div>';
-                return;
-            }
-
-            let html = '<div class="panel-section"><h4>Audio Tracks</h4>';
-
-            if (audioTracks.length === 0) {
-                html += '<div style="padding:12px;color:rgba(255,255,255,0.4);font-style:italic;">No audio track info available</div>';
-            } else {
-                audioTracks.forEach((track, i) => {
-                    const label = track.language_name || track.language || 'Unknown';
-                    const meta = [
-                        track.channels ? `${track.channels}ch` : '',
-                        track.codec ? track.codec.toUpperCase() : '',
-                        track.bit_rate ? `${Math.round(track.bit_rate / 1000)}kbps` : ''
-                    ].filter(Boolean).join(' · ');
-                    html += `<div class="track-item ${i === currentAudioTrack ? 'active' : ''}" onclick="selectAudio(${i})">
-                        <div class="track-radio"></div>
-                        <div>
-                            <div class="track-label">${label}</div>
-                            ${meta ? `<div class="track-meta">${meta}</div>` : ''}
-                        </div>
-                    </div>`;
-                });
-            }
-
-            html += '</div>';
-            container.innerHTML = html;
-        }
-
-        // Subtitle selection
-        async function selectSubtitle(index) {
-            // Remove existing text tracks
-            const tracks = player.textTracks();
-            for (let i = tracks.length - 1; i >= 0; i--) {
-                if (tracks[i].kind === 'subtitles') {
-                    tracks[i].mode = 'disabled';
-                }
-            }
-            // Remove remote text tracks
-            const rtt = player.remoteTextTracks();
-            for (let i = rtt.length - 1; i >= 0; i--) {
-                player.removeRemoteTextTrack(rtt[i]);
-            }
-
-            currentSubtitleTrack = index;
-
-            // Update badge
-            const badge = document.getElementById('sub-badge');
-            if (index >= 0 && subtitleTracks[index]) {
-                badge.textContent = subtitleTracks[index].language_name || 'On';
-                badge.style.display = 'inline';
-            } else {
-                badge.style.display = 'none';
-            }
-
-            if (index === -1) {
-                showToast('Subtitles off');
-                if (currentPanel === 'subtitles') renderSubtitlePanel(document.getElementById('panelBody'));
-                return;
-            }
-
-            showToast('Loading subtitle...');
-            const url = `${baseUrl}/subtitles/${fileId}/${index}.vtt`;
-
-            player.addRemoteTextTrack({
-                kind: 'subtitles',
-                label: subtitleTracks[index].language_name || 'Subtitle',
-                src: url,
-                default: true,
-                mode: 'showing'
-            }, false);
-
-            // Enable the newly added track
-            const newTracks = player.textTracks();
-            for (let i = 0; i < newTracks.length; i++) {
-                if (newTracks[i].kind === 'subtitles') {
-                    newTracks[i].mode = 'showing';
-                }
-            }
-
-            showToast(`Subtitle: ${subtitleTracks[index].language_name || 'Track ' + index}`);
-            if (currentPanel === 'subtitles') renderSubtitlePanel(document.getElementById('panelBody'));
-        }
-
-        // Audio selection - switches HLS stream to different audio track
-        function selectAudio(index) {
-            if (index === currentAudioTrack) return;
-            currentAudioTrack = index;
-
-            const newUrl = `${baseUrl}/hls/${fileId}/${index}/index.m3u8`;
-
-            showToast(`Switching to: ${audioTracks[index].language_name || 'Track ' + index}...`);
-
-            // Update audio badge
-            const badge = document.getElementById('audio-badge');
-            badge.textContent = audioTracks[index].language_name || audioTracks[index].language || `Track ${index}`;
-            badge.style.display = 'inline';
-
-            // Change source to new HLS manifest
-            player.src({ type: 'application/x-mpegURL', src: newUrl });
-            player.play();
-
-            player.one('loadedmetadata', function () {
-                showToast(`Audio: ${audioTracks[index].language_name || 'Track ' + index}`);
+        // Handle video errors gracefully
+        if (player) {
+            player.addEventListener('error', function () {
+                document.getElementById('errorOverlay').classList.add('show');
             });
 
-            if (currentPanel === 'audio') renderAudioPanel(document.getElementById('panelBody'));
-        }
+            // Also detect if video can't start playing after a timeout
+            let playbackStarted = false;
+            player.addEventListener('playing', function () {
+                playbackStarted = true;
+            });
 
-        // Load tracks
-        async function loadAudioTracks() {
-            try {
-                const res = await fetch(`${baseUrl}/probe/audio/${fileId}`);
-                const data = await res.json();
-                audioTracks = data.audio_tracks || [];
-                audioTracks._loaded = true;
-
-                const badge = document.getElementById('audio-badge');
-                if (audioTracks.length > 0) {
-                    badge.textContent = audioTracks.length;
-                    badge.style.display = 'inline';
+            setTimeout(function () {
+                if (!playbackStarted && player.readyState < 3) {
+                    document.getElementById('errorOverlay').classList.add('show');
                 }
-
-                if (currentPanel === 'audio') renderAudioPanel(document.getElementById('panelBody'));
-            } catch (e) {
-                console.error('Audio probe failed:', e);
-                audioTracks._loaded = true;
-            }
+            }, 15000);
         }
-
-        async function loadSubtitleTracks() {
-            try {
-                const res = await fetch(`${baseUrl}/probe/subtitles/${fileId}`);
-                const data = await res.json();
-                subtitleTracks = data.subtitle_tracks || [];
-                subtitleTracks._loaded = true;
-
-                const badge = document.getElementById('sub-badge');
-                if (subtitleTracks.length > 0 && currentSubtitleTrack === -1) {
-                    // Don't set badge until user selects
-                }
-
-                if (currentPanel === 'subtitles') renderSubtitlePanel(document.getElementById('panelBody'));
-            } catch (e) {
-                console.error('Subtitle probe failed:', e);
-                subtitleTracks._loaded = true;
-            }
-        }
-
-        player.on('error', function () {
-            showToast('Playback error');
-        });
-
-        // Load on start
-        loadAudioTracks();
-        loadSubtitleTracks();
     </script>
 </body>
 
