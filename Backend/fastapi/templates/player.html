@@ -423,6 +423,7 @@
         </button>
         <div style="flex:1"></div>
         <a href="{{ download_url }}" class="bottom-btn" download>📥 Download</a>
+        <button class="bottom-btn" onclick="openVLC()">🎬 Watch in VLC</button>
         <button class="bottom-btn" onclick="copyLink()">🔗 Copy Link</button>
         {% if stremio_link %}
         <a href="{{ stremio_link }}" class="bottom-btn">▶️ Stremio</a>
@@ -469,6 +470,16 @@
             fluid: false,
             fill: true,
             playbackRates: [0.5, 1, 1.25, 1.5, 2],
+            liveui: false,
+            liveTracker: false,
+        });
+
+        // Remove live display if present
+        player.ready(function () {
+            var liveDisplay = player.controlBar.getChild('liveDisplay');
+            if (liveDisplay) liveDisplay.hide();
+            var seekToLive = player.controlBar.getChild('seekToLive');
+            if (seekToLive) seekToLive.hide();
         });
 
         // Toast
@@ -486,6 +497,13 @@
 
         function copyLink() {
             navigator.clipboard.writeText(downloadUrl).then(() => showToast('Link copied!'));
+        }
+
+        function openVLC() {
+            const streamUrl = downloadUrl;
+            // Try vlc:// protocol (works on mobile and desktop with VLC installed)
+            window.location.href = 'vlc://' + streamUrl;
+            showToast('Opening in VLC...');
         }
 
         // Panel
