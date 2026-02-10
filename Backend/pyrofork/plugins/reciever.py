@@ -96,7 +96,7 @@ async def send_reply_messages():
                     f"{rating_str}"
                     f"{f' | {quality}' if quality else ''}"
                     f" | {size}\n"
-                    f"\n🎬 **VLC:** `{direct_stream}`"
+                    f"\n▶️ **Direct Stream Link:**\n`{direct_stream}`"
                 )
             else:
                 reply_text = (
@@ -105,19 +105,17 @@ async def send_reply_messages():
                     f"{rating_str}"
                     f"{f' | {quality}' if quality else ''}"
                     f" | {size}\n"
-                    f"\n🎬 **VLC:** `{direct_stream}`"
+                    f"\n▶️ **Direct Stream Link:**\n`{direct_stream}`"
                 )
             
-            # Create inline keyboard with instant play buttons
-            buttons = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("▶️ Watch in Stremio", url=stremio_link),
-                    InlineKeyboardButton("🌐 Watch in Browser", url=browser_player),
-                ],
-                [
-                    InlineKeyboardButton("📥 Direct Download", url=direct_stream),
-                ]
-            ])
+            # Create inline keyboard - Stremio + VLC buttons
+            vlc_page = f"{base_url}/vlc/{encoded_string}" if encoded_string else None
+            buttons_row = [
+                InlineKeyboardButton("▶️ Watch in Stremio", url=stremio_link),
+            ]
+            if vlc_page:
+                buttons_row.append(InlineKeyboardButton("🎬 Watch in VLC", url=vlc_page))
+            buttons = InlineKeyboardMarkup([buttons_row])
             
             # Import StreamBot for sending reply
             from Backend.pyrofork.bot import StreamBot
