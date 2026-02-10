@@ -405,7 +405,7 @@
     <!-- Video Player -->
     <div class="video-container">
         <video id="player" class="video-js vjs-big-play-centered" controls preload="auto">
-            <source src="{{ stream_url }}" type="application/x-mpegURL">
+            <source src="{{ stream_url }}" type="video/mp4">
         </video>
     </div>
 
@@ -460,21 +460,15 @@
         let audioTracks = [];
         let currentPanel = null;
 
-        // Init player with HLS support
+        // Init player
         player = videojs('player', {
             controls: true,
-            autoplay: true,
+            autoplay: false,
             preload: 'auto',
             responsive: true,
             fluid: false,
             fill: true,
             playbackRates: [0.5, 1, 1.25, 1.5, 2],
-            html5: {
-                vhs: {
-                    overrideNative: true,
-                    enableLowInitialPlaylist: true,
-                },
-            },
         });
 
         // Toast

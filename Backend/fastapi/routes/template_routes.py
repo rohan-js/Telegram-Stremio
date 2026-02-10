@@ -202,9 +202,9 @@ async def player_page(request: Request, id: str):
         # Decode the file ID to get metadata
         decoded = await decode_string(id)
         
-        # Build stream URLs
-        stream_url = f"{base_url}/hls/{id}/0/index.m3u8"  # HLS for browser
-        download_url = f"{base_url}/dl/{id}/video.mkv"  # Raw download
+        # Build stream URL - use raw /dl/ for instant playback with seeking
+        stream_url = f"{base_url}/dl/{id}/video.mkv"
+        download_url = stream_url
         
         return templates.TemplateResponse("player.html", {
             "request": request,
