@@ -120,127 +120,153 @@ async def stream_handler(request: Request, id: str, name: str):
     )
 
 
+# Cache for transcoded files
+_transcode_cache_dir = "/tmp/stream_cache"
+_transcode_locks = {}  # {cache_key: asyncio.Lock}
+
+import os
+os.makedirs(_transcode_cache_dir, exist_ok=True)
+
+
 @router.get("/stream/{id}")
 async def transcoded_stream(request: Request, id: str, audio: int = 0):
     """
     Stream video with transcoded audio for browser compatibility.
-    FFmpeg copies video (no re-encode), transcodes audio to AAC,
-    outputs fragmented MP4 that browsers can play.
-    
-    Args:
-        id: File ID
-        audio: Audio track index (0-based, default 0)
+    Downloads file, transcodes audio to AAC with proper MP4 moov atom,
+    then serves with range request support for full seeking.
+    Results are cached so subsequent requests are instant.
     """
     import asyncio as aio
+    from fastapi.responses import FileResponse
     
-    decoded = await decode_string(id)
-    msg_id = decoded.get("msg_id")
-    if not msg_id:
-        raise HTTPException(status_code=400, detail="Missing id")
+    cache_key = f"{id}_a{audio}"
+    cached_path = os.path.join(_transcode_cache_dir, f"{cache_key}.mp4")
+    
+    # Serve from cache if available
+    if os.path.exists(cached_path) and os.path.getsize(cached_path) > 0:
+        return FileResponse(
+            cached_path,
+            media_type="video/mp4",
+            headers={"Accept-Ranges": "bytes"},
+        )
+    
+    # Get a lock for this specific transcode to avoid duplicate work
+    if cache_key not in _transcode_locks:
+        _transcode_locks[cache_key] = aio.Lock()
+    
+    async with _transcode_locks[cache_key]:
+        # Double-check after acquiring lock
+        if os.path.exists(cached_path) and os.path.getsize(cached_path) > 0:
+            return FileResponse(
+                cached_path,
+                media_type="video/mp4",
+                headers={"Accept-Ranges": "bytes"},
+            )
+        
+        decoded = await decode_string(id)
+        msg_id = decoded.get("msg_id")
+        if not msg_id:
+            raise HTTPException(status_code=400, detail="Missing id")
 
-    chat_id = int(f"-100{decoded['chat_id']}")
-    
-    # Get file properties
-    index = min(work_loads, key=work_loads.get)
-    tg_client = multi_clients[index]
-    if tg_client not in _streamer_by_client:
-        _streamer_by_client[tg_client] = ByteStreamer(tg_client)
-    streamer: ByteStreamer = _streamer_by_client[tg_client]
-    
-    file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=int(msg_id))
-    file_size = file_id.file_size
-    chunk_size = streamer.CHUNK_SIZE
-    
-    # FFmpeg command: pipe input, copy video, transcode audio to AAC, fragmented MP4 output
-    ffmpeg_cmd = [
-        "ffmpeg",
-        "-i", "pipe:0",           # Read from stdin
-        "-map", "0:v:0",          # First video stream
-        "-map", f"0:a:{audio}",   # Selected audio track
-        "-c:v", "copy",           # Copy video (no re-encode)
-        "-c:a", "aac",            # Transcode audio to AAC
-        "-b:a", "192k",           # Audio bitrate
-        "-ac", "2",               # Stereo output
-        "-f", "mp4",              # MP4 container
-        "-movflags", "frag_keyframe+empty_moov+faststart",  # Fragmented for streaming
-        "pipe:1"                  # Output to stdout
-    ]
-    
-    async def generate():
-        process = None
+        chat_id = int(f"-100{decoded['chat_id']}")
+        
+        # Get file properties
+        index = min(work_loads, key=work_loads.get)
+        tg_client = multi_clients[index]
+        if tg_client not in _streamer_by_client:
+            _streamer_by_client[tg_client] = ByteStreamer(tg_client)
+        streamer: ByteStreamer = _streamer_by_client[tg_client]
+        
+        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=int(msg_id))
+        file_size = file_id.file_size
+        chunk_size = streamer.CHUNK_SIZE
+        
+        # Temp paths
+        input_path = os.path.join(_transcode_cache_dir, f"{cache_key}_input.mkv")
+        output_path = cached_path + ".tmp"
+        
         try:
-            # Start FFmpeg process
+            # Step 1: Download from Telegram
+            LOGGER.info(f"Transcode: downloading {file_size} bytes for {cache_key}")
+            downloaded = 0
+            part_count = max(1, file_size // chunk_size)
+            
+            with open(input_path, "wb") as f:
+                gen = await streamer.prefetch_stream(
+                    file_id=file_id,
+                    client_index=index,
+                    offset=0,
+                    first_part_cut=0,
+                    last_part_cut=chunk_size,
+                    part_count=part_count,
+                    chunk_size=chunk_size,
+                    prefetch=5,
+                    parallelism=3,
+                )
+                async for item in gen:
+                    if isinstance(item, tuple) and len(item) >= 2:
+                        data = item[1]
+                    else:
+                        data = item
+                    if data:
+                        f.write(data)
+                        downloaded += len(data)
+            
+            LOGGER.info(f"Transcode: downloaded {downloaded} bytes, starting FFmpeg")
+            
+            # Step 2: Transcode with FFmpeg - copy video, AAC audio, proper moov atom
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-i", input_path,
+                "-map", "0:v:0",
+                "-map", f"0:a:{audio}",
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-ac", "2",
+                "-movflags", "+faststart",
+                "-f", "mp4",
+                output_path,
+            ]
+            
             process = await aio.create_subprocess_exec(
                 *ffmpeg_cmd,
-                stdin=aio.subprocess.PIPE,
                 stdout=aio.subprocess.PIPE,
                 stderr=aio.subprocess.PIPE,
             )
             
-            # Feed data to FFmpeg in background
-            async def feed_input():
-                try:
-                    part_count = max(1, file_size // chunk_size)
-                    gen = await streamer.prefetch_stream(
-                        file_id=file_id,
-                        client_index=index,
-                        offset=0,
-                        first_part_cut=0,
-                        last_part_cut=chunk_size,
-                        part_count=part_count,
-                        chunk_size=chunk_size,
-                        prefetch=5,
-                        parallelism=3,
-                    )
-                    async for item in gen:
-                        if isinstance(item, tuple) and len(item) >= 2:
-                            data = item[1]
-                        else:
-                            data = item
-                        if data and process.stdin:
-                            process.stdin.write(data)
-                            await process.stdin.drain()
-                except Exception as e:
-                    LOGGER.warning(f"Feed input error: {e}")
-                finally:
-                    if process.stdin:
-                        process.stdin.close()
+            _, stderr = await aio.wait_for(process.communicate(), timeout=600)
             
-            # Start feeding input
-            feed_task = aio.create_task(feed_input())
+            if process.returncode != 0:
+                LOGGER.warning(f"FFmpeg transcode error: {stderr.decode()[:500]}")
+                raise HTTPException(status_code=500, detail="Transcoding failed")
             
-            # Read FFmpeg output and yield
-            while True:
-                chunk = await process.stdout.read(65536)
-                if not chunk:
-                    break
-                yield chunk
+            # Step 3: Move to final cache path
+            os.rename(output_path, cached_path)
+            LOGGER.info(f"Transcode: complete for {cache_key}, size={os.path.getsize(cached_path)}")
             
-            await feed_task
+            # Cleanup input file
+            if os.path.exists(input_path):
+                os.remove(input_path)
             
-            # Check for errors
-            stderr_data = await process.stderr.read()
-            if process.returncode and process.returncode != 0:
-                LOGGER.warning(f"FFmpeg transcode stderr: {stderr_data.decode()[:500]}")
+            return FileResponse(
+                cached_path,
+                media_type="video/mp4",
+                headers={"Accept-Ranges": "bytes"},
+            )
             
+        except HTTPException:
+            raise
         except Exception as e:
-            LOGGER.exception(f"Transcode stream error: {e}")
-        finally:
-            if process and process.returncode is None:
-                try:
-                    process.kill()
-                except Exception:
-                    pass
-    
-    return StreamingResponse(
-        generate(),
-        media_type="video/mp4",
-        headers={
-            "Content-Type": "video/mp4",
-            "Accept-Ranges": "none",
-            "Cache-Control": "no-cache",
-        }
-    )
+            LOGGER.exception(f"Transcode error: {e}")
+            # Cleanup on failure
+            for p in [input_path, output_path]:
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 async def media_streamer(
