@@ -236,34 +236,60 @@ async def player_page(request: Request, id: str):
 
 
 async def vlc_redirect(request: Request, id: str):
-    """Return an M3U playlist file that opens the stream in VLC."""
-    from fastapi.responses import Response
+    """Smart VLC launcher - Android gets intent://, Desktop gets .m3u playlist."""
+    from fastapi.responses import Response, HTMLResponse
     from Backend.helper.encrypt import decode_string
     
     base_url = Telegram.BASE_URL.rstrip('/')
     stream_url = f"{base_url}/dl/{id}/video.mkv"
+    user_agent = (request.headers.get("user-agent") or "").lower()
+    is_android = "android" in user_agent
     
-    # Try to get a nice filename from metadata
-    try:
-        decoded = await decode_string(id)
-        title = decoded.get("title", "stream")
-        quality = decoded.get("quality", "")
-        filename = f"{title}_{quality}.m3u" if quality else f"{title}.m3u"
-        # Clean filename
-        filename = "".join(c for c in filename if c.isalnum() or c in "._- ").strip()
-        if not filename.endswith(".m3u"):
-            filename += ".m3u"
-    except Exception:
-        filename = "play.m3u"
-    
-    content = f"#EXTM3U\n#EXTINF:-1,Telegram Stream\n{stream_url}\n"
-    
-    return Response(
-        content=content,
-        media_type="audio/x-mpegurl",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        }
-    )
+    if is_android:
+        # Android: redirect to intent:// deep link that opens VLC directly
+        intent_url = (
+            f"intent://{base_url.replace('https://', '').replace('http://', '')}"
+            f"/dl/{id}/video.mkv"
+            f"#Intent;scheme=https;package=org.videolan.vlc;type=video/*;end"
+        )
+        html = (
+            '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+            '<title>Opening VLC...</title>'
+            '<style>body{background:#0a0a1a;color:#fff;font-family:sans-serif;'
+            'display:flex;align-items:center;justify-content:center;height:100vh;'
+            'text-align:center}a{color:#a855f7;text-decoration:underline}</style>'
+            '</head><body><div>'
+            '<h2>🎬 Opening in VLC...</h2>'
+            '<p style="margin-top:15px;opacity:0.6;font-size:0.85rem">'
+            'Make sure VLC is installed.</p>'
+            f'<p style="margin-top:10px"><a href="{intent_url}">Tap here if VLC didn\'t open</a></p>'
+            '</div>'
+            f'<script>window.location.href="{intent_url}";</script>'
+            '</body></html>'
+        )
+        return HTMLResponse(content=html)
+    else:
+        # Desktop: return .m3u playlist file
+        try:
+            decoded = await decode_string(id)
+            title = decoded.get("title", "stream")
+            quality = decoded.get("quality", "")
+            filename = f"{title}_{quality}.m3u" if quality else f"{title}.m3u"
+            filename = "".join(c for c in filename if c.isalnum() or c in "._- ").strip()
+            if not filename.endswith(".m3u"):
+                filename += ".m3u"
+        except Exception:
+            filename = "play.m3u"
+        
+        content = f"#EXTM3U\n#EXTINF:-1,Telegram Stream\n{stream_url}\n"
+        
+        return Response(
+            content=content,
+            media_type="audio/x-mpegurl",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
 
 
