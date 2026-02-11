@@ -275,10 +275,12 @@ async def vlc_redirect(request: Request, id: str):
             decoded = await decode_string(id)
             title = decoded.get("title", "stream")
             quality = decoded.get("quality", "")
-            filename = f"{title}_{quality}.m3u" if quality else f"{title}.m3u"
-            filename = "".join(c for c in filename if c.isalnum() or c in "._- ").strip()
-            if not filename.endswith(".m3u"):
-                filename += ".m3u"
+            raw_name = f"{title}_{quality}" if quality else title
+            # ASCII-only filename for Content-Disposition (latin-1 safe)
+            filename = "".join(c for c in raw_name if c.isascii() and (c.isalnum() or c in "._- ")).strip()
+            if not filename:
+                filename = "stream"
+            filename += ".m3u"
         except Exception:
             filename = "play.m3u"
         
