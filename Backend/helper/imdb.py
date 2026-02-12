@@ -36,14 +36,57 @@ async def search_title(query: str, type: str) -> Optional[Dict[str, Any]]:
         if resp.status_code != 200:
             return None
         data = resp.json()
-        if data and 'metas' in data and data['metas']:
-            meta = data['metas'][0]
+        if not data or 'metas' not in data or not data['metas']:
+            return None
+        
+        # Extract the title and year from the query
+        # Query may be "Title 2025" or just "Title"
+        query_year = None
+        query_title = query.strip()
+        year_match = re.search(r'\b((?:19|20)\d{2})\s*$', query_title)
+        if year_match:
+            query_year = int(year_match.group(1))
+            query_title = query_title[:year_match.start()].strip()
+        
+        query_lower = query_title.lower()
+        
+        # Score each result by title similarity + year match
+        best_meta = None
+        best_score = -1
+        
+        for meta in data['metas']:
+            name = (meta.get('name') or '').lower()
+            score = 0
+            
+            # Title matching (most important)
+            if name == query_lower:
+                score += 100  # Exact match
+            elif name.startswith(query_lower) or query_lower.startswith(name):
+                score += 60   # Prefix match
+            elif query_lower in name or name in query_lower:
+                score += 30   # Substring match
+            else:
+                score += 0    # No match
+            
+            # Year matching
+            if query_year:
+                meta_year = extract_first_year(meta.get('releaseInfo', ''))
+                if meta_year == query_year:
+                    score += 50   # Exact year match
+                elif meta_year and abs(meta_year - query_year) <= 1:
+                    score += 20   # Off by 1 year (release date variations)
+            
+            if score > best_score:
+                best_score = score
+                best_meta = meta
+        
+        if best_meta:
             return {
-                'id': meta.get('imdb_id', meta.get('id', '')),
+                'id': best_meta.get('imdb_id', best_meta.get('id', '')),
                 'type': type,
-                'title': meta.get('name', ''),
-                'year': meta.get('releaseInfo', ''),
-                'poster': meta.get('poster', '')
+                'title': best_meta.get('name', ''),
+                'year': best_meta.get('releaseInfo', ''),
+                'poster': best_meta.get('poster', '')
             }
         return None
     except Exception:
