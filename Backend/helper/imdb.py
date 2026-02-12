@@ -50,9 +50,16 @@ def _score_result(name: str, result_year: int, query_title: str, query_year: int
     
     return score
 
+# Map Indian language names to ISO 639-1 codes for TMDb API
+LANG_TO_ISO = {
+    "Hindi": "hi", "Malayalam": "ml", "Tamil": "ta", "Telugu": "te",
+    "Kannada": "kn", "Bengali": "bn", "Marathi": "mr",
+    "Gujarati": "gu", "Punjabi": "pa",
+}
+
 
 async def search_title(query: str, type: str, languages: list = None) -> Optional[Dict[str, Any]]:
-    """Search for a title using IMDb suggestion API first, then Cinemeta fallback."""
+    """Search for a title using multiple sources, prioritizing language-specific TMDb for Indian movies."""
     # Extract title and year from query
     query_year = None
     query_title = query.strip()
@@ -61,44 +68,107 @@ async def search_title(query: str, type: str, languages: list = None) -> Optiona
         query_year = int(year_match.group(1))
         query_title = query_title[:year_match.start()].strip()
     
-    # Step 1: Try IMDb suggestion API (direct, accurate)
-    result = await _imdb_suggestion_search(query_title, type, query_year)
-    
-    # Step 2: If Indian languages detected and result might be wrong version,
-    # retry with language name to find the regional movie
-    if languages and result:
-        result_score = _score_result(
-            result.get('title', ''), 
-            int(result.get('year', 0) or 0),
-            query_title, query_year
-        )
-        # If the match isn't perfect (exact title + exact year = 150),
-        # or even if it is (same name, same year, but wrong movie),
-        # try searching with language to find the regional version
+    # Step 1: If Indian languages detected, try TMDb with language filter FIRST
+    # This is the most reliable way to find Indian regional movies
+    if languages:
         for lang in languages:
-            lang_result = await _imdb_suggestion_search(
-                f"{query_title} {lang}", type, query_year
-            )
-            if lang_result:
-                lang_score = _score_result(
-                    lang_result.get('title', ''),
-                    int(lang_result.get('year', 0) or 0),
-                    query_title, query_year
+            iso_code = LANG_TO_ISO.get(lang)
+            if iso_code:
+                tmdb_result = await _tmdb_direct_search(
+                    query_title, type, query_year, iso_code
                 )
-                # If language-specific search finds a good match, prefer it
-                if lang_score >= 50:
-                    result = lang_result
-                    break
+                if tmdb_result:
+                    return tmdb_result
     
-    # Step 3: If no result from IMDb, try without language
-    if not result:
-        result = await _imdb_suggestion_search(query_title, type, query_year)
-    
+    # Step 2: Try IMDb suggestion API
+    result = await _imdb_suggestion_search(query_title, type, query_year)
     if result:
         return result
     
-    # Step 4: Fallback to Cinemeta
+    # Step 3: Fallback to Cinemeta
     return await _cinemeta_search(query, type, query_title, query_year)
+
+
+async def _tmdb_direct_search(title: str, type: str, year: int = None, lang_code: str = None) -> Optional[Dict[str, Any]]:
+    """Search TMDb API directly with language filter for regional movies."""
+    from Backend.config import Telegram
+    
+    api_key = Telegram.TMDB_API
+    if not api_key:
+        return None
+    
+    client = await _get_client()
+    media_type = "tv" if type in ("tvSeries", "series") else "movie"
+    
+    params = {
+        "api_key": api_key,
+        "query": title,
+    }
+    if year:
+        params["year" if media_type == "movie" else "first_air_date_year"] = year
+    if lang_code:
+        params["with_original_language"] = lang_code
+    
+    url = f"https://api.themoviedb.org/3/search/{media_type}"
+    
+    try:
+        resp = await client.get(url, params=params)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        results = data.get("results", [])
+        if not results:
+            return None
+        
+        # Score and pick the best result
+        best = None
+        best_score = -1
+        
+        for item in results:
+            item_title = item.get("title") or item.get("name") or ""
+            release = item.get("release_date") or item.get("first_air_date") or ""
+            item_year = int(release[:4]) if release and len(release) >= 4 else 0
+            
+            score = _score_result(item_title, item_year, title, year)
+            if score > best_score:
+                best_score = score
+                best = item
+        
+        if best and best_score >= 50:
+            # Get IMDb ID from TMDb external IDs
+            tmdb_id = best.get("id")
+            imdb_id = await _get_imdb_from_tmdb(tmdb_id, media_type, api_key)
+            
+            best_title = best.get("title") or best.get("name") or ""
+            release = best.get("release_date") or best.get("first_air_date") or ""
+            best_year = release[:4] if release and len(release) >= 4 else ""
+            
+            return {
+                'id': imdb_id or f"tmdb:{tmdb_id}",
+                'type': type,
+                'title': best_title,
+                'year': best_year,
+                'poster': f"https://image.tmdb.org/t/p/w500{best.get('poster_path')}" if best.get('poster_path') else ''
+            }
+        return None
+    except Exception:
+        return None
+
+
+async def _get_imdb_from_tmdb(tmdb_id: int, media_type: str, api_key: str) -> Optional[str]:
+    """Get IMDb ID from TMDb external IDs."""
+    client = await _get_client()
+    try:
+        url = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}/external_ids?api_key={api_key}"
+        resp = await client.get(url)
+        if resp.status_code == 200:
+            data = resp.json()
+            imdb_id = data.get("imdb_id")
+            if imdb_id and imdb_id.startswith("tt"):
+                return imdb_id
+    except Exception:
+        pass
+    return None
 
 
 async def _imdb_suggestion_search(title: str, type: str, year: int = None) -> Optional[Dict[str, Any]]:
