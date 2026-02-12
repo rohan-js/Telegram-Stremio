@@ -106,8 +106,6 @@ async def _tmdb_direct_search(title: str, type: str, year: int = None, lang_code
     }
     if year:
         params["year" if media_type == "movie" else "first_air_date_year"] = year
-    if lang_code:
-        params["with_original_language"] = lang_code
     
     url = f"https://api.themoviedb.org/3/search/{media_type}"
     
@@ -120,11 +118,15 @@ async def _tmdb_direct_search(title: str, type: str, year: int = None, lang_code
         if not results:
             return None
         
-        # Score and pick the best result
+        # Filter by original_language if specified, then score
         best = None
         best_score = -1
         
         for item in results:
+            # Skip results that don't match the target language
+            if lang_code and item.get("original_language") != lang_code:
+                continue
+            
             item_title = item.get("title") or item.get("name") or ""
             release = item.get("release_date") or item.get("first_air_date") or ""
             item_year = int(release[:4]) if release and len(release) >= 4 else 0
