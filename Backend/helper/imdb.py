@@ -51,7 +51,7 @@ def _score_result(name: str, result_year: int, query_title: str, query_year: int
     return score
 
 
-async def search_title(query: str, type: str) -> Optional[Dict[str, Any]]:
+async def search_title(query: str, type: str, languages: list = None) -> Optional[Dict[str, Any]]:
     """Search for a title using IMDb suggestion API first, then Cinemeta fallback."""
     # Extract title and year from query
     query_year = None
@@ -63,10 +63,41 @@ async def search_title(query: str, type: str) -> Optional[Dict[str, Any]]:
     
     # Step 1: Try IMDb suggestion API (direct, accurate)
     result = await _imdb_suggestion_search(query_title, type, query_year)
+    
+    # Step 2: If Indian languages detected and result might be wrong version,
+    # retry with language name to find the regional movie
+    if languages and result:
+        result_score = _score_result(
+            result.get('title', ''), 
+            int(result.get('year', 0) or 0),
+            query_title, query_year
+        )
+        # If the match isn't perfect (exact title + exact year = 150),
+        # or even if it is (same name, same year, but wrong movie),
+        # try searching with language to find the regional version
+        for lang in languages:
+            lang_result = await _imdb_suggestion_search(
+                f"{query_title} {lang}", type, query_year
+            )
+            if lang_result:
+                lang_score = _score_result(
+                    lang_result.get('title', ''),
+                    int(lang_result.get('year', 0) or 0),
+                    query_title, query_year
+                )
+                # If language-specific search finds a good match, prefer it
+                if lang_score >= 50:
+                    result = lang_result
+                    break
+    
+    # Step 3: If no result from IMDb, try without language
+    if not result:
+        result = await _imdb_suggestion_search(query_title, type, query_year)
+    
     if result:
         return result
     
-    # Step 2: Fallback to Cinemeta
+    # Step 4: Fallback to Cinemeta
     return await _cinemeta_search(query, type, query_title, query_year)
 
 

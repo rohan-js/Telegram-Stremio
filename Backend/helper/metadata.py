@@ -23,6 +23,33 @@ EPISODE_CACHE: dict = {}
 # Concurrency semaphore for external API calls
 API_SEMAPHORE = asyncio.Semaphore(12)
 
+# Indian language indicators found in filenames
+INDIAN_LANG_MAP = {
+    "hin": "Hindi", "hindi": "Hindi",
+    "mal": "Malayalam", "malayalam": "Malayalam",
+    "tam": "Tamil", "tamil": "Tamil",
+    "tel": "Telugu", "telugu": "Telugu",
+    "kan": "Kannada", "kannada": "Kannada",
+    "ben": "Bengali", "bengali": "Bengali",
+    "mar": "Marathi", "marathi": "Marathi",
+    "guj": "Gujarati", "gujarati": "Gujarati",
+    "pun": "Punjabi", "punjabi": "Punjabi",
+}
+
+def _extract_languages(filename: str) -> list[str]:
+    """Extract Indian language indicators from filename."""
+    # Normalize filename for matching
+    lower = filename.lower()
+    # Split on common separators
+    tokens = re.split(r'[\s._\-\[\](){}+]+', lower)
+    found = []
+    for token in tokens:
+        if token in INDIAN_LANG_MAP:
+            lang = INDIAN_LANG_MAP[token]
+            if lang not in found:
+                found.append(lang)
+    return found
+
 # ----------------- Helpers -----------------
 def format_tmdb_image(path: str, size="w500") -> str:
     if not path:
@@ -69,13 +96,14 @@ def extract_default_id(url: str) -> str | None:
 
     return None
 
-async def safe_imdb_search(title: str, type_: str) -> str | None:
-    key = f"imdb::{type_}::{title}"
+async def safe_imdb_search(title: str, type_: str, languages: list[str] = None) -> str | None:
+    lang_key = ",".join(languages) if languages else ""
+    key = f"imdb::{type_}::{title}::{lang_key}"
     if key in IMDB_CACHE:
         return IMDB_CACHE[key]
     try:
         async with API_SEMAPHORE:
-            result = await search_title(query=title, type=type_)
+            result = await search_title(query=title, type=type_, languages=languages)
         imdb_id = result["id"] if result else None
         IMDB_CACHE[key] = imdb_id
         return imdb_id
@@ -208,13 +236,18 @@ async def metadata(filename: str, channel: int, msg_id) -> dict | None:
     except Exception:
         encoded_string = None
 
+    # Extract language hints from filename for disambiguation
+    languages = _extract_languages(filename)
+    if languages:
+        LOGGER.info(f"Detected languages in filename: {languages}")
+
     try:
         if season and episode:
             LOGGER.info(f"Fetching TV metadata: {title} S{season}E{episode}")
             return await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id)
         else:
-            LOGGER.info(f"Fetching Movie metadata: {title} ({year})")
-            return await fetch_movie_metadata(title, encoded_string, year, quality, default_id)
+            LOGGER.info(f"Fetching Movie metadata: {title} ({year}) langs={languages}")
+            return await fetch_movie_metadata(title, encoded_string, year, quality, default_id, languages=languages)
     except Exception as e:
         LOGGER.error(f"Error while fetching metadata for {filename}: {e}\n{traceback.format_exc()}")
         return None
@@ -388,7 +421,7 @@ async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, q
 
 
 # ----------------- Movie Metadata -----------------
-async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, default_id=None) -> dict | None:
+async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, default_id=None, languages: list[str] = None) -> dict | None:
     imdb_id = None
     tmdb_id = None
     imdb_details = None
@@ -413,7 +446,8 @@ async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, d
     if not imdb_id and not tmdb_id:
         imdb_id = await safe_imdb_search(
             f"{title} {year}" if year else title,
-            "movie"
+            "movie",
+            languages=languages
         )
         use_tmdb = not bool(imdb_id)
 
