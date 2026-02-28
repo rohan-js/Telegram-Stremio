@@ -147,7 +147,14 @@ for _ in range(1):
 async def file_receive_handler(client: Client, message: Message):
     if str(message.chat.id) in Telegram.AUTH_CHANNEL:
         try:
-            if message.video or (message.document and message.document.mime_type.startswith("video/")):
+            video_extensions = ('.mkv', '.mp4', '.avi', '.webm', '.mov', '.flv', '.wmv')
+            is_video_doc = (
+                message.document and (
+                    (message.document.mime_type and message.document.mime_type.startswith("video/")) or
+                    (message.document.file_name and message.document.file_name.lower().endswith(video_extensions))
+                )
+            )
+            if message.video or is_video_doc:
                 file = message.video or message.document
                 title = message.caption or file.file_name
                 msg_id = message.id
