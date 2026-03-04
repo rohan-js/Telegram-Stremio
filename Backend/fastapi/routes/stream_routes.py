@@ -4,6 +4,7 @@ import mimetypes
 import time
 import asyncio
 from typing import Dict
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse, Response
@@ -347,10 +348,20 @@ async def media_streamer(
     if "." not in file_name and "/" in mime_type:
         file_name = f"{file_name}.{mime_type.split('/')[1]}"
 
+    # Sanitize filename for HTTP headers (latin-1 only)
+    try:
+        file_name.encode('latin-1')
+        safe_disposition = f'inline; filename="{file_name}"'
+    except UnicodeEncodeError:
+        # RFC 5987: use percent-encoded UTF-8 filename
+        ascii_name = file_name.encode('ascii', errors='ignore').decode('ascii') or 'video.mkv'
+        encoded_name = quote(file_name)
+        safe_disposition = f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}"
+
     headers = {
         "Content-Type": mime_type,
         "Content-Length": str(req_length),
-        "Content-Disposition": f'inline; filename="{file_name}"',
+        "Content-Disposition": safe_disposition,
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=3600, immutable",
         "Access-Control-Allow-Origin": "*",
