@@ -391,7 +391,11 @@ async def stremio_open(request: Request, media_type: str, id: str, season: int =
     """
     Redirect to Stremio app via HTML page with JavaScript.
     Telegram doesn't allow stremio:// in button URLs, so we use HTTP redirect.
-    Uses web.stremio.com for Windows (stremio:// protocol doesn't pass path on Windows).
+    
+    Windows fix: stremio:// protocol on Windows doesn't pass the detail path correctly
+    (Stremio tries to fetch https://detail/... as a manifest URL).
+    Solution: use stremio:// to launch the app, then redirect to Stremio's local 
+    streaming server (localhost:11470) which navigates the desktop app to the right page.
     """
     from fastapi.responses import HTMLResponse
     
@@ -404,21 +408,11 @@ async def stremio_open(request: Request, media_type: str, id: str, season: int =
     else:
         detail_path = f"detail/movie/{id}/{id}"
     
-    # Detect Windows from User-Agent
-    user_agent = (request.headers.get("user-agent") or "").lower()
-    is_windows = "windows" in user_agent
+    stremio_protocol = f"stremio://{detail_path}"
+    # Stremio desktop runs a local server - this URL navigates the app directly
+    local_stremio = f"http://localhost:11470/#!/{detail_path}"
+    web_stremio = f"https://web.stremio.com/#/{detail_path}"
     
-    # Windows: use web.stremio.com (reliably opens desktop app with correct content)
-    # Linux/Android/other: use stremio:// protocol (works natively)
-    if is_windows:
-        primary_url = f"https://web.stremio.com/#/{detail_path}"
-    else:
-        primary_url = f"stremio://{detail_path}"
-    
-    stremio_protocol_url = f"stremio://{detail_path}"
-    web_url = f"https://web.stremio.com/#/{detail_path}"
-    
-    # Return HTML that redirects
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -443,7 +437,7 @@ async def stremio_open(request: Request, media_type: str, id: str, season: int =
                 background: rgba(255,255,255,0.1);
                 border-radius: 20px;
                 backdrop-filter: blur(10px);
-                max-width: 400px;
+                max-width: 420px;
             }}
             h1 {{ margin-bottom: 20px; }}
             .spinner {{
@@ -457,8 +451,8 @@ async def stremio_open(request: Request, media_type: str, id: str, season: int =
             }}
             @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
             .btn {{
-                margin-top: 15px;
-                padding: 15px 30px;
+                margin-top: 12px;
+                padding: 14px 28px;
                 background: white;
                 color: #667eea;
                 border-radius: 10px;
@@ -470,24 +464,56 @@ async def stremio_open(request: Request, media_type: str, id: str, season: int =
             .btn-secondary {{
                 background: rgba(255,255,255,0.2);
                 color: white;
-                margin-top: 10px;
                 font-size: 0.9em;
             }}
             .links {{ margin-top: 25px; }}
+            #status {{ font-size: 0.85em; opacity: 0.8; margin-top: 15px; }}
         </style>
     </head>
     <body>
         <div class="container">
             <h1>🎬 Opening Stremio...</h1>
             <div class="spinner"></div>
-            <p>If Stremio doesn't open automatically:</p>
-            <div class="links">
-                <a href="{primary_url}" class="btn">Open Stremio</a><br>
-                <a href="{web_url}" class="btn btn-secondary">Open in Web Player</a>
+            <p id="status">Launching Stremio app...</p>
+            <div class="links" style="display:none" id="fallback">
+                <p>If Stremio didn't open:</p>
+                <a href="{local_stremio}" class="btn">Open in Stremio Desktop</a><br>
+                <a href="{web_stremio}" class="btn btn-secondary">Open in Web Player</a>
             </div>
         </div>
         <script>
-            window.location.href = "{primary_url}";
+            (function() {{
+                var isWindows = navigator.platform.indexOf('Win') > -1 || 
+                                navigator.userAgent.indexOf('Windows') > -1;
+                
+                if (isWindows) {{
+                    // Windows: stremio:// protocol doesn't pass path correctly
+                    // Use local Stremio server (runs on localhost:11470 when app is open)
+                    
+                    // First, try to open the app via stremio:// (just launches it)
+                    var iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    iframe.src = 'stremio://';
+                    document.body.appendChild(iframe);
+                    
+                    // After app has time to start, redirect to local server 
+                    // which navigates the desktop app to the right page
+                    document.getElementById('status').textContent = 'Opening in Stremio Desktop...';
+                    setTimeout(function() {{
+                        window.location.href = '{local_stremio}';
+                    }}, 1500);
+                    
+                }} else {{
+                    // Linux/Android/Mac: stremio:// protocol works correctly
+                    window.location.href = '{stremio_protocol}';
+                }}
+                
+                // Show fallback buttons after 4 seconds
+                setTimeout(function() {{
+                    document.getElementById('fallback').style.display = 'block';
+                    document.getElementById('status').textContent = 'Taking too long?';
+                }}, 4000);
+            }})();
         </script>
     </body>
     </html>
