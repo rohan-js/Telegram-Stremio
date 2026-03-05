@@ -392,10 +392,9 @@ async def stremio_open(request: Request, media_type: str, id: str, season: int =
     Redirect to Stremio app via HTML page with JavaScript.
     Telegram doesn't allow stremio:// in button URLs, so we use HTTP redirect.
     
-    Windows fix: stremio:// protocol on Windows doesn't pass the detail path correctly
-    (Stremio tries to fetch https://detail/... as a manifest URL).
-    Solution: use stremio:// to launch the app, then redirect to Stremio's local 
-    streaming server (localhost:11470) which navigates the desktop app to the right page.
+    Uses stremio:/// (triple slash) format because stremio://detail/... makes 
+    'detail' the hostname on Windows, causing Stremio to try fetching 
+    https://detail/... as an addon manifest.
     """
     from fastapi.responses import HTMLResponse
     
@@ -408,10 +407,9 @@ async def stremio_open(request: Request, media_type: str, id: str, season: int =
     else:
         detail_path = f"detail/movie/{id}/{id}"
     
-    stremio_protocol = f"stremio://{detail_path}"
-    # Stremio desktop runs a local server - this URL navigates the app directly
-    local_stremio = f"http://localhost:11470/#!/{detail_path}"
-    web_stremio = f"https://web.stremio.com/#/{detail_path}"
+    # Triple slash: stremio:///detail/... → empty host, 'detail' is path (not hostname)
+    stremio_url = f"stremio:///{detail_path}"
+    web_url = f"https://web.stremio.com/#/{detail_path}"
     
     html_content = f"""
     <!DOCTYPE html>
@@ -476,44 +474,19 @@ async def stremio_open(request: Request, media_type: str, id: str, season: int =
             <div class="spinner"></div>
             <p id="status">Launching Stremio app...</p>
             <div class="links" style="display:none" id="fallback">
-                <p>If Stremio didn't open:</p>
-                <a href="{local_stremio}" class="btn">Open in Stremio Desktop</a><br>
-                <a href="{web_stremio}" class="btn btn-secondary">Open in Web Player</a>
+                <p>If Stremio didn't open automatically:</p>
+                <a href="{stremio_url}" class="btn">Open in Stremio</a><br>
+                <a href="{web_url}" class="btn btn-secondary">Open in Web Player</a>
             </div>
         </div>
         <script>
-            (function() {{
-                var isWindows = navigator.platform.indexOf('Win') > -1 || 
-                                navigator.userAgent.indexOf('Windows') > -1;
-                
-                if (isWindows) {{
-                    // Windows: stremio:// protocol doesn't pass path correctly
-                    // Use local Stremio server (runs on localhost:11470 when app is open)
-                    
-                    // First, try to open the app via stremio:// (just launches it)
-                    var iframe = document.createElement('iframe');
-                    iframe.style.display = 'none';
-                    iframe.src = 'stremio://';
-                    document.body.appendChild(iframe);
-                    
-                    // After app has time to start, redirect to local server 
-                    // which navigates the desktop app to the right page
-                    document.getElementById('status').textContent = 'Opening in Stremio Desktop...';
-                    setTimeout(function() {{
-                        window.location.href = '{local_stremio}';
-                    }}, 1500);
-                    
-                }} else {{
-                    // Linux/Android/Mac: stremio:// protocol works correctly
-                    window.location.href = '{stremio_protocol}';
-                }}
-                
-                // Show fallback buttons after 4 seconds
-                setTimeout(function() {{
-                    document.getElementById('fallback').style.display = 'block';
-                    document.getElementById('status').textContent = 'Taking too long?';
-                }}, 4000);
-            }})();
+            window.location.href = "{stremio_url}";
+            
+            // Show fallback buttons after 3 seconds
+            setTimeout(function() {{
+                document.getElementById('fallback').style.display = 'block';
+                document.getElementById('status').textContent = 'Taking too long?';
+            }}, 3000);
         </script>
     </body>
     </html>
