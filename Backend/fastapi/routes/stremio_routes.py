@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import Optional, List
 from urllib.parse import unquote
 from Backend.config import Telegram
@@ -387,23 +387,38 @@ async def get_streams(
 
 
 @router.get("/open/{media_type}/{id}")
-async def stremio_open(media_type: str, id: str, season: int = None, episode: int = None):
+async def stremio_open(request: Request, media_type: str, id: str, season: int = None, episode: int = None):
     """
     Redirect to Stremio app via HTML page with JavaScript.
     Telegram doesn't allow stremio:// in button URLs, so we use HTTP redirect.
+    Uses web.stremio.com for Windows (stremio:// protocol doesn't pass path on Windows).
     """
     from fastapi.responses import HTMLResponse
     
-    # Build the stremio:// deep link
+    # Build the detail path
     if media_type == "series" or media_type == "tv":
         if season and episode:
-            stremio_url = f"stremio://detail/series/{id}/{id}:{season}:{episode}"
+            detail_path = f"detail/series/{id}/{id}:{season}:{episode}"
         else:
-            stremio_url = f"stremio://detail/series/{id}"
+            detail_path = f"detail/series/{id}"
     else:
-        stremio_url = f"stremio://detail/movie/{id}/{id}"
+        detail_path = f"detail/movie/{id}/{id}"
     
-    # Return HTML that redirects to stremio://
+    # Detect Windows from User-Agent
+    user_agent = (request.headers.get("user-agent") or "").lower()
+    is_windows = "windows" in user_agent
+    
+    # Windows: use web.stremio.com (reliably opens desktop app with correct content)
+    # Linux/Android/other: use stremio:// protocol (works natively)
+    if is_windows:
+        primary_url = f"https://web.stremio.com/#/{detail_path}"
+    else:
+        primary_url = f"stremio://{detail_path}"
+    
+    stremio_protocol_url = f"stremio://{detail_path}"
+    web_url = f"https://web.stremio.com/#/{detail_path}"
+    
+    # Return HTML that redirects
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -428,6 +443,7 @@ async def stremio_open(media_type: str, id: str, season: int = None, episode: in
                 background: rgba(255,255,255,0.1);
                 border-radius: 20px;
                 backdrop-filter: blur(10px);
+                max-width: 400px;
             }}
             h1 {{ margin-bottom: 20px; }}
             .spinner {{
@@ -440,8 +456,8 @@ async def stremio_open(media_type: str, id: str, season: int = None, episode: in
                 margin: 20px auto;
             }}
             @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-            .fallback {{
-                margin-top: 30px;
+            .btn {{
+                margin-top: 15px;
                 padding: 15px 30px;
                 background: white;
                 color: #667eea;
@@ -450,7 +466,14 @@ async def stremio_open(media_type: str, id: str, season: int = None, episode: in
                 font-weight: bold;
                 display: inline-block;
             }}
-            .fallback:hover {{ opacity: 0.9; }}
+            .btn:hover {{ opacity: 0.9; }}
+            .btn-secondary {{
+                background: rgba(255,255,255,0.2);
+                color: white;
+                margin-top: 10px;
+                font-size: 0.9em;
+            }}
+            .links {{ margin-top: 25px; }}
         </style>
     </head>
     <body>
@@ -458,16 +481,13 @@ async def stremio_open(media_type: str, id: str, season: int = None, episode: in
             <h1>🎬 Opening Stremio...</h1>
             <div class="spinner"></div>
             <p>If Stremio doesn't open automatically:</p>
-            <a href="{stremio_url}" class="fallback">Click here to open Stremio</a>
+            <div class="links">
+                <a href="{primary_url}" class="btn">Open Stremio</a><br>
+                <a href="{web_url}" class="btn btn-secondary">Open in Web Player</a>
+            </div>
         </div>
         <script>
-            // Try to open Stremio
-            window.location.href = "{stremio_url}";
-            
-            // Fallback: try again after a short delay
-            setTimeout(function() {{
-                window.location.href = "{stremio_url}";
-            }}, 1000);
+            window.location.href = "{primary_url}";
         </script>
     </body>
     </html>
