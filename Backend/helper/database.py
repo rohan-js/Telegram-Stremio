@@ -316,8 +316,15 @@ class Database:
             existing_qualities.append(quality_to_update)
 
         else:
-            # allow duplicate qualities
-            existing_qualities.append(quality_to_update)
+            # Keep different files, but skip exact same file (same filename)
+            new_name = quality_to_update.get("name", "")
+            already_exists = any(
+                q.get("name") == new_name for q in existing_qualities
+            )
+            if not already_exists:
+                existing_qualities.append(quality_to_update)
+            else:
+                LOGGER.info(f"Skipping duplicate file: {new_name}")
 
         existing_movie["telegram"] = existing_qualities
         existing_movie["updated_on"] = datetime.utcnow()
@@ -444,7 +451,15 @@ class Database:
                         existing_episode["telegram"].append(quality)
 
                     else:
-                        existing_episode["telegram"].append(quality)
+                        # Keep different files, but skip exact same file (same filename)
+                        new_name = quality.get("name", "")
+                        already_exists = any(
+                            q.get("name") == new_name for q in existing_episode["telegram"]
+                        )
+                        if not already_exists:
+                            existing_episode["telegram"].append(quality)
+                        else:
+                            LOGGER.info(f"Skipping duplicate file: {new_name}")
 
         existing_tv["updated_on"] = datetime.utcnow()
 
