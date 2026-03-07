@@ -15,7 +15,10 @@ async def announce_addon(client: Client, message: Message):
     
     text = (
         "🎬 <b>Telegram Stremio Addon</b>\n\n"
-        "Click the button below to install the addon in Stremio:"
+        "<b>📥 Step 1:</b> Download & Install Stremio\n"
+        "👉 <a href='https://www.stremio.com/downloads'>stremio.com/downloads</a>\n\n"
+        "<b>👤 Step 2:</b> Open Stremio → Sign Up / Log In\n\n"
+        "<b>⬇️ Step 3:</b> Click the button below to add the addon:"
     )
     
     # Use https:// URLs for buttons (Telegram doesn't allow custom protocols like stremio://)
