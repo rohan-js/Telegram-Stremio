@@ -480,9 +480,123 @@ async def stremio_open(request: Request, media_type: str, id: str, season: int =
             </div>
         </div>
         <script>
-            window.location.href = "{stremio_url}";
+            var isAndroid = /android/i.test(navigator.userAgent);
+            
+            if (isAndroid) {{
+                // On Android, try intent:// which reliably opens Stremio app
+                var intentUrl = "intent://{detail_path}#Intent;scheme=stremio;package=com.stremio.one;end";
+                window.location.href = intentUrl;
+            }} else {{
+                window.location.href = "{stremio_url}";
+            }}
             
             // Show fallback buttons after 3 seconds
+            setTimeout(function() {{
+                document.getElementById('fallback').style.display = 'block';
+                document.getElementById('status').textContent = 'Taking too long?';
+            }}, 3000);
+        </script>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/install")
+async def stremio_install(request: Request):
+    """
+    Redirect to install this addon in Stremio.
+    Works on Android (via intent://), Windows, and Linux (via stremio://).
+    Same pattern as /open/ endpoint.
+    """
+    from fastapi.responses import HTMLResponse
+    
+    manifest_url = f"{BASE_URL}/stremio/manifest.json"
+    # stremio:// URL for desktop
+    stremio_url = manifest_url.replace('https://', 'stremio://').replace('http://', 'stremio://')
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Installing Stremio Addon...</title>
+        <style>
+            body {{
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                margin: 0;
+                color: white;
+            }}
+            .container {{
+                text-align: center;
+                padding: 40px;
+                background: rgba(255,255,255,0.1);
+                border-radius: 20px;
+                backdrop-filter: blur(10px);
+                max-width: 420px;
+            }}
+            h1 {{ margin-bottom: 20px; }}
+            .spinner {{
+                width: 50px;
+                height: 50px;
+                border: 4px solid rgba(255,255,255,0.3);
+                border-top-color: white;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin: 20px auto;
+            }}
+            @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+            .btn {{
+                margin-top: 12px;
+                padding: 14px 28px;
+                background: white;
+                color: #667eea;
+                border-radius: 10px;
+                text-decoration: none;
+                font-weight: bold;
+                display: inline-block;
+            }}
+            .btn:hover {{ opacity: 0.9; }}
+            .btn-secondary {{
+                background: rgba(255,255,255,0.2);
+                color: white;
+                font-size: 0.9em;
+            }}
+            .links {{ margin-top: 25px; }}
+            #status {{ font-size: 0.85em; opacity: 0.8; margin-top: 15px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎬 Installing Addon...</h1>
+            <div class="spinner"></div>
+            <p id="status">Opening Stremio to install addon...</p>
+            <div class="links" style="display:none" id="fallback">
+                <p>If Stremio didn't open automatically:</p>
+                <a href="{stremio_url}" class="btn">Install in Stremio</a><br>
+                <a href="https://web.stremio.com/#/addons" class="btn btn-secondary">Open Stremio Web</a>
+            </div>
+        </div>
+        <script>
+            var isAndroid = /android/i.test(navigator.userAgent);
+            var manifestUrl = "{manifest_url}";
+            
+            if (isAndroid) {{
+                // Android: use intent:// to open Stremio and pass the manifest URL
+                var intentUrl = "intent://" + manifestUrl.replace(/^https?:\\/\\//, '') + "#Intent;scheme=stremio;package=com.stremio.one;end";
+                window.location.href = intentUrl;
+            }} else {{
+                // Desktop: stremio:// protocol
+                window.location.href = "{stremio_url}";
+            }}
+            
             setTimeout(function() {{
                 document.getElementById('fallback').style.display = 'block';
                 document.getElementById('status').textContent = 'Taking too long?';

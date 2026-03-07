@@ -6,13 +6,14 @@ from Backend.config import Telegram
 @Client.on_message(filters.command('start') & filters.private & CustomFilters.owner, group=10)
 async def send_start_message(client: Client, message: Message):
     try:
-        base_url = Telegram.BASE_URL
-        addon_url = f"{base_url}/stremio/manifest.json"
+        base_url = Telegram.BASE_URL.rstrip('/')
+        install_url = f"{base_url}/stremio/install"
 
         await message.reply_text(
-            '<b>Welcome to the main Telegram Stremio bot!</b>\n\n'
-            'To install the Stremio addon, copy the URL below and add it in the Stremio addons:\n\n'
-            f'<b>Your Addon URL:</b>\n<code>{addon_url}</code>',
+            '<b>🎬 Telegram Stremio Addon</b>\n\n'
+            'Click the link below to install the addon in Stremio:\n\n'
+            f'<b>Install URL:</b>\n<code>{install_url}</code>\n\n'
+            '👆 Open this link in any browser — it will automatically open Stremio and install the addon on Android, Windows, and Linux.',
             quote=True,
             parse_mode=enums.ParseMode.HTML
         )
