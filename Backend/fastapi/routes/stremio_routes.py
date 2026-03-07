@@ -508,13 +508,17 @@ async def stremio_install(request: Request):
     """
     Redirect to install this addon in Stremio.
     Works on Android (via intent://), Windows, and Linux (via stremio://).
-    Same pattern as /open/ endpoint.
+    Uses the actual request hostname so cloudflare tunnel URLs work correctly.
     """
     from fastapi.responses import HTMLResponse
     
-    manifest_url = f"{BASE_URL}/stremio/manifest.json"
+    # Build manifest URL from the actual request host (not BASE_URL)
+    # So clicking https://cloudflare-tunnel.com/stremio/install → stremio://cloudflare-tunnel.com/stremio/manifest.json
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.hostname))
+    manifest_url = f"{scheme}://{host}/stremio/manifest.json"
     # stremio:// URL for desktop
-    stremio_url = manifest_url.replace('https://', 'stremio://').replace('http://', 'stremio://')
+    stremio_url = f"stremio://{host}/stremio/manifest.json"
     
     html_content = f"""
     <!DOCTYPE html>
