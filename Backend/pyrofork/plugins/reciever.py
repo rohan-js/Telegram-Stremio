@@ -156,7 +156,15 @@ async def file_receive_handler(client: Client, message: Message):
             )
             if message.video or is_video_doc:
                 file = message.video or message.document
-                title = message.caption or file.file_name
+                
+                # Prefer file_name over caption - captions often contain junk text
+                # (watermarks, @mentions, translation info, promo text)
+                file_name = getattr(file, 'file_name', None) or ''
+                if file_name and file_name.lower().endswith(video_extensions):
+                    title = file_name
+                else:
+                    title = message.caption or file_name or 'unknown'
+                
                 msg_id = message.id
                 size = get_readable_file_size(file.file_size)
                 channel = str(message.chat.id).replace("-100", "")
