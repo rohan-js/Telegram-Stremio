@@ -121,30 +121,11 @@ def clean_filename(filename):
     watermark_pattern = r'_@[A-Za-z0-9]+_|@[A-Za-z0-9]+_|[\[\]\s@]*@[^.\s\[\]]+[\]\[\s@]*'
     cleaned = re.sub(watermark_pattern, ' ', cleaned)
     
-    # 7. Remove language and quality tags that don't help with title matching
-    cleaned = re.sub(
-        r'\b(?:Telugu|Tamil|Hindi|Malayalam|Kannada|Bengali|Marathi|Punjabi|'
-        r'English|Dubbed|Dual\s*Audio|Multi\s*Audio|'
-        r'HQ|HDRi|HDRip|HDR|WEB-DL|WEBRip|BluRay|BRRip|DVDRip|HDTV|'
-        r'CAMRip|HDCAM|HDCAMRip|PreDVD|DVDScr|'
-        r'720p|1080p|2160p|4K|UHD|FHD|HD|SD|'
-        r'x264|x265|HEVC|H\.264|H\.265|AVC|'
-        r'AAC|AC3|DTS|MP3|FLAC|'
-        r'ESub|ESubs|HardSub|SoftSub|SubsIncluded)\b',
-        ' ', cleaned, flags=re.IGNORECASE
-    )
+    # 7. Replace underscores and dots with spaces (but preserve dots before extensions)
+    # This helps PTN parse filenames like "Joseph.2018.Malayalam.AMZN.WEB-DL.1080p.mkv"
+    cleaned = re.sub(r'[_]', ' ', cleaned)
     
-    # 8. Remove streaming service and release group tags
-    cleaned = re.sub(
-        r'\b(?:org|AMZN|Amazon|NF|Netflix|DDP|DD|TVDL|HDHub4u|'
-        r'HDHub|FilmCorner|MovieHub|TvShows|WebSeries|FILMCORNERMAIN|'
-        r'YTS|YIFY|RARBG|PSA|Pahe|TamilRockers|Tamilmv|'
-        r'5\.1|2\.1|2\.0|7\.0|7\.1|5\.0|~|\d+kbps|'
-        r'CK|MX|TG|MKVKING|MkvHub)\b',
-        ' ', cleaned, flags=re.IGNORECASE
-    )
-    
-    # 9. Remove brackets that only contain junk (emojis, @mentions, etc.)
+    # 8. Remove brackets that only contain junk (emojis, @mentions, etc.)
     cleaned = re.sub(r'\[\s*\]|\(\s*\)', '', cleaned)
     
     # 10. Clean up parentheses with junk but preserve year markers like (2025)
