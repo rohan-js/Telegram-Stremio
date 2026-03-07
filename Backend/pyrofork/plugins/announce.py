@@ -11,18 +11,17 @@ async def announce_addon(client: Client, message: Message):
     # Use cloudflare tunnel URL
     stremio_url = "stremio://herb-planning-photography-though.trycloudflare.com/stremio/manifest.json"
     addon_url = "https://herb-planning-photography-though.trycloudflare.com/stremio/manifest.json"
+    install_url = "https://herb-planning-photography-though.trycloudflare.com/stremio/install"
     
     text = (
         "🎬 <b>Telegram Stremio Addon</b>\n\n"
-        "To install the Stremio addon, copy the URL below and add it in the Stremio addons:\n\n"
-        f"<b>Your Addon URL:</b>\n"
-        f"<code>{stremio_url}</code>\n\n"
-        "👆 Copy the URL above and paste in Stremio → Addons → Install from URL"
+        "Click the button below to install the addon in Stremio:"
     )
     
     # Use https:// URLs for buttons (Telegram doesn't allow custom protocols like stremio://)
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌐 Open Addon Page", url=addon_url)]
+        [InlineKeyboardButton("🖥️ Install (Windows/Linux)", url=install_url)],
+        [InlineKeyboardButton("📱 Install (Android)", url=install_url)]
     ])
     
     success_count = 0
