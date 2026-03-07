@@ -23,8 +23,7 @@ async def announce_addon(client: Client, message: Message):
     
     # Use https:// URLs for buttons (Telegram doesn't allow custom protocols like stremio://)
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖥️ Install (Windows/Linux)", url=install_url)],
-        [InlineKeyboardButton("📱 Install (Android)", url=install_url)]
+        [InlineKeyboardButton("⬇️ Install Addon", url=install_url)]
     ])
     
     success_count = 0
