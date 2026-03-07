@@ -107,25 +107,27 @@ def clean_filename(filename):
     promo_phrases = re.compile(
         r'(?:^|\s)(?:JOIN\s*NOW|SUBSCRIBE\s*NOW|DOWNLOAD\s*NOW|GET\s*NOW|'
         r'VISIT\s*NOW|JOIN\s*US|SUBSCRIBE\s*TO|DOWNLOAD\s*FROM|'
-        r'@\w+|FROM\s*@\w+|POWERED\s*BY|PRESENTED\s*BY|'
+        r'@[A-Za-z0-9]+|FROM\s*@[A-Za-z0-9]+|POWERED\s*BY|PRESENTED\s*BY|'
         r'NMX\s*NAVARASA\s*SIGMA\s*IBA\s*WEBSERIES|'
         r'NMX\s*NAVARASA|SIGMA\s*IBA)[\s\-:]*',
         re.IGNORECASE
     )
     cleaned = promo_phrases.sub(' ', cleaned)
     
-    # 5. Remove @username patterns anywhere
-    cleaned = re.sub(r'@[A-Za-z0-9_]+', '', cleaned)
+    # 5. Remove @username patterns anywhere (exclude underscore to preserve connected content)
+    cleaned = re.sub(r'@[A-Za-z0-9]+', '', cleaned)
     
     # 6. Remove common Telegram channel watermarks in various formats
     watermark_pattern = r'_@[A-Za-z0-9]+_|@[A-Za-z0-9]+_|[\[\]\s@]*@[^.\s\[\]]+[\]\[\s@]*'
     cleaned = re.sub(watermark_pattern, ' ', cleaned)
     
-    # 7. Replace underscores and dots with spaces (but preserve dots before extensions)
-    # This helps PTN parse filenames like "Joseph.2018.Malayalam.AMZN.WEB-DL.1080p.mkv"
+    # 7. Remove file extension BEFORE normalization (so dots aren't replaced first)
+    cleaned = re.sub(r'\.(mkv|mp4|avi|mov|wmv|flv|webm)$', '', cleaned, flags=re.IGNORECASE)
+    
+    # 8. Replace underscores with spaces
     cleaned = re.sub(r'[_]', ' ', cleaned)
     
-    # 8. Remove brackets that only contain junk (emojis, @mentions, etc.)
+    # 9. Remove brackets that only contain junk (emojis, @mentions, etc.)
     cleaned = re.sub(r'\[\s*\]|\(\s*\)', '', cleaned)
     
     # 10. Clean up parentheses with junk but preserve year markers like (2025)
@@ -142,12 +144,6 @@ def clean_filename(filename):
         re.IGNORECASE
     )
     cleaned = junk_start.sub('', cleaned)
-    
-    # 13. Restore periods before file extensions
-    cleaned = cleaned.replace(' .', '.')
-    
-    # 14. Remove file extension for cleaner title matching
-    cleaned = re.sub(r'\.(mkv|mp4|avi|mov|wmv|flv|webm)$', '', cleaned, flags=re.IGNORECASE)
     
     # 15. Final cleanup - ensure we have something useful
     cleaned = cleaned.strip()
