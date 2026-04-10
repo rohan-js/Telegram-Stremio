@@ -61,6 +61,11 @@ class Database:
             else:
                 self.current_db_index = state["current_index"]
 
+            tracking_db = self.dbs["tracking"]
+            await tracking_db["access_logs"].create_index([("logged_at", DESCENDING)])
+            await tracking_db["access_logs"].create_index([("event_type", ASCENDING), ("logged_at", DESCENDING)])
+            await tracking_db["stream_analytics"].create_index([("logged_at", DESCENDING)])
+
             LOGGER.info(f"Active storage DB: storage_{self.current_db_index}")
 
         except Exception as e:
@@ -990,3 +995,203 @@ class Database:
             }}
         )
         return result.modified_count > 0
+
+    async def log_event(self, collection: str, payload: dict) -> dict:
+        document = dict(payload or {})
+        document.setdefault("logged_at", datetime.utcnow())
+        result = await self.dbs["tracking"][collection].insert_one(document)
+        document["_id"] = result.inserted_id
+        return convert_objectid_to_str(document)
+
+    async def log_access_event(self, payload: dict) -> dict:
+        payload = dict(payload or {})
+        payload.setdefault("event_type", "stream_access")
+        payload.setdefault("status", "success")
+        return await self.log_event("access_logs", payload)
+
+    async def log_admin_action(self, action: str, actor: str = None, status: str = "success", details: dict = None) -> dict:
+        return await self.log_event("access_logs", {
+            "event_type": "admin_action",
+            "action": action,
+            "actor": actor,
+            "status": status,
+            "details": details or {},
+        })
+
+    async def log_stream_stats(self, stats: dict) -> dict:
+        payload = dict(stats or {})
+        payload.setdefault("event_type", "stream_analytics")
+        payload.setdefault("logged_at", datetime.utcnow())
+        payload.setdefault("duration_sec", float(payload.get("duration", 0) or payload.get("duration_sec", 0) or 0))
+        return await self.log_event("stream_analytics", payload)
+
+    async def get_stream_analytics(self, limit: int = 200) -> dict:
+        """Return summary stats + recent stream records from the tracking DB."""
+        try:
+            col = self.dbs["tracking"]["stream_analytics"]
+
+            pipeline = [
+                {"$group": {
+                    "_id": None,
+                    "total_streams": {"$sum": 1},
+                    "total_bytes": {"$sum": "$total_bytes"},
+                    "avg_speed": {"$avg": "$avg_mbps"},
+                    "peak_speed": {"$max": "$peak_mbps"},
+                    "avg_duration": {"$avg": "$duration_sec"},
+                }},
+            ]
+            agg = await col.aggregate(pipeline).to_list(1)
+            summary = agg[0] if agg else {}
+            summary.pop("_id", None)
+
+            per_client_pipeline = [
+                {"$group": {
+                    "_id": "$client_index",
+                    "streams": {"$sum": 1},
+                    "avg_mbps": {"$avg": "$avg_mbps"},
+                    "peak_mbps": {"$max": "$peak_mbps"},
+                    "total_bytes": {"$sum": "$total_bytes"},
+                }},
+                {"$sort": {"_id": 1}},
+            ]
+            per_client = await col.aggregate(per_client_pipeline).to_list(None)
+            for row in per_client:
+                row["client_index"] = row.pop("_id")
+                row["avg_mbps"] = round(row.get("avg_mbps", 0), 3)
+                row["peak_mbps"] = round(row.get("peak_mbps", 0), 3)
+
+            recent_cursor = col.find(
+                {},
+                {
+                    "_id": 0,
+                    "stream_id": 1,
+                    "client_index": 1,
+                    "dc_id": 1,
+                    "total_bytes": 1,
+                    "duration_sec": 1,
+                    "avg_mbps": 1,
+                    "peak_mbps": 1,
+                    "status": 1,
+                    "logged_at": 1,
+                    "title": 1,
+                    "meta": 1,
+                    "token": 1,
+                    "token_name": 1,
+                    "user_id": 1,
+                    "user_name": 1,
+                },
+            ).sort("logged_at", DESCENDING).limit(limit)
+            recent = await recent_cursor.to_list(None)
+            for r in recent:
+                if "logged_at" in r and r["logged_at"]:
+                    r["logged_at"] = r["logged_at"].isoformat()
+
+            return {
+                "summary": summary,
+                "per_client": per_client,
+                "recent": recent,
+            }
+        except Exception as e:
+            LOGGER.error(f"get_stream_analytics error: {e}")
+            return {"summary": {}, "per_client": [], "recent": []}
+
+    async def get_usage_dashboard(self, limit: int = 100) -> dict:
+        try:
+            tokens = await self.get_all_api_tokens()
+            token_rows = []
+            token_map = {item.get("token"): item for item in tokens}
+
+            for token in tokens:
+                usage = token.get("usage", {})
+                limits = token.get("limits", {})
+                daily_bytes = usage.get("daily", {}).get("bytes", 0)
+                monthly_bytes = usage.get("monthly", {}).get("bytes", 0)
+                total_bytes = usage.get("total_bytes", 0)
+                token_rows.append({
+                    "name": token.get("name"),
+                    "token": token.get("token"),
+                    "created_at": token.get("created_at").isoformat() if token.get("created_at") else None,
+                    "daily_bytes": daily_bytes,
+                    "monthly_bytes": monthly_bytes,
+                    "total_bytes": total_bytes,
+                    "daily_limit_gb": limits.get("daily_limit_gb", 0),
+                    "monthly_limit_gb": limits.get("monthly_limit_gb", 0),
+                    "limit_exceeded": token.get("limit_exceeded"),
+                })
+
+            token_rows.sort(key=lambda item: item.get("total_bytes", 0), reverse=True)
+
+            access_col = self.dbs["tracking"]["access_logs"]
+            total_events = await access_col.count_documents({})
+            stream_events = await access_col.count_documents({"event_type": "stream_access"})
+            admin_events = await access_col.count_documents({"event_type": "admin_action"})
+            failures = await access_col.count_documents({"status": {"$in": ["error", "failed", "denied"]}})
+
+            token_pipeline = [
+                {"$match": {"event_type": "stream_access", "token": {"$exists": True, "$ne": None}}},
+                {"$group": {
+                    "_id": "$token",
+                    "events": {"$sum": 1},
+                    "last_seen": {"$max": "$logged_at"},
+                }},
+                {"$sort": {"events": -1}},
+            ]
+            token_activity = await access_col.aggregate(token_pipeline).to_list(None)
+            for row in token_activity:
+                token_value = row.get("_id")
+                token_doc = token_map.get(token_value, {})
+                row["token"] = token_value
+                row["name"] = token_doc.get("name") or token_value[:8]
+                row["total_bytes"] = token_doc.get("usage", {}).get("total_bytes", 0)
+                row["daily_bytes"] = token_doc.get("usage", {}).get("daily", {}).get("bytes", 0)
+                row["monthly_bytes"] = token_doc.get("usage", {}).get("monthly", {}).get("bytes", 0)
+                row["daily_limit_gb"] = token_doc.get("limits", {}).get("daily_limit_gb", 0)
+                row["monthly_limit_gb"] = token_doc.get("limits", {}).get("monthly_limit_gb", 0)
+                if row.get("last_seen"):
+                    row["last_seen"] = row["last_seen"].isoformat()
+                row.pop("_id", None)
+
+            recent_cursor = access_col.find({}, {"_id": 0}).sort("logged_at", DESCENDING).limit(limit)
+            recent = await recent_cursor.to_list(None)
+            for item in recent:
+                if item.get("logged_at"):
+                    item["logged_at"] = item["logged_at"].isoformat()
+
+            recent_admin = [item for item in recent if item.get("event_type") == "admin_action"]
+            recent_streams = [item for item in recent if item.get("event_type") == "stream_access"]
+
+            total_bytes = sum(token.get("usage", {}).get("total_bytes", 0) for token in tokens)
+            daily_bytes = sum(token.get("usage", {}).get("daily", {}).get("bytes", 0) for token in tokens)
+            monthly_bytes = sum(token.get("usage", {}).get("monthly", {}).get("bytes", 0) for token in tokens)
+
+            stream_analytics = await self.get_stream_analytics(limit=limit)
+
+            return {
+                "summary": {
+                    "total_events": total_events,
+                    "stream_events": stream_events,
+                    "admin_events": admin_events,
+                    "failures": failures,
+                    "tracked_tokens": len(tokens),
+                    "total_bytes": total_bytes,
+                    "daily_bytes": daily_bytes,
+                    "monthly_bytes": monthly_bytes,
+                },
+                "tokens": token_rows,
+                "token_activity": token_activity,
+                "recent": recent,
+                "recent_admin": recent_admin,
+                "recent_streams": recent_streams,
+                "stream_analytics": stream_analytics,
+            }
+        except Exception as e:
+            LOGGER.error(f"get_usage_dashboard error: {e}")
+            return {
+                "summary": {},
+                "tokens": [],
+                "token_activity": [],
+                "recent": [],
+                "recent_admin": [],
+                "recent_streams": [],
+                "stream_analytics": {"summary": {}, "per_client": [], "recent": []},
+            }

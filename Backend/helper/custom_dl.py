@@ -349,6 +349,19 @@ class ByteStreamer:
                     })
 
                     try:
+                        from Backend import db
+                        await db.log_stream_stats({
+                            **entry,
+                            "stream_id": stream_id,
+                            "duration_sec": duration,
+                            "total_bytes": total_bytes,
+                            "avg_mbps": avg_mbps,
+                            "peak_mbps": entry.get("peak_mbps", 0.0),
+                        })
+                    except Exception as e:
+                        LOGGER.error(f"Failed to persist stream analytics for {stream_id}: {e}")
+
+                    try:
                         RECENT_STREAMS.appendleft(ACTIVE_STREAMS.pop(stream_id))
                     except KeyError:
                         pass

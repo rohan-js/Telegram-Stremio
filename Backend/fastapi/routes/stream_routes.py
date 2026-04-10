@@ -70,15 +70,12 @@ def select_best_client(target_dc: int) -> int:
         if client_dc == target_dc and client_idx in multi_clients:
             matching_dc_clients.append((client_idx, work_loads.get(client_idx, 0)))
 
-
-    # # -------------Don't use part of code at now ----------------------------
-    # if matching_dc_clients:
-    #     selected = min(matching_dc_clients, key=lambda x: x[1])[0]
-    #     LOGGER.info(
-    #         f"Selected client {selected} (DC {target_dc} match) with workload {work_loads[selected]}"
-    #     )
-    #     return selected
-    # # -------------------------------------------------------------------------
+    if matching_dc_clients:
+        selected = min(matching_dc_clients, key=lambda x: x[1])[0]
+        LOGGER.debug(
+            f"Selected client {selected} (DC {target_dc} match) with workload {work_loads[selected]}"
+        )
+        return selected
 
     if multi_clients:
         selected = min(work_loads, key=work_loads.get)
@@ -90,6 +87,29 @@ def select_best_client(target_dc: int) -> int:
         return selected
 
     return 0
+
+
+def get_adaptive_chunk_size(file_size: int, req_length: int, active_streams: int) -> int:
+    base = max(256 * 1024, Telegram.CHUNK_SIZE_KB * 1024)
+    if not Telegram.ADAPTIVE_CHUNK:
+        return base
+
+    if req_length >= 64 * 1024 * 1024:
+        candidate = 2 * 1024 * 1024
+    elif req_length >= 16 * 1024 * 1024:
+        candidate = 1024 * 1024
+    elif req_length >= 4 * 1024 * 1024:
+        candidate = 768 * 1024
+    else:
+        candidate = 512 * 1024
+
+    if file_size < 128 * 1024 * 1024:
+        candidate = min(candidate, 768 * 1024)
+
+    if active_streams >= 3:
+        candidate = max(512 * 1024, candidate // 2)
+
+    return max(256 * 1024, min(2 * 1024 * 1024, candidate))
 
 
 async def track_usage_from_stats(stream_id: str, token: str, token_data: dict):
@@ -160,6 +180,16 @@ async def track_usage_from_stats(stream_id: str, token: str, token_data: dict):
                     LOGGER.error(f"Cancelled usage update failed: {e}")
 
 
+async def _legacy_token_data() -> dict:
+    """Fallback token data for legacy /dl/{id}/{name} links."""
+    return {
+        "name": "legacy",
+        "user_id": None,
+        "limits": {},
+        "usage": {"daily": {"bytes": 0}, "monthly": {"bytes": 0}},
+    }
+
+
 @router.get("/dl/{token}/{id}/{name}")
 @router.head("/dl/{token}/{id}/{name}")
 async def stream_handler(
@@ -178,6 +208,26 @@ async def stream_handler(
     message = await StreamBot.get_messages(chat_id, int(msg_id))
     file = message.video or message.document
     secure_hash = file.file_unique_id[:6]
+    stream_id = secrets.token_hex(8)
+
+    try:
+        asyncio.create_task(db.log_access_event({
+            "event_type": "stream_access",
+            "stream_id": stream_id,
+            "token": token,
+            "token_name": token_data.get("name") if token_data else None,
+            "user_id": token_data.get("user_id") if token_data else None,
+            "chat_id": chat_id,
+            "msg_id": int(msg_id),
+            "media_name": name,
+            "file_name": getattr(file, "file_name", None),
+            "file_size": getattr(file, "file_size", None),
+            "client_host": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent"),
+            "path": str(request.url.path),
+        }))
+    except Exception as e:
+        LOGGER.debug(f"Unable to enqueue stream access log: {e}")
 
     return await media_streamer(
         request=request,
@@ -186,7 +236,70 @@ async def stream_handler(
         secure_hash=secure_hash,
         token=token,
         token_data=token_data,
+        stream_id=stream_id,
     )
+
+
+@router.get("/dl/{id}/{name}")
+@router.head("/dl/{id}/{name}")
+async def stream_handler_legacy(
+    request: Request,
+    id: str,
+    name: str,
+):
+    """Backward-compatible streaming route for links without API token."""
+    decoded = await decode_string(id)
+    msg_id = decoded.get("msg_id")
+    if not msg_id:
+        raise HTTPException(status_code=400, detail="Missing id")
+
+    chat_id = int(f"-100{decoded['chat_id']}")
+    message = await StreamBot.get_messages(chat_id, int(msg_id))
+    file = message.video or message.document
+    secure_hash = file.file_unique_id[:6]
+    stream_id = secrets.token_hex(8)
+    token_data = await _legacy_token_data()
+
+    try:
+        asyncio.create_task(db.log_access_event({
+            "event_type": "stream_access",
+            "stream_id": stream_id,
+            "token": "legacy",
+            "token_name": "legacy",
+            "user_id": None,
+            "chat_id": chat_id,
+            "msg_id": int(msg_id),
+            "media_name": name,
+            "file_name": getattr(file, "file_name", None),
+            "file_size": getattr(file, "file_size", None),
+            "client_host": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent"),
+            "path": str(request.url.path),
+        }))
+    except Exception as e:
+        LOGGER.debug(f"Unable to enqueue legacy stream access log: {e}")
+
+    return await media_streamer(
+        request=request,
+        chat_id=chat_id,
+        msg_id=int(msg_id),
+        secure_hash=secure_hash,
+        token="legacy",
+        token_data=token_data,
+        stream_id=stream_id,
+    )
+
+
+@router.get("/probe/audio/{id}")
+async def probe_audio_tracks_legacy(id: str):
+    """Compatibility endpoint used by older player pages.
+    Returns an empty list instead of 404 when probing is unavailable.
+    """
+    return JSONResponse({
+        "file_id": id,
+        "audio_tracks": [],
+        "cached": False,
+    })
 
 async def media_streamer(
     request: Request,
@@ -195,6 +308,7 @@ async def media_streamer(
     secure_hash: str,
     token: str,
     token_data: dict = None,
+    stream_id: str = None,
 ):
     temp_client = multi_clients[min(work_loads, key=work_loads.get)]
     if temp_client not in _streamer_by_client:
@@ -222,20 +336,27 @@ async def media_streamer(
     start, end = parse_range_header(range_header, file_size)
     req_length = end - start + 1
 
-    chunk_size = streamer.CHUNK_SIZE
+    chunk_size = get_adaptive_chunk_size(file_size, req_length, len(ACTIVE_STREAMS))
     offset = start - (start % chunk_size)
     first_part_cut = start - offset
     last_part_cut = (end % chunk_size) + 1
     part_count = math.ceil(end / chunk_size) - math.floor(offset / chunk_size)
 
-    stream_id = secrets.token_hex(8)
+    stream_id = stream_id or secrets.token_hex(8)
     meta = {
         "request_path": str(request.url.path),
         "client_host": request.client.host if request.client else None,
+        "token": token,
+        "token_name": token_data.get("name") if token_data else None,
+        "user_id": token_data.get("user_id") if token_data else None,
     }
 
-    prefetch_count = Telegram.PARALLEL
-    parallelism = Telegram.PRE_FETCH
+    active_count = max(1, len(ACTIVE_STREAMS))
+    client_count = max(1, len(multi_clients))
+    free_tier_budget = max(1, min(3, client_count + 1 - (active_count // 2)))
+
+    prefetch_count = max(1, min(Telegram.PARALLEL, free_tier_budget))
+    parallelism = max(1, min(Telegram.PRE_FETCH, free_tier_budget))
 
     body_gen = await streamer.prefetch_stream(
         file_id=file_id,
@@ -354,3 +475,28 @@ async def get_stream_detail(stream_id: str):
             return JSONResponse(make_json_safe(rec))
 
     raise HTTPException(status_code=404, detail="Stream not found")
+
+
+@router.get("/stream/health/perf")
+async def get_stream_perf_health():
+    active_count = len(ACTIVE_STREAMS)
+    recent_count = len(RECENT_STREAMS)
+    active_avg_mbps = 0.0
+    active_peak_mbps = 0.0
+
+    if active_count:
+        avgs = [float(v.get("avg_mbps", 0.0) or 0.0) for v in ACTIVE_STREAMS.values()]
+        peaks = [float(v.get("peak_mbps", 0.0) or 0.0) for v in ACTIVE_STREAMS.values()]
+        active_avg_mbps = round(sum(avgs) / len(avgs), 3)
+        active_peak_mbps = round(max(peaks), 3)
+
+    return JSONResponse(
+        {
+            "active_streams": active_count,
+            "recent_streams": recent_count,
+            "avg_active_mbps": active_avg_mbps,
+            "peak_active_mbps": active_peak_mbps,
+            "work_loads": work_loads,
+            "client_dc_map": client_dc_map,
+        }
+    )

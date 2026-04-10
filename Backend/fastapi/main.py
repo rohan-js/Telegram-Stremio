@@ -9,13 +9,15 @@ from Backend.fastapi.routes.stream_routes import router as stream_router
 from Backend.fastapi.routes.stremio_routes import router as stremio_router
 from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
-    media_management_page, edit_media_page, public_status_page, stremio_guide_page
+    media_management_page, edit_media_page, public_status_page, stremio_guide_page,
+    ops_dashboard_page, player_page, vlc_redirect
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
     delete_movie_quality_api, delete_tv_quality_api,
     delete_tv_episode_api, delete_tv_season_api,
-    create_token_api, revoke_token_api, update_token_limits_api
+    create_token_api, revoke_token_api, update_token_limits_api,
+    get_ops_dashboard_api, clear_access_logs_api
 )
 
 app = FastAPI(
@@ -68,6 +70,14 @@ async def public_status(request: Request):
 async def stremio_guide(request: Request):
     return await stremio_guide_page(request)
 
+@app.get("/player/{id}", response_class=HTMLResponse)
+async def player(request: Request, id: str):
+    return await player_page(request, id)
+
+@app.get("/vlc/{id}", response_class=HTMLResponse)
+async def vlc(request: Request, id: str):
+    return await vlc_redirect(request, id)
+
 # --- Protected Routes (Authentication Required) ---
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request, _: bool = Depends(require_auth)):
@@ -77,13 +87,17 @@ async def root(request: Request, _: bool = Depends(require_auth)):
 async def media_management(request: Request, media_type: str = "movie", _: bool = Depends(require_auth)):
     return await media_management_page(request, media_type, _)
 
+@app.get("/admin/ops", response_class=HTMLResponse)
+async def ops_dashboard(request: Request, _: bool = Depends(require_auth)):
+    return await ops_dashboard_page(request, _)
+
 @app.get("/media/edit", response_class=HTMLResponse)
 async def edit_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
     return await edit_media_page(request, tmdb_id, db_index, media_type, _)
 
 @app.get("/api/media/list")
 async def list_media(
-    media_type: str = Query("movie", regex="^(movie|tv)$"),
+    media_type: str = Query("movie", pattern="^(movie|tv)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
     search: str = Query("", max_length=100),
@@ -146,6 +160,14 @@ async def revoke_token(token: str, _: bool = Depends(require_auth)):
 async def get_system_stats(_: bool = Depends(require_auth)):
     from Backend.fastapi.routes.api_routes import get_system_stats_api
     return await get_system_stats_api()
+
+@app.get("/api/admin/ops")
+async def get_ops_dashboard(_: bool = Depends(require_auth)):
+    return await get_ops_dashboard_api()
+
+@app.post("/api/admin/access-logs/clear")
+async def clear_access_logs(_: bool = Depends(require_auth)):
+    return await clear_access_logs_api()
 
 @app.exception_handler(401)
 async def auth_exception_handler(request: Request, exc):

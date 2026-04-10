@@ -11,9 +11,15 @@ class Telegram:
 
     BASE_URL = getenv("BASE_URL", "").rstrip('/')
     PORT = int(getenv("PORT", "8000"))
+    UVICORN_KEEPALIVE = int(getenv("UVICORN_KEEPALIVE", "20"))
+    UVICORN_BACKLOG = int(getenv("UVICORN_BACKLOG", "1024"))
+    UVICORN_CONCURRENCY = int(getenv("UVICORN_CONCURRENCY", "80"))
 
     PARALLEL = int(getenv("PARALLEL", "1"))
     PRE_FETCH = int(getenv("PRE_FETCH", "1"))
+    CHUNK_SIZE_KB = int(getenv("CHUNK_SIZE_KB", "1024"))
+    ADAPTIVE_CHUNK = getenv("ADAPTIVE_CHUNK", "true").lower() == "true"
+    LEGACY_FALLBACK_STREAM = getenv("LEGACY_FALLBACK_STREAM", "true").lower() == "true"
 
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
     DATABASE = [db.strip() for db in (getenv("DATABASE") or "").split(",") if db.strip()]
@@ -31,4 +37,7 @@ class Telegram:
 
     ADMIN_USERNAME = getenv("ADMIN_USERNAME", "fyvio")
     ADMIN_PASSWORD = getenv("ADMIN_PASSWORD", "fyvio")
+
+    ADMIN_ALERT_CHAT_ID = int(getenv("ADMIN_ALERT_CHAT_ID", str(OWNER_ID)))
+    ADMIN_ALERTS_ENABLED = getenv("ADMIN_ALERTS_ENABLED", "true").lower() == "true"
     

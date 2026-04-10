@@ -2,51 +2,68 @@ from asyncio import get_event_loop, sleep as asleep
 import asyncio
 import logging
 from traceback import format_exc
+from datetime import datetime, timezone
 from pyrogram import idle
+from pyrogram.errors import FloodWait
 from Backend import __version__, db
 from Backend.helper.pinger import ping
 from Backend.logger import LOGGER
 from Backend.fastapi import server
-from Backend.helper.pyro import restart_notification, setup_bot_commands
+from Backend.helper.pyro import restart_notification, setup_bot_commands, notify_admin
 from Backend.pyrofork.bot import Helper, StreamBot
 from Backend.pyrofork.clients import initialize_clients
 
 loop = get_event_loop()
 
+
+async def _start_client_with_retry(client, label: str):
+    while True:
+        try:
+            await client.start()
+            return
+        except FloodWait as e:
+            wait_for = int(getattr(e, "value", 60)) + 5
+            LOGGER.warning(f"{label} hit FloodWait. Retrying in {wait_for}s")
+            await asleep(wait_for)
+
 async def start_services():
     try:
         LOGGER.info(f"Initializing Telegram-Stremio v-{__version__}")
-        await asleep(1.2)
-        
+
         await db.connect()
-        await asleep(1.2)
-        
-        await StreamBot.start()
+
+        LOGGER.info('Initializing Telegram-Stremio Web Server...')
+        loop.create_task(server.serve())
+        loop.create_task(ping())
+
+        await _start_client_with_retry(StreamBot, "Bot Client")
         StreamBot.username = StreamBot.me.username
         LOGGER.info(f"Bot Client : [@{StreamBot.username}]")
-        await asleep(1.2)
 
-        await Helper.start()
+        await _start_client_with_retry(Helper, "Helper Bot Client")
         Helper.username = Helper.me.username
         LOGGER.info(f"Helper Bot Client : [@{Helper.username}]")
-        await asleep(1.2)
 
         LOGGER.info("Initializing Multi Clients...")
         await initialize_clients()
-        await asleep(2)
 
-        await setup_bot_commands(StreamBot)
-        await asleep(2)
-
-        LOGGER.info('Initializing Telegram-Stremio Web Server...')
-        await restart_notification()
-        loop.create_task(server.serve())
-        loop.create_task(ping())
+        await asyncio.gather(
+            setup_bot_commands(StreamBot),
+            restart_notification(),
+        )
         
         LOGGER.info("Telegram-Stremio Started Successfully!")
+        await notify_admin(
+            f"<b>Telegram-Stremio is online.</b>\n\nVersion: {__version__}\nTime: {datetime.now(timezone.utc).isoformat()}"
+        )
         await idle()
     except Exception:
-        LOGGER.error("Error during startup:\n" + format_exc())
+        error_text = format_exc()
+        LOGGER.error("Error during startup:\n" + error_text)
+        try:
+            await notify_admin(f"<b>Telegram-Stremio startup error</b>\n<pre>{error_text[-3500:]}</pre>")
+        except Exception:
+            pass
 
 async def stop_services():
     try:
@@ -58,8 +75,15 @@ async def stop_services():
         
         await asyncio.gather(*pending_tasks, return_exceptions=True)
 
-        await StreamBot.stop()
-        await Helper.stop()
+        try:
+            await StreamBot.stop()
+        except Exception:
+            pass
+
+        try:
+            await Helper.stop()
+        except Exception:
+            pass
 
         await db.disconnect()
         

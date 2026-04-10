@@ -141,12 +141,29 @@ async def restart_notification():
         LOGGER.error(f"Error in restart_notification: {e}")
 
 
+async def notify_admin(message: str, parse_mode=enums.ParseMode.HTML):
+    if not Telegram.ADMIN_ALERTS_ENABLED:
+        return
+
+    try:
+        await StreamBot.send_message(
+            chat_id=Telegram.ADMIN_ALERT_CHAT_ID,
+            text=message,
+            parse_mode=parse_mode,
+            disable_web_page_preview=True,
+        )
+    except Exception as e:
+        LOGGER.error(f"Error sending admin notification: {e}")
+
+
 # Bot commands
 commands = [
     BotCommand("start", "🚀 Start the bot"),
     BotCommand("set", "🎬 Manually add IMDb metadata"),
     # BotCommand("fixmetadata", "⚙️ Fix empty fields of Metadata"),
+    BotCommand("announce", "📌 Post and pin addon install message"),
     BotCommand("log", "📄 Send the log file"),
+    BotCommand("ops", "📊 Operations dashboard summary"),
     BotCommand("restart", "♻️ Restart the bot"),
 ]
 

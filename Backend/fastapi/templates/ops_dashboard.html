@@ -1,0 +1,385 @@
+{% extends "base.html" %}
+
+{% block title %}Operations Dashboard - Telegram Stremio{% endblock %}
+
+{% block content %}
+<div class="min-h-screen pb-12">
+    <section class="relative overflow-hidden">
+        <div class="absolute inset-0 theme-primary opacity-10"></div>
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 relative">
+            <div class="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                    <p class="uppercase tracking-[0.25em] text-xs theme-text-secondary mb-3">Operations Center</p>
+                    <h1 class="text-4xl md:text-5xl font-black text-text leading-tight">Usage, access, and audit control.</h1>
+                    <p class="mt-4 max-w-3xl text-base theme-text-secondary">
+                        Monitor who is streaming, how much bandwidth they use, which tokens are active, and what the system is doing right now.
+                    </p>
+                </div>
+                <div class="flex flex-wrap gap-3">
+                    <button onclick="refreshOps()" class="theme-primary text-white px-5 py-3 rounded-xl font-semibold shadow-lg hover:opacity-90 transition-all">
+                        Refresh Data
+                    </button>
+                    <button onclick="clearAccessLogs()" class="bg-red-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg hover:bg-red-700 transition-all">
+                        Clear Access Logs
+                    </button>
+                    <a href="/" class="bg-white/70 text-text px-5 py-3 rounded-xl font-semibold shadow-lg hover:bg-white transition-all">Back to Dashboard</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+        <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4 -mt-2" id="summary-grid">
+            <div class="theme-card rounded-2xl p-6 shadow-xl border border-white/10">
+                <div class="text-xs uppercase tracking-widest theme-text-secondary mb-2">Total Events</div>
+                <div class="text-3xl font-black text-text" id="summary-total-events">0</div>
+                <div class="mt-2 text-sm theme-text-secondary">All logged actions</div>
+            </div>
+            <div class="theme-card rounded-2xl p-6 shadow-xl border border-white/10">
+                <div class="text-xs uppercase tracking-widest theme-text-secondary mb-2">Stream Events</div>
+                <div class="text-3xl font-black text-text" id="summary-stream-events">0</div>
+                <div class="mt-2 text-sm theme-text-secondary">Playback sessions tracked</div>
+            </div>
+            <div class="theme-card rounded-2xl p-6 shadow-xl border border-white/10">
+                <div class="text-xs uppercase tracking-widest theme-text-secondary mb-2">Admin Actions</div>
+                <div class="text-3xl font-black text-text" id="summary-admin-events">0</div>
+                <div class="mt-2 text-sm theme-text-secondary">Edits, clears, revokes</div>
+            </div>
+            <div class="theme-card rounded-2xl p-6 shadow-xl border border-white/10">
+                <div class="text-xs uppercase tracking-widest theme-text-secondary mb-2">Failures</div>
+                <div class="text-3xl font-black text-text" id="summary-failures">0</div>
+                <div class="mt-2 text-sm theme-text-secondary">Rejected or errored events</div>
+            </div>
+        </section>
+
+        <section class="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
+            <div class="theme-card rounded-2xl p-6 shadow-xl border border-white/10">
+                <div class="flex items-center justify-between gap-4 mb-5">
+                    <div>
+                        <h2 class="text-2xl font-bold text-text">Token Usage</h2>
+                        <p class="theme-text-secondary text-sm">Track bandwidth, limits, and consumption per token.</p>
+                    </div>
+                    <div class="text-sm theme-text-secondary">Totals: <span id="summary-total-bytes" class="font-semibold text-text">0 B</span></div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-white/10 text-xs uppercase theme-text-secondary">
+                                <th class="py-3 px-3">Token</th>
+                                <th class="py-3 px-3">Today</th>
+                                <th class="py-3 px-3">Month</th>
+                                <th class="py-3 px-3">Total</th>
+                                <th class="py-3 px-3">Limits</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tokens-tbody">
+                            <tr><td colspan="5" class="py-8 text-center theme-text-secondary">Loading usage data...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="space-y-6">
+                <div class="theme-card rounded-2xl p-6 shadow-xl border border-white/10">
+                    <h2 class="text-2xl font-bold text-text mb-4">Bandwidth Snapshot</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <div class="flex justify-between text-sm mb-1"><span class="theme-text-secondary">Daily</span><span id="summary-daily-bytes" class="font-semibold text-text">0 B</span></div>
+                            <div class="w-full bg-white/10 rounded-full h-3 overflow-hidden"><div id="daily-bar" class="theme-primary h-3 rounded-full" style="width: 0%"></div></div>
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-sm mb-1"><span class="theme-text-secondary">Monthly</span><span id="summary-monthly-bytes" class="font-semibold text-text">0 B</span></div>
+                            <div class="w-full bg-white/10 rounded-full h-3 overflow-hidden"><div id="monthly-bar" class="theme-primary h-3 rounded-full" style="width: 0%"></div></div>
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-sm mb-1"><span class="theme-text-secondary">Tracked Tokens</span><span id="summary-tracked-tokens" class="font-semibold text-text">0</span></div>
+                            <div class="w-full bg-white/10 rounded-full h-3 overflow-hidden"><div id="tokens-bar" class="theme-primary h-3 rounded-full" style="width: 0%"></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="theme-card rounded-2xl p-6 shadow-xl border border-white/10">
+                    <h2 class="text-2xl font-bold text-text mb-4">Client Distribution</h2>
+                    <div id="client-breakdown" class="space-y-3 text-sm theme-text-secondary">
+                        <div>Loading client breakdown...</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="theme-card rounded-2xl p-6 shadow-xl border border-white/10">
+            <div class="flex items-center justify-between gap-4 mb-5">
+                <div>
+                    <h2 class="text-2xl font-bold text-text">Recent Access Log</h2>
+                    <p class="theme-text-secondary text-sm">Stream sessions, admin actions, and other logged events.</p>
+                </div>
+                <span class="px-3 py-1 rounded-full bg-white/10 text-sm theme-text-secondary" id="recent-events-count">0 events</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-white/10 text-xs uppercase theme-text-secondary">
+                            <th class="py-3 px-3">Time</th>
+                            <th class="py-3 px-3">Type</th>
+                            <th class="py-3 px-3">Token / Actor</th>
+                            <th class="py-3 px-3">Action</th>
+                            <th class="py-3 px-3">Path / Details</th>
+                            <th class="py-3 px-3">Status</th>
+                            <th class="py-3 px-3">IP</th>
+                        </tr>
+                    </thead>
+                    <tbody id="access-tbody">
+                        <tr><td colspan="7" class="py-8 text-center theme-text-secondary">Loading access logs...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="grid gap-6 xl:grid-cols-2">
+            <div class="theme-card rounded-2xl p-6 shadow-xl border border-white/10">
+                <div class="flex items-center justify-between gap-3 mb-5">
+                    <div>
+                        <h2 class="text-2xl font-bold text-text">Recent Admin Actions</h2>
+                        <p class="theme-text-secondary text-sm">A focused audit trail for destructive or sensitive operations.</p>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-white/10 text-xs uppercase theme-text-secondary">
+                                <th class="py-3 px-3">Time</th>
+                                <th class="py-3 px-3">Actor</th>
+                                <th class="py-3 px-3">Action</th>
+                                <th class="py-3 px-3">Status</th>
+                                <th class="py-3 px-3">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-tbody">
+                            <tr><td colspan="5" class="py-8 text-center theme-text-secondary">Loading admin audit...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="theme-card rounded-2xl p-6 shadow-xl border border-white/10">
+                <div class="flex items-center justify-between gap-3 mb-5">
+                    <div>
+                        <h2 class="text-2xl font-bold text-text">Streaming Analytics</h2>
+                        <p class="theme-text-secondary text-sm">Persisted session metrics across clients and DCs.</p>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4 mb-5">
+                    <div class="rounded-xl bg-white/5 p-4">
+                        <div class="text-xs uppercase tracking-widest theme-text-secondary">Streams</div>
+                        <div id="stream-total" class="text-3xl font-black text-text mt-2">0</div>
+                    </div>
+                    <div class="rounded-xl bg-white/5 p-4">
+                        <div class="text-xs uppercase tracking-widest theme-text-secondary">Avg Speed</div>
+                        <div id="stream-avg" class="text-3xl font-black text-text mt-2">0 MB/s</div>
+                    </div>
+                    <div class="rounded-xl bg-white/5 p-4">
+                        <div class="text-xs uppercase tracking-widest theme-text-secondary">Peak Speed</div>
+                        <div id="stream-peak" class="text-3xl font-black text-text mt-2">0 MB/s</div>
+                    </div>
+                    <div class="rounded-xl bg-white/5 p-4">
+                        <div class="text-xs uppercase tracking-widest theme-text-secondary">Bytes</div>
+                        <div id="stream-bytes" class="text-3xl font-black text-text mt-2">0 B</div>
+                    </div>
+                </div>
+                <div class="overflow-x-auto max-h-[360px] overflow-y-auto">
+                    <table class="w-full text-left border-collapse text-sm">
+                        <thead>
+                            <tr class="border-b border-white/10 text-xs uppercase theme-text-secondary sticky top-0 theme-card">
+                                <th class="py-3 px-3">Stream</th>
+                                <th class="py-3 px-3">Client</th>
+                                <th class="py-3 px-3">DC</th>
+                                <th class="py-3 px-3">Status</th>
+                                <th class="py-3 px-3">Bytes</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stream-tbody">
+                            <tr><td colspan="5" class="py-8 text-center theme-text-secondary">Loading analytics...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script>
+    function formatBytes(bytes) {
+        const value = Number(bytes || 0);
+        if (!value) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+        return `${(value / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
+    }
+
+    function formatDate(value) {
+        if (!value) return '—';
+        try {
+            return new Date(value).toLocaleString([], {
+                month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit'
+            });
+        } catch {
+            return value;
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[character]));
+    }
+
+    function statusBadge(status) {
+        const value = (status || 'success').toLowerCase();
+        if (value === 'error' || value === 'failed' || value === 'denied') return 'bg-red-500/15 text-red-300';
+        if (value === 'cancelled') return 'bg-yellow-500/15 text-yellow-200';
+        return 'bg-emerald-500/15 text-emerald-200';
+    }
+
+    async function refreshOps() {
+        const res = await fetch('/api/admin/ops');
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') return;
+
+        const payload = data.data || {};
+        const summary = payload.summary || {};
+        const tokens = payload.tokens || [];
+        const recent = payload.recent || [];
+        const recentAdmin = payload.recent_admin || [];
+        const streamAnalytics = payload.stream_analytics || {};
+        const streamSummary = streamAnalytics.summary || {};
+        const perClient = streamAnalytics.per_client || [];
+        const streamRecent = streamAnalytics.recent || [];
+
+        document.getElementById('summary-total-events').innerText = summary.total_events || 0;
+        document.getElementById('summary-stream-events').innerText = summary.stream_events || 0;
+        document.getElementById('summary-admin-events').innerText = summary.admin_events || 0;
+        document.getElementById('summary-failures').innerText = summary.failures || 0;
+        document.getElementById('summary-total-bytes').innerText = formatBytes(summary.total_bytes || 0);
+        document.getElementById('summary-daily-bytes').innerText = formatBytes(summary.daily_bytes || 0);
+        document.getElementById('summary-monthly-bytes').innerText = formatBytes(summary.monthly_bytes || 0);
+        document.getElementById('summary-tracked-tokens').innerText = summary.tracked_tokens || 0;
+
+        const dailyLimit = Math.max(summary.daily_bytes || 0, 1024 * 1024 * 1024);
+        const monthlyLimit = Math.max(summary.monthly_bytes || 0, 1024 * 1024 * 1024);
+        document.getElementById('daily-bar').style.width = `${Math.min(((summary.daily_bytes || 0) / dailyLimit) * 100, 100)}%`;
+        document.getElementById('monthly-bar').style.width = `${Math.min(((summary.monthly_bytes || 0) / monthlyLimit) * 100, 100)}%`;
+        document.getElementById('tokens-bar').style.width = `${Math.min((summary.tracked_tokens || 0) * 12, 100)}%`;
+
+        document.getElementById('recent-events-count').innerText = `${recent.length} events`;
+
+        document.getElementById('tokens-tbody').innerHTML = tokens.length ? tokens.map(token => {
+            const dailyLimitGb = Number(token.daily_limit_gb || 0);
+            const monthlyLimitGb = Number(token.monthly_limit_gb || 0);
+            const dailyBytes = Number(token.daily_bytes || 0);
+            const monthlyBytes = Number(token.monthly_bytes || 0);
+            const totalBytes = Number(token.total_bytes || 0);
+            const dailyRatio = dailyLimitGb ? Math.min((dailyBytes / (dailyLimitGb * 1024 ** 3)) * 100, 100) : 0;
+            const monthlyRatio = monthlyLimitGb ? Math.min((monthlyBytes / (monthlyLimitGb * 1024 ** 3)) * 100, 100) : 0;
+            return `
+                <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                    <td class="py-3 px-3">
+                        <div class="font-semibold text-text">${escapeHtml(token.name || 'Unnamed')}</div>
+                        <div class="text-xs theme-text-secondary font-mono">${token.token ? escapeHtml(token.token.slice(0, 8) + '...') : '—'}</div>
+                    </td>
+                    <td class="py-3 px-3 text-sm">
+                        <div class="font-semibold text-text">${formatBytes(dailyBytes)}</div>
+                        <div class="text-xs theme-text-secondary">${dailyRatio.toFixed(0)}% of limit</div>
+                    </td>
+                    <td class="py-3 px-3 text-sm">
+                        <div class="font-semibold text-text">${formatBytes(monthlyBytes)}</div>
+                        <div class="text-xs theme-text-secondary">${monthlyRatio.toFixed(0)}% of limit</div>
+                    </td>
+                    <td class="py-3 px-3 text-sm font-semibold text-text">${formatBytes(totalBytes)}</td>
+                    <td class="py-3 px-3 text-sm theme-text-secondary">
+                        <div>Daily: ${dailyLimitGb ? dailyLimitGb + ' GB' : '∞'}</div>
+                        <div>Monthly: ${monthlyLimitGb ? monthlyLimitGb + ' GB' : '∞'}</div>
+                    </td>
+                </tr>
+            `;
+        }).join('') : '<tr><td colspan="5" class="py-8 text-center theme-text-secondary">No token data available.</td></tr>';
+
+        document.getElementById('access-tbody').innerHTML = recent.length ? recent.map(item => {
+            const actor = escapeHtml(item.token_name || item.user_name || item.actor || item.token || '—');
+            const action = escapeHtml(item.action || item.event_type || 'stream');
+            const path = escapeHtml(item.path || (item.details && item.details.path) || item.media_name || '—');
+            const detail = escapeHtml(item.details ? JSON.stringify(item.details).slice(0, 90) : (item.media_name || item.title || '—'));
+            return `
+                <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                    <td class="py-3 px-3 text-xs theme-text-secondary whitespace-nowrap">${formatDate(item.logged_at)}</td>
+                    <td class="py-3 px-3 text-xs uppercase tracking-wider ${item.event_type === 'admin_action' ? 'text-sky-300' : 'text-emerald-300'}">${item.event_type || 'event'}</td>
+                    <td class="py-3 px-3 text-sm text-text">${actor}</td>
+                    <td class="py-3 px-3 text-sm text-text">${action}</td>
+                    <td class="py-3 px-3 text-xs theme-text-secondary max-w-[280px] truncate" title="${detail}">${path}</td>
+                    <td class="py-3 px-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${statusBadge(item.status)}">${item.status || 'success'}</span></td>
+                    <td class="py-3 px-3 text-xs font-mono theme-text-secondary">${item.client_host || item.ip || '—'}</td>
+                </tr>
+            `;
+        }).join('') : '<tr><td colspan="7" class="py-8 text-center theme-text-secondary">No access logs yet.</td></tr>';
+
+        document.getElementById('admin-tbody').innerHTML = recentAdmin.length ? recentAdmin.map(item => {
+            const detailsText = escapeHtml(JSON.stringify(item.details || {}));
+            return `
+                <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                    <td class="py-3 px-3 text-xs theme-text-secondary whitespace-nowrap">${formatDate(item.logged_at)}</td>
+                    <td class="py-3 px-3 text-sm text-text">${escapeHtml(item.actor || item.user_name || '—')}</td>
+                    <td class="py-3 px-3 text-sm text-text">${escapeHtml(item.action || 'admin_action')}</td>
+                    <td class="py-3 px-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${statusBadge(item.status)}">${item.status || 'success'}</span></td>
+                    <td class="py-3 px-3 text-xs theme-text-secondary max-w-[260px] truncate" title="${detailsText}">${detailsText}</td>
+                </tr>
+            `;
+        }).join('') : '<tr><td colspan="5" class="py-8 text-center theme-text-secondary">No admin actions logged.</td></tr>';
+
+        document.getElementById('stream-total').innerText = streamSummary.total_streams || 0;
+        document.getElementById('stream-avg').innerText = `${Number(streamSummary.avg_speed || 0).toFixed(2)} MB/s`;
+        document.getElementById('stream-peak').innerText = `${Number(streamSummary.peak_speed || 0).toFixed(2)} MB/s`;
+        document.getElementById('stream-bytes').innerText = formatBytes(streamSummary.total_bytes || 0);
+
+        document.getElementById('client-breakdown').innerHTML = perClient.length ? perClient.map(row => `
+            <div class="flex items-center justify-between rounded-xl bg-white/5 px-4 py-3">
+                <div>
+                    <div class="font-semibold text-text">Bot ${Number(row.client_index || 0) + 1}</div>
+                    <div class="text-xs theme-text-secondary">${row.streams || 0} streams</div>
+                </div>
+                <div class="text-right">
+                    <div class="font-semibold text-text">${Number(row.avg_mbps || 0).toFixed(2)} MB/s</div>
+                    <div class="text-xs theme-text-secondary">Peak ${Number(row.peak_mbps || 0).toFixed(2)} MB/s</div>
+                </div>
+            </div>
+        `).join('') : '<div class="theme-text-secondary">No client analytics available.</div>';
+
+        document.getElementById('stream-tbody').innerHTML = streamRecent.length ? streamRecent.map(item => `
+            <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                <td class="py-3 px-3 font-mono text-xs text-text">${(item.stream_id || '—').slice(0, 10)}</td>
+                <td class="py-3 px-3 text-xs theme-text-secondary">Bot ${Number(item.client_index || 0) + 1}</td>
+                <td class="py-3 px-3 text-xs theme-text-secondary">DC${item.dc_id || 0}</td>
+                <td class="py-3 px-3 text-xs uppercase tracking-wider text-text">${item.status || 'finished'}</td>
+                <td class="py-3 px-3 text-xs text-text">${formatBytes(item.total_bytes || 0)}</td>
+            </tr>
+        `).join('') : '<tr><td colspan="5" class="py-8 text-center theme-text-secondary">No stream sessions recorded yet.</td></tr>';
+    }
+
+    async function clearAccessLogs() {
+        if (!confirm('Clear all access logs and audit events? This cannot be undone.')) return;
+        const res = await fetch('/api/admin/access-logs/clear', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+            await refreshOps();
+            alert(data.message || 'Access logs cleared.');
+        } else {
+            alert(data.message || 'Failed to clear access logs.');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', refreshOps);
+    setInterval(refreshOps, 30000);
+</script>
+{% endblock %}

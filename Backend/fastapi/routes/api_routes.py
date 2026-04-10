@@ -5,6 +5,14 @@ from Backend.pyrofork.bot import multi_clients, StreamBot
 from time import time
 
 
+async def _audit_admin_action(action: str, details: dict = None):
+    try:
+        await db.log_admin_action(action, details=details or {})
+    except Exception as e:
+        from Backend.logger import LOGGER
+        LOGGER.debug(f"Audit log skipped for {action}: {e}")
+
+
 # --- API Routes for System Stats ---
 
 async def get_system_stats_api():
@@ -37,7 +45,7 @@ async def get_system_stats_api():
 # --- API Routes for Media Management ---
 
 async def list_media_api(
-    media_type: str = Query("movie", regex="^(movie|tv)$"),
+    media_type: str = Query("movie", pattern="^(movie|tv)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
     search: str = Query("", max_length=100)
@@ -68,12 +76,13 @@ async def list_media_api(
 async def delete_media_api(
     tmdb_id: int,
     db_index: int,
-    media_type: str = Query(regex="^(movie|tv)$")
+    media_type: str = Query(pattern="^(movie|tv)$")
 ):
     try:
         media_type_formatted = "Movie" if media_type == "movie" else "Series"
         result = await db.delete_document(media_type_formatted, tmdb_id, db_index)
         if result:
+            await _audit_admin_action("delete_media", {"tmdb_id": tmdb_id, "db_index": db_index, "media_type": media_type})
             return {"message": "Media deleted successfully"}
         else:
             raise HTTPException(status_code=404, detail="Media not found")
@@ -84,7 +93,7 @@ async def update_media_api(
     request: Request,
     tmdb_id: int,
     db_index: int,
-    media_type: str = Query(regex="^(movie|tv)$")
+    media_type: str = Query(pattern="^(movie|tv)$")
 ):
     try:
         update_data = await request.json()
@@ -131,6 +140,7 @@ async def update_media_api(
         update_data = {k: v for k, v in update_data.items() if v != ""}
         result = await db.update_document(media_type, tmdb_id, db_index, update_data)
         if result:
+            await _audit_admin_action("update_media", {"tmdb_id": tmdb_id, "db_index": db_index, "media_type": media_type, "fields": list(update_data.keys())})
             return {"message": "Media updated successfully"}
         else:
             raise HTTPException(status_code=404, detail="Media not found or no changes made")
@@ -141,7 +151,7 @@ async def update_media_api(
 async def get_media_details_api(
     tmdb_id: int,
     db_index: int,
-    media_type: str = Query(regex="^(movie|tv)$")
+    media_type: str = Query(pattern="^(movie|tv)$")
 ):
     try:
         result = await db.get_document(media_type, tmdb_id, db_index)
@@ -156,6 +166,7 @@ async def delete_movie_quality_api(tmdb_id: int, db_index: int, id: str):
     try:
         result = await db.delete_movie_quality(tmdb_id, db_index, id)
         if result:
+            await _audit_admin_action("delete_movie_quality", {"tmdb_id": tmdb_id, "db_index": db_index, "quality_id": id})
             return {"message": "Quality deleted successfully"}
         else:
             raise HTTPException(status_code=404, detail="Quality not found")
@@ -168,6 +179,7 @@ async def delete_tv_quality_api(
     try:
         result = await db.delete_tv_quality(tmdb_id, db_index, season, episode, id)
         if result:
+            await _audit_admin_action("delete_tv_quality", {"tmdb_id": tmdb_id, "db_index": db_index, "season": season, "episode": episode, "quality_id": id})
             return {"message": "deleted successfully"}
         else:
             raise HTTPException(status_code=404, detail="Quality not found")
@@ -180,6 +192,7 @@ async def delete_tv_episode_api(
     try:
         result = await db.delete_tv_episode(tmdb_id, db_index, season, episode)
         if result:
+            await _audit_admin_action("delete_tv_episode", {"tmdb_id": tmdb_id, "db_index": db_index, "season": season, "episode": episode})
             return {"message": "Episode deleted successfully"}
         else:
             raise HTTPException(status_code=404, detail="Episode not found")
@@ -190,6 +203,7 @@ async def delete_tv_season_api(tmdb_id: int, db_index: int, season: int):
     try:
         result = await db.delete_tv_season(tmdb_id, db_index, season)
         if result:
+            await _audit_admin_action("delete_tv_season", {"tmdb_id": tmdb_id, "db_index": db_index, "season": season})
             return {"message": "Season deleted successfully"}
         else:
             raise HTTPException(status_code=404, detail="Season not found")
@@ -219,6 +233,7 @@ async def create_token_api(payload: dict):
             parse_limit(daily_limit), 
             parse_limit(monthly_limit)
         )
+        await _audit_admin_action("create_token", {"name": token_name, "daily_limit_gb": parse_limit(daily_limit), "monthly_limit_gb": parse_limit(monthly_limit)})
         return new_token
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -240,6 +255,7 @@ async def update_token_limits_api(token: str, payload: dict):
             parse_limit(daily_limit),
             parse_limit(monthly_limit)
         )
+        await _audit_admin_action("update_token_limits", {"token": token, "daily_limit_gb": parse_limit(daily_limit), "monthly_limit_gb": parse_limit(monthly_limit)})
         
         if result:
             return {"message": "Limits updated successfully"}
@@ -253,8 +269,33 @@ async def revoke_token_api(token: str):
     try:
         result = await db.revoke_api_token(token)
         if result:
+            await _audit_admin_action("revoke_token", {"token": token})
             return {"message": "Token revoked successfully"}
         else:
             raise HTTPException(status_code=404, detail="Token not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Operations / Audit API Routes ---
+
+async def get_ops_dashboard_api(limit: int = 100) -> dict:
+    try:
+        data = await db.get_usage_dashboard(limit=limit)
+        return {"status": "success", "data": data}
+    except Exception as e:
+        from Backend.logger import LOGGER
+        LOGGER.error(f"Ops dashboard API error: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+async def clear_access_logs_api() -> dict:
+    try:
+        result = await db.dbs["tracking"]["access_logs"].delete_many({})
+        await _audit_admin_action("clear_access_logs", {"deleted_count": result.deleted_count})
+        return {
+            "status": "success",
+            "message": f"{result.deleted_count} access log records cleared.",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

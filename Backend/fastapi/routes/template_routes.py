@@ -1,11 +1,13 @@
 from fastapi import Request, Form, HTTPException, Depends
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from Backend.fastapi.security.credentials import verify_credentials, require_auth, is_authenticated, get_current_user
 from Backend.fastapi.themes import get_theme, get_all_themes
 from Backend import db
 from Backend.pyrofork.bot import work_loads, multi_clients, StreamBot
 from Backend.helper.pyro import get_readable_time
+from Backend.helper.encrypt import decode_string
+from Backend.config import Telegram
 from Backend import StartTime, __version__
 import time
 from Backend.helper.custom_dl import ACTIVE_STREAMS, RECENT_STREAMS
@@ -19,7 +21,7 @@ async def login_page(request: Request):
     theme_name = request.session.get("theme", "purple_gradient")
     theme = get_theme(theme_name)
     
-    return templates.TemplateResponse("login.html", {
+    return templates.TemplateResponse(request, "login.html", {
         "request": request,
         "theme": theme,
         "themes": get_all_themes(),
@@ -34,7 +36,7 @@ async def login_post(request: Request, username: str = Form(...), password: str 
     else:
         theme_name = request.session.get("theme", "purple_gradient")
         theme = get_theme(theme_name)
-        return templates.TemplateResponse("login.html", {
+        return templates.TemplateResponse(request, "login.html", {
             "request": request,
             "theme": theme,
             "themes": get_all_themes(),
@@ -133,7 +135,7 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
         }
 
     api_tokens = await db.get_all_api_tokens()
-    return templates.TemplateResponse("dashboard.html", {
+    return templates.TemplateResponse(request, "dashboard.html", {
         "request": request,
         "theme": theme,
         "themes": get_all_themes(),
@@ -144,12 +146,26 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
     })
 
 
+async def ops_dashboard_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "purple_gradient")
+    theme = get_theme(theme_name)
+    current_user = get_current_user(request)
+
+    return templates.TemplateResponse(request, "ops_dashboard.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "current_user": current_user,
+    })
+
+
 async def media_management_page(request: Request, media_type: str = "movie", _: bool = Depends(require_auth)):
     theme_name = request.session.get("theme", "purple_gradient")
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
     
-    return templates.TemplateResponse("media_management.html", {
+    return templates.TemplateResponse(request, "media_management.html", {
         "request": request,
         "theme": theme,
         "themes": get_all_themes(),
@@ -170,7 +186,7 @@ async def edit_media_page(request: Request, tmdb_id: int, db_index: int, media_t
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-    return templates.TemplateResponse("media_edit.html", {
+    return templates.TemplateResponse(request, "media_edit.html", {
         "request": request,
         "theme": theme,
         "themes": get_all_themes(),
@@ -205,7 +221,7 @@ async def public_status_page(request: Request):
             "databases_online": 0
         }
     
-    return templates.TemplateResponse("public_status.html", {
+    return templates.TemplateResponse(request, "public_status.html", {
         "request": request,
         "theme": theme,
         "themes": get_all_themes(),
@@ -217,11 +233,113 @@ async def public_status_page(request: Request):
 async def stremio_guide_page(request: Request):
     theme_name = request.session.get("theme", "purple_gradient")
     theme = get_theme(theme_name)
+    tokens = await db.get_all_api_tokens()
+
+    if tokens and tokens[0].get("token"):
+        token = tokens[0]["token"]
+    else:
+        created = await db.add_api_token("default-addon", None, None)
+        token = created.get("token")
+
+    base_url = str(request.base_url).rstrip("/")
+    addon_url = f"{base_url}/stremio/{token}/manifest.json"
     
-    return templates.TemplateResponse("stremio_guide.html", {
+    return templates.TemplateResponse(request, "stremio_guide.html", {
         "request": request,
         "theme": theme,
         "themes": get_all_themes(),
         "current_theme": theme_name,
-        "is_authenticated": is_authenticated(request)
+        "is_authenticated": is_authenticated(request),
+        "addon_url": addon_url,
     })
+
+
+async def player_page(request: Request, id: str):
+    theme_name = request.session.get("theme", "purple_gradient")
+    theme = get_theme(theme_name)
+    base_url = Telegram.BASE_URL.rstrip('/')
+
+    try:
+        decoded = await decode_string(id)
+
+        stream_url = f"{base_url}/dl/{id}/video.mkv"
+        download_url = stream_url
+
+        return templates.TemplateResponse(request, "player.html", {
+            "request": request,
+            "theme": theme,
+            "stream_url": stream_url,
+            "download_url": download_url,
+            "file_id": id,
+            "base_url": base_url,
+            "title": decoded.get("title", "Now Playing"),
+            "quality": decoded.get("quality", ""),
+            "size": decoded.get("size", ""),
+            "year": decoded.get("year", ""),
+            "stremio_link": "",
+            "error": None
+        })
+
+    except Exception as e:
+        return templates.TemplateResponse(request, "player.html", {
+            "request": request,
+            "theme": theme,
+            "stream_url": "",
+            "file_id": id,
+            "base_url": base_url,
+            "title": "Error",
+            "error": str(e)
+        })
+
+
+async def vlc_redirect(request: Request, id: str):
+    base_url = Telegram.BASE_URL.rstrip('/')
+    stream_url = f"{base_url}/dl/{id}/video.mkv"
+    user_agent = (request.headers.get("user-agent") or "").lower()
+    is_android = "android" in user_agent
+
+    if is_android:
+        intent_url = (
+            f"intent://{base_url.replace('https://', '').replace('http://', '')}"
+            f"/dl/{id}/video.mkv"
+            f"#Intent;scheme=https;package=org.videolan.vlc;type=video/*;end"
+        )
+        html = (
+            '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+            '<title>Opening VLC...</title>'
+            '<style>body{background:#0a0a1a;color:#fff;font-family:sans-serif;'
+            'display:flex;align-items:center;justify-content:center;height:100vh;'
+            'text-align:center}a{color:#a855f7;text-decoration:underline}</style>'
+            '</head><body><div>'
+            '<h2>🎬 Opening in VLC...</h2>'
+            '<p style="margin-top:15px;opacity:0.6;font-size:0.85rem">'
+            'Make sure VLC is installed.</p>'
+            f'<p style="margin-top:10px"><a href="{intent_url}">Tap here if VLC didn\'t open</a></p>'
+            '</div>'
+            f'<script>window.location.href="{intent_url}";</script>'
+            '</body></html>'
+        )
+        return HTMLResponse(content=html)
+
+    try:
+        decoded = await decode_string(id)
+        title = decoded.get("title", "stream")
+        quality = decoded.get("quality", "")
+        raw_name = f"{title}_{quality}" if quality else title
+        filename = "".join(c for c in raw_name if c.isascii() and (c.isalnum() or c in "._- ")).strip()
+        if not filename:
+            filename = "stream"
+        filename += ".m3u"
+    except Exception:
+        filename = "play.m3u"
+
+    content = f"#EXTM3U\n#EXTINF:-1,Telegram Stream\n{stream_url}\n"
+
+    return Response(
+        content=content,
+        media_type="audio/x-mpegurl",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+    )
