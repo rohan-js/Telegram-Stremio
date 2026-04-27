@@ -1,3 +1,10 @@
+config.env
+config.env.bak
+config.env.bak_
+config.env.bak_ip_switch_
+*.bak
+*.bak.*
+*.before_*
 .venv
 media/
 *.strm
