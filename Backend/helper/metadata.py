@@ -70,6 +70,21 @@ def extract_default_id(url: str) -> str | None:
     return None
 
 
+def has_combined_marker(*values) -> bool:
+    for value in values:
+        if not value:
+            continue
+        if isinstance(value, dict):
+            parts = value.values()
+        elif isinstance(value, list):
+            parts = value
+        else:
+            parts = [value]
+        if any("combined" in str(item).lower() for item in parts):
+            return True
+    return False
+
+
 def infer_resolution_from_filename(filename: str, parsed: dict) -> str:
     text = f"{filename} {parsed.get('quality', '')}".lower()
 
@@ -184,11 +199,6 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         LOGGER.error(f"PTN parsing failed for {filename}: {e}\n{traceback.format_exc()}")
         return None
 
-    # Skip combined/invalid files
-    if "excess" in parsed and any("combined" in item.lower() for item in parsed["excess"]):
-        LOGGER.info(f"Skipping {filename}: contains 'combined'")
-        return None
-
     # Skip split/multipart files
     # if Telegram.SKIP_MULTIPART:
     multipart_pattern = compile(r'(?:part|cd|disc|disk)[s._-]*\d+(?=\.\w+$)', IGNORECASE)
@@ -205,8 +215,10 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         LOGGER.warning(f"Invalid season/episode format for {filename}: {parsed}")
         return None
     if season and not episode:
-        LOGGER.warning(f"Missing episode in {filename}: {parsed}")
-        return None
+        is_season_pack = has_combined_marker(filename, parsed)
+        if not is_season_pack:
+            LOGGER.warning(f"Missing episode in {filename}: {parsed}")
+            return None
     if not quality:
         quality = "SD"
 
@@ -246,6 +258,9 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         if season and episode:
             LOGGER.info(f"Fetching TV metadata: {title} S{season}E{episode}")
             return await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id)
+        elif season:
+            LOGGER.info(f"Fetching TV season-pack metadata: {title} S{season}")
+            return await fetch_tv_season_pack_metadata(title, season, encoded_string, year, quality, default_id)
         else:
             LOGGER.info(f"Fetching Movie metadata: {title} ({year})")
             return await fetch_movie_metadata(title, encoded_string, year, quality, default_id)
@@ -254,6 +269,76 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         return None
 
 # ----------------- TV Metadata -----------------
+async def _get_tmdb_tv_id(title, year=None, default_id=None):
+    if default_id:
+        default_id = str(default_id).strip()
+        if default_id.isdigit():
+            return int(default_id)
+
+    tmdb_search = await safe_tmdb_search(title, "tv", year)
+    return tmdb_search.id if tmdb_search else None
+
+
+async def _get_season_episode_count(title, season, year=None, default_id=None) -> int:
+    try:
+        tmdb_id = await _get_tmdb_tv_id(title, year, default_id)
+        if not tmdb_id:
+            return 1
+
+        tv = await _tmdb_tv_details(tmdb_id)
+        for season_info in getattr(tv, "seasons", []) or []:
+            if int(getattr(season_info, "season_number", -1) or -1) == int(season):
+                count = int(getattr(season_info, "episode_count", 0) or 0)
+                return max(1, count)
+    except Exception as e:
+        LOGGER.warning(f"Could not determine episode count for {title} S{season}: {e}")
+
+    return 1
+
+
+async def fetch_tv_season_pack_metadata(title, season, encoded_string, year=None, quality=None, default_id=None) -> dict | None:
+    base = await fetch_tv_metadata(title, season, 1, encoded_string, year, quality, default_id)
+    if not base:
+        return None
+
+    episode_count = await _get_season_episode_count(title, season, year, default_id)
+    tmdb_id = base.get("tmdb_id")
+    episodes = []
+
+    for episode_number in range(1, episode_count + 1):
+        ep_details = None
+        if tmdb_id:
+            try:
+                ep_details = await _tmdb_episode_details(int(tmdb_id), season, episode_number)
+            except Exception:
+                ep_details = None
+
+        episodes.append(
+            {
+                "episode_number": episode_number,
+                "episode_title": getattr(ep_details, "name", f"Episode {episode_number}") if ep_details else f"Episode {episode_number}",
+                "episode_backdrop": format_tmdb_image(getattr(ep_details, "still_path", None), "original") if ep_details else "",
+                "episode_overview": getattr(ep_details, "overview", "") if ep_details else "",
+                "episode_released": (
+                    ep_details.air_date.strftime("%Y-%m-%dT05:00:00.000Z")
+                    if getattr(ep_details, "air_date", None)
+                    else ""
+                ),
+            }
+        )
+
+    base.update(
+        {
+            "season_pack": True,
+            "season_pack_episode_count": episode_count,
+            "season_pack_episodes": episodes,
+            "episode_number": 1,
+            "episode_title": f"Season {int(season):02d} Pack",
+        }
+    )
+    return base
+
+
 async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, quality=None, default_id=None) -> dict | None:
     imdb_id = None
     tmdb_id = None

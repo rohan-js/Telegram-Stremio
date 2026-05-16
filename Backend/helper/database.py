@@ -1,5 +1,6 @@
 import secrets
 import string
+import math
 from asyncio import create_task
 from bson import ObjectId
 import motor.motor_asyncio
@@ -414,6 +415,39 @@ class Database:
             )
             return await self.update_movie(media)
         else:
+            if metadata_info.get("season_pack") and metadata_info.get("season_pack_episodes"):
+                episodes = [
+                    Episode(
+                        episode_number=int(ep.get("episode_number")),
+                        title=ep.get("episode_title") or f"Episode {ep.get('episode_number')}",
+                        episode_backdrop=ep.get("episode_backdrop"),
+                        overview=ep.get("episode_overview"),
+                        released=ep.get("episode_released"),
+                        telegram=[QualityDetail(
+                            quality=metadata_info['quality'],
+                            id=metadata_info['encoded_string'],
+                            name=name,
+                            size=size
+                        )]
+                    )
+                    for ep in metadata_info["season_pack_episodes"]
+                    if ep.get("episode_number") is not None
+                ]
+            else:
+                episodes = [Episode(
+                    episode_number=metadata_info['episode_number'],
+                    title=metadata_info['episode_title'],
+                    episode_backdrop=metadata_info['episode_backdrop'],
+                    overview=metadata_info['episode_overview'],
+                    released=metadata_info['episode_released'],
+                    telegram=[QualityDetail(
+                        quality=metadata_info['quality'],
+                        id=metadata_info['encoded_string'],
+                        name=name,
+                        size=size
+                    )]
+                )]
+
             tv_show = TVShowSchema(
                 tmdb_id=metadata_info['tmdb_id'],
                 imdb_id=metadata_info['imdb_id'],
@@ -431,19 +465,7 @@ class Database:
                 media_type=metadata_info['media_type'],
                 seasons=[Season(
                     season_number=metadata_info['season_number'],
-                    episodes=[Episode(
-                        episode_number=metadata_info['episode_number'],
-                        title=metadata_info['episode_title'],
-                        episode_backdrop=metadata_info['episode_backdrop'],
-                        overview=metadata_info['episode_overview'],
-                        released=metadata_info['episode_released'],
-                        telegram=[QualityDetail(
-                            quality=metadata_info['quality'],
-                            id=metadata_info['encoded_string'],
-                            name=name,
-                            size=size
-                        )]
-                    )]
+                    episodes=episodes
                 )]
             )
             return await self.update_tv_show(tv_show)
@@ -1398,12 +1420,21 @@ class Database:
                 "title":       stats.get("meta", {}).get("title"),  # Added title
                 "client_index": stats.get("client_index"),
                 "total_bytes": stats.get("total_bytes", 0),
+                "ttfb_sec":    stats.get("ttfb_sec"),
                 "duration_sec": round(stats.get("duration", 0.0), 2),
                 "avg_mbps":    round(stats.get("avg_mbps", 0.0), 3),
                 "peak_mbps":   round(stats.get("peak_mbps", 0.0), 3),
                 "status":      stats.get("status", "finished"),
                 "parallelism": stats.get("parallelism"),
                 "chunk_size":  stats.get("chunk_size"),
+                "cached":      stats.get("cached", False),
+                "served_via":  stats.get("served_via", "telegram"),
+                "chunk_timeouts": stats.get("chunk_timeouts", 0),
+                "chunk_errors":   stats.get("chunk_errors", 0),
+                "fallback_chunks": stats.get("fallback_chunks", 0),
+                "zero_pad_chunks": stats.get("zero_pad_chunks", 0),
+                "buffering_events": stats.get("buffering_events", 0),
+                "buffering_rate": stats.get("buffering_rate", 0.0),
                 "logged_at":   datetime.utcnow(),
             }
             await self.dbs["tracking"]["stream_analytics"].insert_one(record)
@@ -1420,10 +1451,17 @@ class Database:
                 {"$group": {
                     "_id": None,
                     "total_streams":     {"$sum": 1},
+                    "cached_streams":    {"$sum": {"$cond": [{"$eq": ["$cached", True]}, 1, 0]}},
+                    "error_streams":     {"$sum": {"$cond": [{"$eq": ["$status", "error"]}, 1, 0]}},
+                    "cancelled_streams": {"$sum": {"$cond": [{"$eq": ["$status", "cancelled"]}, 1, 0]}},
+                    "non_finished_streams": {"$sum": {"$cond": [{"$ne": ["$status", "finished"]}, 1, 0]}},
                     "total_bytes":       {"$sum": "$total_bytes"},
                     "avg_speed":         {"$avg": "$avg_mbps"},
                     "peak_speed":        {"$max": "$peak_mbps"},
                     "avg_duration":      {"$avg": "$duration_sec"},
+                    "avg_ttfb_sec":      {"$avg": "$ttfb_sec"},
+                    "avg_buffering_rate": {"$avg": "$buffering_rate"},
+                    "buffering_streams": {"$sum": {"$cond": [{"$gt": ["$buffering_events", 0]}, 1, 0]}},
                 }},
             ]
             agg = await col.aggregate(pipeline).to_list(1)
@@ -1435,9 +1473,16 @@ class Database:
                 {"$group": {
                     "_id":          "$client_index",
                     "streams":      {"$sum": 1},
+                    "cached_streams": {"$sum": {"$cond": [{"$eq": ["$cached", True]}, 1, 0]}},
+                    "error_streams": {"$sum": {"$cond": [{"$eq": ["$status", "error"]}, 1, 0]}},
+                    "cancelled_streams": {"$sum": {"$cond": [{"$eq": ["$status", "cancelled"]}, 1, 0]}},
+                    "non_finished_streams": {"$sum": {"$cond": [{"$ne": ["$status", "finished"]}, 1, 0]}},
                     "avg_mbps":     {"$avg": "$avg_mbps"},
                     "peak_mbps":    {"$max": "$peak_mbps"},
                     "total_bytes":  {"$sum": "$total_bytes"},
+                    "avg_ttfb_sec": {"$avg": "$ttfb_sec"},
+                    "avg_buffering_rate": {"$avg": "$buffering_rate"},
+                    "buffering_streams": {"$sum": {"$cond": [{"$gt": ["$buffering_events", 0]}, 1, 0]}},
                 }},
                 {"$sort": {"_id": 1}},
             ]
@@ -1446,18 +1491,58 @@ class Database:
                 row["client_index"] = row.pop("_id")
                 row["avg_mbps"]     = round(row.get("avg_mbps", 0), 3)
                 row["peak_mbps"]    = round(row.get("peak_mbps", 0), 3)
+                row["avg_ttfb_sec"]  = round(row.get("avg_ttfb_sec", 0) or 0, 3)
+                row["avg_buffering_rate"] = round(row.get("avg_buffering_rate", 0) or 0, 4)
 
             # Recent records (newest first)
             recent_cursor = col.find(
                 {},
                 {"_id": 0, "stream_id": 1, "client_index": 1, "dc_id": 1,
                  "total_bytes": 1, "duration_sec": 1, "avg_mbps": 1,
-                 "peak_mbps": 1, "status": 1, "logged_at": 1, "title": 1}
+                 "peak_mbps": 1, "status": 1, "logged_at": 1, "title": 1,
+                  "cached": 1, "served_via": 1,
+                 "ttfb_sec": 1, "chunk_timeouts": 1, "chunk_errors": 1,
+                  "fallback_chunks": 1, "zero_pad_chunks": 1,
+                  "buffering_events": 1, "buffering_rate": 1}
             ).sort("logged_at", DESCENDING).limit(limit)
             recent = await recent_cursor.to_list(None)
             for r in recent:
                 if "logged_at" in r:
                     r["logged_at"] = r["logged_at"].isoformat()
+
+            # Best-effort percentiles computed over the returned window.
+            ttfb_vals = sorted([v for v in (r.get("ttfb_sec") for r in recent) if isinstance(v, (int, float))])
+            if ttfb_vals:
+                def pct(p: float) -> float:
+                    if len(ttfb_vals) == 1:
+                        return float(ttfb_vals[0])
+                    k = (len(ttfb_vals) - 1) * p
+                    f = int(math.floor(k))
+                    c = int(math.ceil(k))
+                    if f == c:
+                        return float(ttfb_vals[int(k)])
+                    return float(ttfb_vals[f] * (c - k) + ttfb_vals[c] * (k - f))
+
+                summary["ttfb_p50_sec"] = round(pct(0.50), 3)
+                summary["ttfb_p95_sec"] = round(pct(0.95), 3)
+            else:
+                summary["ttfb_p50_sec"] = None
+                summary["ttfb_p95_sec"] = None
+
+            if summary.get("total_streams"):
+                summary["cache_hit_rate"] = round((summary.get("cached_streams", 0) / summary["total_streams"]) * 100, 2)
+                summary["error_rate"] = round((summary.get("error_streams", 0) / summary["total_streams"]) * 100, 2)
+                summary["cancel_rate"] = round((summary.get("cancelled_streams", 0) / summary["total_streams"]) * 100, 2)
+                summary["non_finished_rate"] = round((summary.get("non_finished_streams", 0) / summary["total_streams"]) * 100, 2)
+                summary["buffering_stream_rate"] = round((summary.get("buffering_streams", 0) / summary["total_streams"]) * 100, 2)
+                summary["avg_buffering_rate"] = round(summary.get("avg_buffering_rate", 0) or 0, 4)
+            else:
+                summary["cache_hit_rate"] = 0
+                summary["error_rate"] = 0
+                summary["cancel_rate"] = 0
+                summary["non_finished_rate"] = 0
+                summary["buffering_stream_rate"] = 0
+                summary["avg_buffering_rate"] = 0
 
             return {
                 "summary":    summary,

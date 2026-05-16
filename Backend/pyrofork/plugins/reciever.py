@@ -13,6 +13,7 @@ from Backend.helper.metadata import metadata, extract_default_id
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
 from Backend.helper.task_manager import edit_message
 from Backend.logger import LOGGER
+from Backend.helper.disk_cache import PRECACHE_MANAGER, PrecacheJob
 
 
 file_queue = Queue()
@@ -73,20 +74,39 @@ async def send_reply_messages():
                 vlc_page = None
 
             rating_str = f"⭐ {rating}" if rating else ""
+            help_note = (
+                "⚠️ If streaming is slow or not loading, turn on Cloudflare WARP and try again.\n"
+                "Facing any issues? Type it here itself.\n\n"
+            )
             if media_type == "tv":
                 season = int(metadata_info.get("season_number", 0) or 0)
                 episode = int(metadata_info.get("episode_number", 0) or 0)
                 ep_title = metadata_info.get("episode_title", "")
-                reply_text = (
-                    f"🎬 <b>{movie_title}</b>"
-                    f"{f' ({year})' if year else ''}\n"
-                    f"📺 S{season:02d}E{episode:02d}"
-                    f"{f' - {ep_title}' if ep_title else ''}\n"
-                    f"{rating_str}"
-                    f"{f' | {quality}' if quality else ''}"
-                    f" | {size}\n\n"
-                    f"▶️ <b>Direct Stream Link:</b>\n<code>{direct_stream}</code>"
-                )
+                if metadata_info.get("season_pack"):
+                    episode_count = int(metadata_info.get("season_pack_episode_count", 0) or 0)
+                    reply_text = (
+                        f"🎬 <b>{movie_title}</b>"
+                        f"{f' ({year})' if year else ''}\n"
+                        f"📺 Season {season:02d} Pack"
+                        f"{f' | {episode_count} episodes' if episode_count else ''}\n"
+                        f"{rating_str}"
+                        f"{f' | {quality}' if quality else ''}"
+                        f" | {size}\n\n"
+                        f"{help_note}"
+                        f"▶️ <b>Direct Stream Link:</b>\n<code>{direct_stream}</code>"
+                    )
+                else:
+                    reply_text = (
+                        f"🎬 <b>{movie_title}</b>"
+                        f"{f' ({year})' if year else ''}\n"
+                        f"📺 S{season:02d}E{episode:02d}"
+                        f"{f' - {ep_title}' if ep_title else ''}\n"
+                        f"{rating_str}"
+                        f"{f' | {quality}' if quality else ''}"
+                        f" | {size}\n\n"
+                        f"{help_note}"
+                        f"▶️ <b>Direct Stream Link:</b>\n<code>{direct_stream}</code>"
+                    )
             else:
                 reply_text = (
                     f"🎬 <b>{movie_title}</b>"
@@ -94,6 +114,7 @@ async def send_reply_messages():
                     f"{rating_str}"
                     f"{f' | {quality}' if quality else ''}"
                     f" | {size}\n\n"
+                    f"{help_note}"
                     f"▶️ <b>Direct Stream Link:</b>\n<code>{direct_stream}</code>"
                 )
 
@@ -146,9 +167,30 @@ async def file_receive_handler(client: Client, message: Message):
                 size = get_readable_file_size(file.file_size)
                 channel = str(message.chat.id).replace("-100", "")
 
+                # Background pre-cache to disk (optional, behind config flags)
+                try:
+                    if getattr(file, "file_unique_id", None) and getattr(file, "file_size", None):
+                        create_task(
+                            PRECACHE_MANAGER.enqueue(
+                                client,
+                                PrecacheJob(
+                                    chat_id=int(message.chat.id),
+                                    msg_id=int(msg_id),
+                                    unique_id=str(file.file_unique_id),
+                                    expected_size=int(file.file_size or 0),
+                                ),
+                            )
+                        )
+                except Exception as e:
+                    LOGGER.debug(f"Precache enqueue failed for msg {msg_id}: {e}")
+
                 metadata_info = await metadata(clean_filename(title), int(channel), msg_id)
                 if metadata_info is None:
                     LOGGER.warning(f"Metadata failed for file: {title} (ID: {msg_id})")
+                    await message.reply_text(
+                        "Metadata failed for this file. If it is a TV file, use an episode filename like S01E01, "
+                        "or use S01 COMBINED for a full-season pack."
+                    )
                     return
 
                 title = remove_urls(title)
@@ -186,6 +228,23 @@ async def file_edited_handler(client: Client, message: Message):
                 channel = str(message.chat.id).replace("-100", "")
                 override_id = extract_default_id(message.caption) if message.caption else None
 
+                # Pre-cache edited media too (in case the file itself changed)
+                try:
+                    if getattr(file, "file_unique_id", None) and getattr(file, "file_size", None):
+                        create_task(
+                            PRECACHE_MANAGER.enqueue(
+                                client,
+                                PrecacheJob(
+                                    chat_id=int(message.chat.id),
+                                    msg_id=int(msg_id),
+                                    unique_id=str(file.file_unique_id),
+                                    expected_size=int(file.file_size or 0),
+                                ),
+                            )
+                        )
+                except Exception as e:
+                    LOGGER.debug(f"Precache enqueue failed for edited msg {msg_id}: {e}")
+
                 if override_id:
                     LOGGER.info(f"Detected override ID '{override_id}' in edited message {msg_id}")
                     stream_id_hash = await encode_string({"chat_id": int(channel), "msg_id": msg_id})
@@ -193,6 +252,10 @@ async def file_edited_handler(client: Client, message: Message):
                     metadata_info = await metadata(clean_filename(title), int(channel), msg_id, override_id=override_id)
                     if metadata_info is None:
                         LOGGER.warning(f"Metadata failed for edited file: {title} (ID: {msg_id})")
+                        await message.reply_text(
+                            "Metadata failed for this edited file. If it is a TV file, use an episode filename like S01E01, "
+                            "or use S01 COMBINED for a full-season pack."
+                        )
                         return
                     title = remove_urls(title)
                     if not title.endswith((".mkv", ".mp4")):
