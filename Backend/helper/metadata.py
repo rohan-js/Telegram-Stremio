@@ -20,8 +20,9 @@ TMDB_SEARCH_CACHE: dict = {}
 TMDB_DETAILS_CACHE: dict = {}
 EPISODE_CACHE: dict = {}
 
-# Concurrency semaphore for external API calls
-API_SEMAPHORE = asyncio.Semaphore(12)
+# Concurrency semaphore for external API calls. Keep this conservative; bursts
+# of forwarded episodes can otherwise cause TMDb connection resets.
+API_SEMAPHORE = asyncio.Semaphore(4)
 
 # ----------------- Helpers -----------------
 def format_tmdb_image(path: str, size="w500") -> str:
@@ -138,58 +139,135 @@ async def safe_tmdb_search(title: str, type_: str, year=None):
         return res
     except Exception as e:
         LOGGER.error(f"TMDb search failed for '{title}' [{type_}]: {e}")
-        TMDB_SEARCH_CACHE[key] = None
         return None
+
+
+async def _retry_api_call(label: str, func, attempts: int = 3, base_delay: float = 0.8):
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await func()
+        except Exception as e:
+            last_error = e
+            if attempt < attempts:
+                await asyncio.sleep(base_delay * attempt)
+    LOGGER.warning(f"{label} failed after {attempts} attempts: {last_error}")
+    return None
 
 async def _tmdb_movie_details(movie_id):
     if movie_id in TMDB_DETAILS_CACHE:
         return TMDB_DETAILS_CACHE[movie_id]
-    try:
+
+    async def fetch():
         async with API_SEMAPHORE:
             details = await tmdb.movie(movie_id).details(
                 append_to_response="external_ids,credits"
             )
             images = await tmdb.movie(movie_id).images()
             details.images = images
+            return details
 
+    details = await _retry_api_call(f"TMDb movie details fetch id={movie_id}", fetch)
+    if details:
         TMDB_DETAILS_CACHE[movie_id] = details
         return details
-    except Exception as e:
-        LOGGER.warning(f"TMDb movie details fetch failed for id={movie_id}: {e}")
-        TMDB_DETAILS_CACHE[movie_id] = None
-        return None
+    return None
 
 
 async def _tmdb_tv_details(tv_id):
     if tv_id in TMDB_DETAILS_CACHE:
         return TMDB_DETAILS_CACHE[tv_id]
-    try:
+
+    async def fetch():
         async with API_SEMAPHORE:
             details = await tmdb.tv(tv_id).details(
                 append_to_response="external_ids,credits"
             )
             images = await tmdb.tv(tv_id).images()
             details.images = images
+            return details
+
+    details = await _retry_api_call(f"TMDb tv details fetch id={tv_id}", fetch)
+    if details:
         TMDB_DETAILS_CACHE[tv_id] = details
         return details
-    except Exception as e:
-        LOGGER.warning(f"TMDb tv details fetch failed for id={tv_id}: {e}")
-        TMDB_DETAILS_CACHE[tv_id] = None
-        return None
+    return None
 
 
 async def _tmdb_episode_details(tv_id, season, episode):
     key = (tv_id, season, episode)
     if key in EPISODE_CACHE:
         return EPISODE_CACHE[key]
-    try:
+
+    async def fetch():
         async with API_SEMAPHORE:
-            details = await tmdb.episode(tv_id, season, episode).details()
+            return await tmdb.episode(tv_id, season, episode).details()
+
+    details = await _retry_api_call(f"TMDb episode details fetch id={tv_id} S{season}E{episode}", fetch, attempts=2)
+    if details:
         EPISODE_CACHE[key] = details
         return details
+    return None
+
+
+def _year_from_date(value) -> int:
+    try:
+        return int(getattr(value, "year", 0) or 0)
     except Exception:
-        EPISODE_CACHE[key] = None
-        return None
+        return 0
+
+
+def _date_to_iso(value) -> str:
+    try:
+        return value.strftime("%Y-%m-%dT05:00:00.000Z") if value else ""
+    except Exception:
+        return ""
+
+
+def _tmdb_tv_fallback(search_result, title, season, episode, encoded_string, quality) -> dict:
+    return {
+        "tmdb_id": getattr(search_result, "id", None),
+        "imdb_id": None,
+        "title": getattr(search_result, "name", None) or title,
+        "year": _year_from_date(getattr(search_result, "first_air_date", None)),
+        "rate": getattr(search_result, "vote_average", 0) or 0,
+        "description": getattr(search_result, "overview", "") or "",
+        "poster": format_tmdb_image(getattr(search_result, "poster_path", None)),
+        "backdrop": format_tmdb_image(getattr(search_result, "backdrop_path", None), "original"),
+        "logo": "",
+        "genres": [],
+        "media_type": "tv",
+        "cast": [],
+        "runtime": "",
+        "season_number": season,
+        "episode_number": episode,
+        "episode_title": f"S{season}E{episode}",
+        "episode_backdrop": "",
+        "episode_overview": "",
+        "episode_released": "",
+        "quality": quality,
+        "encoded_string": encoded_string,
+    }
+
+
+def _tmdb_movie_fallback(search_result, title, encoded_string, year, quality) -> dict:
+    return {
+        "tmdb_id": getattr(search_result, "id", None),
+        "imdb_id": None,
+        "title": getattr(search_result, "title", None) or getattr(search_result, "name", None) or title,
+        "year": _year_from_date(getattr(search_result, "release_date", None)) or (year or 0),
+        "rate": getattr(search_result, "vote_average", 0) or 0,
+        "description": getattr(search_result, "overview", "") or "",
+        "poster": format_tmdb_image(getattr(search_result, "poster_path", None)),
+        "backdrop": format_tmdb_image(getattr(search_result, "backdrop_path", None), "original"),
+        "logo": "",
+        "cast": [],
+        "runtime": "",
+        "media_type": "movie",
+        "genres": [],
+        "quality": quality,
+        "encoded_string": encoded_string,
+    }
 
 # ----------------- Main Metadata -----------------
 async def metadata(filename: str, channel: int, msg_id, override_id: str = None) -> dict | None:
@@ -286,6 +364,8 @@ async def _get_season_episode_count(title, season, year=None, default_id=None) -
             return 1
 
         tv = await _tmdb_tv_details(tmdb_id)
+        if not tv:
+            return 1
         for season_info in getattr(tv, "seasons", []) or []:
             if int(getattr(season_info, "season_number", -1) or -1) == int(season):
                 count = int(getattr(season_info, "episode_count", 0) or 0)
@@ -407,6 +487,7 @@ async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, q
     # =======================================================
     if must_use_tmdb:
         LOGGER.info(f"No valid IMDb TV data for '{title}' → using TMDb")
+        tmdb_search = None
 
         # Search TMDb by title
         if not tmdb_id:
@@ -420,7 +501,31 @@ async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, q
         tv = await _tmdb_tv_details(tmdb_id)
         if not tv:
             LOGGER.warning(f"TMDb TV details failed for id={tmdb_id}")
-            return None
+            if tmdb_search:
+                return _tmdb_tv_fallback(tmdb_search, title, season, episode, encoded_string, quality)
+            return {
+                "tmdb_id": tmdb_id,
+                "imdb_id": None,
+                "title": title,
+                "year": year or 0,
+                "rate": 0,
+                "description": "",
+                "poster": "",
+                "backdrop": "",
+                "logo": "",
+                "genres": [],
+                "media_type": "tv",
+                "cast": [],
+                "runtime": "",
+                "season_number": season,
+                "episode_number": episode,
+                "episode_title": f"S{season}E{episode}",
+                "episode_backdrop": "",
+                "episode_overview": "",
+                "episode_released": "",
+                "quality": quality,
+                "encoded_string": encoded_string,
+            }
 
         # Fetch episode
         ep = await _tmdb_episode_details(tmdb_id, season, episode)
@@ -461,11 +566,7 @@ async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, q
             "episode_title": getattr(ep, "name", f"S{season}E{episode}") if ep else f"S{season}E{episode}",
             "episode_backdrop": format_tmdb_image(getattr(ep, "still_path", None), "original") if ep else "",
             "episode_overview": getattr(ep, "overview", "") if ep else "",
-            "episode_released": (
-                ep.air_date.strftime("%Y-%m-%dT05:00:00.000Z")
-                if getattr(ep, "air_date", None)
-                else ""
-            ),
+            "episode_released": _date_to_iso(getattr(ep, "air_date", None)),
 
             "quality": quality,
             "encoded_string": encoded_string,
@@ -571,6 +672,7 @@ async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, d
     # =======================================================
     if must_use_tmdb:
         LOGGER.info(f"No valid IMDb data for '{title}' → using TMDb")
+        tmdb_result = None
 
         # TMDb search if id unknown
         if not tmdb_id:
@@ -584,7 +686,25 @@ async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, d
         movie = await _tmdb_movie_details(tmdb_id)
         if not movie:
             LOGGER.warning(f"TMDb details failed for {tmdb_id}")
-            return None
+            if tmdb_result:
+                return _tmdb_movie_fallback(tmdb_result, title, encoded_string, year, quality)
+            return {
+                "tmdb_id": tmdb_id,
+                "imdb_id": None,
+                "title": title,
+                "year": year or 0,
+                "rate": 0,
+                "description": "",
+                "poster": "",
+                "backdrop": "",
+                "logo": "",
+                "cast": [],
+                "runtime": "",
+                "media_type": "movie",
+                "genres": [],
+                "quality": quality,
+                "encoded_string": encoded_string,
+            }
 
         # Cast extraction
         credits = getattr(movie, "credits", None) or {}

@@ -20,6 +20,12 @@ file_queue = Queue()
 db_lock = Lock()
 reply_queue = Queue()
 
+METADATA_FAILED_TEXT = (
+    "Metadata failed for this file. The filename may be valid, but the external metadata service "
+    "may be temporarily unavailable. Try again after a minute, or add an IMDb/TMDb link in the caption. "
+    "For TV files, use S01E01 for episodes or S01 COMBINED for a full-season pack."
+)
+
 
 async def process_file():
     while True:
@@ -187,10 +193,7 @@ async def file_receive_handler(client: Client, message: Message):
                 metadata_info = await metadata(clean_filename(title), int(channel), msg_id)
                 if metadata_info is None:
                     LOGGER.warning(f"Metadata failed for file: {title} (ID: {msg_id})")
-                    await message.reply_text(
-                        "Metadata failed for this file. If it is a TV file, use an episode filename like S01E01, "
-                        "or use S01 COMBINED for a full-season pack."
-                    )
+                    await message.reply_text(METADATA_FAILED_TEXT)
                     return
 
                 title = remove_urls(title)
@@ -252,10 +255,7 @@ async def file_edited_handler(client: Client, message: Message):
                     metadata_info = await metadata(clean_filename(title), int(channel), msg_id, override_id=override_id)
                     if metadata_info is None:
                         LOGGER.warning(f"Metadata failed for edited file: {title} (ID: {msg_id})")
-                        await message.reply_text(
-                            "Metadata failed for this edited file. If it is a TV file, use an episode filename like S01E01, "
-                            "or use S01 COMBINED for a full-season pack."
-                        )
+                        await message.reply_text(METADATA_FAILED_TEXT)
                         return
                     title = remove_urls(title)
                     if not title.endswith((".mkv", ".mp4")):
