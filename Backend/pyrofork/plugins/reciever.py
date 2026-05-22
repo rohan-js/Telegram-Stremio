@@ -12,6 +12,12 @@ from Backend.helper.encrypt import encode_string
 from Backend.helper.metadata import metadata, extract_default_id
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
 from Backend.helper.task_manager import edit_message
+from Backend.helper.torrent_source import (
+    TorrentItem,
+    extract_magnet_links,
+    parse_magnet,
+    parse_torrent,
+)
 from Backend.logger import LOGGER
 from Backend.helper.disk_cache import PRECACHE_MANAGER, PrecacheJob
 
@@ -25,6 +31,14 @@ METADATA_FAILED_TEXT = (
     "may be temporarily unavailable. Try again after a minute, or add an IMDb/TMDb link in the caption. "
     "For TV files, use S01E01 for episodes or S01 COMBINED for a full-season pack."
 )
+
+TORRENT_METADATA_FAILED_TEXT = (
+    "Metadata failed for this torrent. Add an IMDb/TMDb link, or use a clearer title like "
+    "Movie Name 2024 1080p / Show.Name.S01E01. For full-season torrents, episode filenames "
+    "should include S01E01 style numbering."
+)
+
+VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".flv", ".wmv")
 
 
 async def process_file():
@@ -61,6 +75,7 @@ async def send_reply_messages():
             quality = metadata_info.get("quality", "")
             encoded_string = metadata_info.get("encoded_string", "")
             rating = metadata_info.get("rate", "")
+            source_type = metadata_info.get("source_type", "telegram")
 
             if imdb_id:
                 if media_type == "tv":
@@ -72,7 +87,7 @@ async def send_reply_messages():
             else:
                 stremio_link = f"{base_url}/stremio/{token}/configure" if token else f"{base_url}/stremio"
 
-            if encoded_string and token:
+            if source_type == "telegram" and encoded_string and token:
                 direct_stream = f"{base_url}/dl/{token}/{encoded_string}/video.mkv"
                 vlc_page = f"{base_url}/vlc/{token}/{encoded_string}"
             else:
@@ -80,10 +95,15 @@ async def send_reply_messages():
                 vlc_page = None
 
             rating_str = f"⭐ {rating}" if rating else ""
-            help_note = (
-                "⚠️ If streaming is slow or not loading, turn on Cloudflare WARP and try again.\n"
-                "Facing any issues? Type it here itself.\n\n"
-            )
+            if source_type == "torrent":
+                help_note = "🧲 Torrent stream. Playback speed depends on seeders/peers.\n\n"
+                stream_note = ""
+            else:
+                help_note = (
+                    "⚠️ If streaming is slow or not loading, turn on Cloudflare WARP and try again.\n"
+                    "Facing any issues? Type it here itself.\n\n"
+                )
+                stream_note = f"▶️ <b>Direct Stream Link:</b>\n<code>{direct_stream}</code>"
             if media_type == "tv":
                 season = int(metadata_info.get("season_number", 0) or 0)
                 episode = int(metadata_info.get("episode_number", 0) or 0)
@@ -99,7 +119,7 @@ async def send_reply_messages():
                         f"{f' | {quality}' if quality else ''}"
                         f" | {size}\n\n"
                         f"{help_note}"
-                        f"▶️ <b>Direct Stream Link:</b>\n<code>{direct_stream}</code>"
+                        f"{stream_note}"
                     )
                 else:
                     reply_text = (
@@ -111,7 +131,7 @@ async def send_reply_messages():
                         f"{f' | {quality}' if quality else ''}"
                         f" | {size}\n\n"
                         f"{help_note}"
-                        f"▶️ <b>Direct Stream Link:</b>\n<code>{direct_stream}</code>"
+                        f"{stream_note}"
                     )
             else:
                 reply_text = (
@@ -121,7 +141,7 @@ async def send_reply_messages():
                     f"{f' | {quality}' if quality else ''}"
                     f" | {size}\n\n"
                     f"{help_note}"
-                    f"▶️ <b>Direct Stream Link:</b>\n<code>{direct_stream}</code>"
+                    f"{stream_note}"
                 )
 
             buttons_row = [InlineKeyboardButton("▶️ Watch in Stremio", url=stremio_link)]
@@ -150,21 +170,136 @@ create_task(process_file())
 create_task(send_reply_messages())
 
 
-@Client.on_message(filters.channel & (filters.document | filters.video))
+def _is_video_document(message: Message) -> bool:
+    return bool(
+        message.document and (
+            (message.document.mime_type and message.document.mime_type.startswith("video/")) or
+            (message.document.file_name and message.document.file_name.lower().endswith(VIDEO_EXTENSIONS))
+        )
+    )
+
+
+def _is_torrent_document(message: Message) -> bool:
+    return bool(
+        message.document and (
+            (message.document.file_name and message.document.file_name.lower().endswith(".torrent")) or
+            message.document.mime_type == "application/x-bittorrent"
+        )
+    )
+
+
+def _message_text(message: Message) -> str:
+    return message.text or message.caption or ""
+
+
+def _torrent_title(item: TorrentItem, text: str) -> str:
+    title = item.file_name or item.display_name
+    if title and title != item.info_hash:
+        return title
+
+    cleaned_text = text
+    for magnet in extract_magnet_links(text):
+        cleaned_text = cleaned_text.replace(magnet, " ")
+    cleaned_text = remove_urls(cleaned_text).strip()
+    return cleaned_text or item.display_name
+
+
+async def _queue_torrent_item(message: Message, item: TorrentItem, override_id: str | None) -> bool:
+    channel = int(str(message.chat.id).replace("-100", ""))
+    msg_id = message.id
+    raw_text = _message_text(message)
+    title = _torrent_title(item, raw_text)
+    if not title or title == item.info_hash:
+        return False
+
+    metadata_info = await metadata(clean_filename(title), channel, msg_id, override_id=override_id)
+    if metadata_info is None:
+        LOGGER.warning(f"Metadata failed for torrent item: {title} (ID: {msg_id})")
+        return False
+
+    encoded_string = await encode_string({
+        "source_type": "torrent",
+        "chat_id": channel,
+        "msg_id": msg_id,
+        "info_hash": item.info_hash,
+        "file_idx": item.file_idx,
+        "name": item.file_name,
+    })
+    display_title = remove_urls(item.file_name or title)
+    if display_title and not display_title.lower().endswith(VIDEO_EXTENSIONS):
+        display_title += ".mkv"
+
+    metadata_info.update({
+        "source_type": "torrent",
+        "encoded_string": encoded_string,
+        "info_hash": item.info_hash,
+        "file_idx": item.file_idx,
+        "sources": item.sources,
+        "filename": item.file_name or display_title,
+        "video_size": item.size_bytes,
+        "origin_chat_id": int(message.chat.id),
+        "origin_msg_id": int(msg_id),
+    })
+    await file_queue.put((
+        metadata_info,
+        channel,
+        msg_id,
+        item.size_text,
+        display_title or title,
+        message.chat.id,
+        message.id,
+    ))
+    return True
+
+
+async def _handle_torrent_message(client: Client, message: Message) -> bool:
+    text = _message_text(message)
+    override_id = extract_default_id(text) if text else None
+    items: list[TorrentItem] = []
+
+    for magnet in extract_magnet_links(text):
+        try:
+            items.append(parse_magnet(magnet, fallback_name=None))
+        except Exception as e:
+            LOGGER.warning(f"Failed to parse magnet in message {message.id}: {e}")
+
+    if _is_torrent_document(message):
+        try:
+            torrent_file = await client.download_media(message, in_memory=True)
+            torrent_file.seek(0)
+            items.extend(parse_torrent(torrent_file.read()))
+            torrent_file.close()
+        except Exception as e:
+            LOGGER.warning(f"Failed to parse torrent document {message.id}: {e}")
+
+    if not items:
+        return False
+
+    queued = 0
+    for item in items:
+        if await _queue_torrent_item(message, item, override_id):
+            queued += 1
+
+    if queued == 0:
+        await message.reply_text(TORRENT_METADATA_FAILED_TEXT)
+        return True
+
+    LOGGER.info(f"Queued {queued} torrent stream(s) from message {message.id}.")
+    return True
+
+
+@Client.on_message(filters.channel & (filters.document | filters.video | filters.text))
 async def file_receive_handler(client: Client, message: Message):
     if str(message.chat.id) in Telegram.AUTH_CHANNEL:
         try:
-            video_extensions = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".flv", ".wmv")
-            is_video_doc = (
-                message.document and (
-                    (message.document.mime_type and message.document.mime_type.startswith("video/")) or
-                    (message.document.file_name and message.document.file_name.lower().endswith(video_extensions))
-                )
-            )
+            if await _handle_torrent_message(client, message):
+                return
+
+            is_video_doc = _is_video_document(message)
             if message.video or is_video_doc:
                 file = message.video or message.document
                 file_name = getattr(file, "file_name", None) or ""
-                if file_name and file_name.lower().endswith(video_extensions):
+                if file_name and file_name.lower().endswith(VIDEO_EXTENSIONS):
                     title = file_name
                 else:
                     title = message.caption or file_name or "unknown"
@@ -219,11 +354,14 @@ async def file_receive_handler(client: Client, message: Message):
         await message.reply_text("> Channel is not in AUTH_CHANNEL")
 
 
-@Client.on_edited_message(filters.channel & (filters.document | filters.video))
+@Client.on_edited_message(filters.channel & (filters.document | filters.video | filters.text))
 async def file_edited_handler(client: Client, message: Message):
     if str(message.chat.id) in Telegram.AUTH_CHANNEL:
         try:
-            if message.video or (message.document and message.document.mime_type.startswith("video/")):
+            if await _handle_torrent_message(client, message):
+                return
+
+            if message.video or _is_video_document(message):
                 file = message.video or message.document
                 title = message.caption or file.file_name
                 msg_id = message.id
@@ -274,7 +412,9 @@ async def file_deleted_handler(client: Client, messages: list[Message]):
                 msg_id = message.id
                 try:
                     stream_id_hash = await encode_string({"chat_id": int(channel), "msg_id": msg_id})
-                    deleted = await db.delete_media_by_stream_id(stream_id_hash)
+                    deleted = await db.delete_media_by_origin(int(message.chat.id), int(msg_id))
+                    if not deleted:
+                        deleted = await db.delete_media_by_stream_id(stream_id_hash)
                     if deleted:
                         LOGGER.info(f"Automatically purged deleted message {msg_id} from database.")
                 except Exception as ex:

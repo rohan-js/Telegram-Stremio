@@ -389,6 +389,7 @@ class Database:
         self, metadata_info: dict,
         channel: int, msg_id: int, size: str, name: str
     ) -> Optional[ObjectId]:
+        quality_detail = self._quality_from_metadata(metadata_info, size, name)
         
         if metadata_info['media_type'] == "movie":
             media = MovieSchema(
@@ -406,12 +407,7 @@ class Database:
                 cast=metadata_info['cast'],
                 runtime=metadata_info['runtime'],
                 media_type=metadata_info['media_type'],
-                telegram=[QualityDetail(
-                    quality=metadata_info['quality'],
-                    id=metadata_info['encoded_string'],
-                    name=name,
-                    size=size
-                )]
+                telegram=[quality_detail]
             )
             return await self.update_movie(media)
         else:
@@ -423,12 +419,7 @@ class Database:
                         episode_backdrop=ep.get("episode_backdrop"),
                         overview=ep.get("episode_overview"),
                         released=ep.get("episode_released"),
-                        telegram=[QualityDetail(
-                            quality=metadata_info['quality'],
-                            id=metadata_info['encoded_string'],
-                            name=name,
-                            size=size
-                        )]
+                        telegram=[quality_detail]
                     )
                     for ep in metadata_info["season_pack_episodes"]
                     if ep.get("episode_number") is not None
@@ -440,12 +431,7 @@ class Database:
                     episode_backdrop=metadata_info['episode_backdrop'],
                     overview=metadata_info['episode_overview'],
                     released=metadata_info['episode_released'],
-                    telegram=[QualityDetail(
-                        quality=metadata_info['quality'],
-                        id=metadata_info['encoded_string'],
-                        name=name,
-                        size=size
-                    )]
+                    telegram=[quality_detail]
                 )]
 
             tv_show = TVShowSchema(
@@ -469,6 +455,48 @@ class Database:
                 )]
             )
             return await self.update_tv_show(tv_show)
+
+    def _quality_from_metadata(self, metadata_info: dict, size: str, name: str) -> QualityDetail:
+        return QualityDetail(
+            quality=metadata_info["quality"],
+            id=metadata_info["encoded_string"],
+            name=name,
+            size=size,
+            source_type=metadata_info.get("source_type", "telegram"),
+            info_hash=metadata_info.get("info_hash"),
+            file_idx=metadata_info.get("file_idx"),
+            sources=metadata_info.get("sources"),
+            filename=metadata_info.get("filename") or name,
+            video_size=metadata_info.get("video_size"),
+            origin_chat_id=metadata_info.get("origin_chat_id"),
+            origin_msg_id=metadata_info.get("origin_msg_id"),
+        )
+
+    def _source_type(self, quality: dict) -> str:
+        return quality.get("source_type") or "telegram"
+
+    def _same_replace_group(self, existing_quality: dict, new_quality: dict) -> bool:
+        return (
+            existing_quality.get("quality") == new_quality.get("quality")
+            and self._source_type(existing_quality) == self._source_type(new_quality)
+        )
+
+    def _should_delete_telegram_source(self, quality: dict) -> bool:
+        return self._source_type(quality) == "telegram" and bool(quality.get("id"))
+
+    def _queue_delete_telegram_source(self, quality: dict) -> None:
+        if not self._should_delete_telegram_source(quality):
+            return
+        create_task(self._delete_encoded_quality_safely(quality.get("id")))
+
+    async def _delete_encoded_quality_safely(self, encoded_id: str) -> None:
+        try:
+            decoded_data = await decode_string(encoded_id)
+            chat_id = int(f"-100{decoded_data['chat_id']}")
+            msg_id = int(decoded_data["msg_id"])
+            await delete_message(chat_id, msg_id)
+        except Exception as e:
+            LOGGER.error(f"Failed to queue file for deletion: {e}")
 
     async def update_movie(self, movie_data: MovieSchema) -> Optional[ObjectId]:
         try:
@@ -529,21 +557,13 @@ class Database:
         existing_qualities = existing_movie.get("telegram", [])
 
         if Telegram.REPLACE_MODE:
-            to_delete = [q for q in existing_qualities if q.get("quality") == target_quality]
+            to_delete = [q for q in existing_qualities if self._same_replace_group(q, quality_to_update)]
 
             for q in to_delete:
-                try:
-                    old_id = q.get("id")
-                    if old_id:
-                        decoded = await decode_string(old_id)
-                        chat_id = int(f"-100{decoded['chat_id']}")
-                        msg_id = int(decoded['msg_id'])
-                        create_task(delete_message(chat_id, msg_id))
-                except Exception as e:
-                    LOGGER.error(f"Failed to delete old quality: {e}")
+                self._queue_delete_telegram_source(q)
 
             existing_qualities = [
-                q for q in existing_qualities if q.get("quality") != target_quality
+                q for q in existing_qualities if not self._same_replace_group(q, quality_to_update)
             ]
             existing_qualities.append(quality_to_update)
 
@@ -655,23 +675,15 @@ class Database:
                     if Telegram.REPLACE_MODE:
                         to_delete = [
                             q for q in existing_episode["telegram"]
-                            if q.get("quality") == target_quality
+                            if self._same_replace_group(q, quality)
                         ]
 
                         for q in to_delete:
-                            try:
-                                old_id = q.get("id")
-                                if old_id:
-                                    decoded = await decode_string(old_id)
-                                    chat_id = int(f"-100{decoded['chat_id']}")
-                                    msg_id = int(decoded['msg_id'])
-                                    create_task(delete_message(chat_id, msg_id))
-                            except Exception as e:
-                                LOGGER.error(f"Failed to delete old quality: {e}")
+                            self._queue_delete_telegram_source(q)
 
                         existing_episode["telegram"] = [
                             q for q in existing_episode["telegram"]
-                            if q.get("quality") != target_quality
+                            if not self._same_replace_group(q, quality)
                         ]
                         existing_episode["telegram"].append(quality)
 
@@ -950,15 +962,7 @@ class Database:
             doc = await self.dbs[db_key]["movie"].find_one({"tmdb_id": tmdb_id})
             if doc and "telegram" in doc:
                 for quality in doc["telegram"]:
-                    try:
-                        old_id = quality.get("id")
-                        if old_id:
-                            decoded_data = await decode_string(old_id)
-                            chat_id = int(f"-100{decoded_data['chat_id']}")
-                            msg_id = int(decoded_data['msg_id'])
-                            create_task(delete_message(chat_id, msg_id))
-                    except Exception as e:
-                        LOGGER.error(f"Failed to queue file for deletion: {e}")
+                    self._queue_delete_telegram_source(quality)
             
             result = await self.dbs[db_key]["movie"].delete_one({"tmdb_id": tmdb_id})
         else:
@@ -967,15 +971,7 @@ class Database:
                 for season in doc["seasons"]:
                     for episode in season.get("episodes", []):
                         for quality in episode.get("telegram", []):
-                            try:
-                                old_id = quality.get("id")
-                                if old_id:
-                                    decoded_data = await decode_string(old_id)
-                                    chat_id = int(f"-100{decoded_data['chat_id']}")
-                                    msg_id = int(decoded_data['msg_id'])
-                                    create_task(delete_message(chat_id, msg_id))
-                            except Exception as e:
-                                LOGGER.error(f"Failed to queue file for deletion: {e}")
+                            self._queue_delete_telegram_source(quality)
             
             result = await self.dbs[db_key]["tv"].delete_one({"tmdb_id": tmdb_id})
         
@@ -1049,6 +1045,72 @@ class Database:
                                 return True
         return False
 
+    async def delete_media_by_origin(self, origin_chat_id: int, origin_msg_id: int) -> bool:
+        """Remove every quality entry created from a source Telegram post."""
+        changed = False
+        for i in range(1, self.current_db_index + 1):
+            db = self.dbs[f"storage_{i}"]
+
+            movie_cursor = db["movie"].find({
+                "telegram.origin_chat_id": int(origin_chat_id),
+                "telegram.origin_msg_id": int(origin_msg_id),
+            })
+            for movie in await movie_cursor.to_list(None):
+                before = len(movie.get("telegram", []))
+                movie["telegram"] = [
+                    q for q in movie.get("telegram", [])
+                    if not (
+                        q.get("origin_chat_id") == int(origin_chat_id)
+                        and q.get("origin_msg_id") == int(origin_msg_id)
+                    )
+                ]
+                if len(movie["telegram"]) == before:
+                    continue
+                if movie["telegram"]:
+                    movie["updated_on"] = datetime.utcnow()
+                    await db["movie"].replace_one({"_id": movie["_id"]}, movie)
+                else:
+                    await db["movie"].delete_one({"_id": movie["_id"]})
+                changed = True
+
+            tv_cursor = db["tv"].find({
+                "seasons.episodes.telegram.origin_chat_id": int(origin_chat_id),
+                "seasons.episodes.telegram.origin_msg_id": int(origin_msg_id),
+            })
+            for tv in await tv_cursor.to_list(None):
+                doc_changed = False
+                new_seasons = []
+                for season in tv.get("seasons", []):
+                    new_episodes = []
+                    for episode in season.get("episodes", []):
+                        before = len(episode.get("telegram", []))
+                        episode["telegram"] = [
+                            q for q in episode.get("telegram", [])
+                            if not (
+                                q.get("origin_chat_id") == int(origin_chat_id)
+                                and q.get("origin_msg_id") == int(origin_msg_id)
+                            )
+                        ]
+                        if len(episode["telegram"]) != before:
+                            doc_changed = True
+                        if episode.get("telegram"):
+                            new_episodes.append(episode)
+                    season["episodes"] = new_episodes
+                    if season["episodes"]:
+                        new_seasons.append(season)
+
+                if not doc_changed:
+                    continue
+                tv["seasons"] = new_seasons
+                if tv["seasons"]:
+                    tv["updated_on"] = datetime.utcnow()
+                    await db["tv"].replace_one({"_id": tv["_id"]}, tv)
+                else:
+                    await db["tv"].delete_one({"_id": tv["_id"]})
+                changed = True
+
+        return changed
+
     async def delete_movie_quality(self, tmdb_id: int, db_index: int, id: str) -> bool:
         db_key = f"storage_{db_index}"
         movie = await self.dbs[db_key]["movie"].find_one({"tmdb_id": tmdb_id})
@@ -1058,15 +1120,7 @@ class Database:
 
         for q in movie["telegram"]:
             if q.get("id") == id:
-                try:
-                    old_id = q.get("id")
-                    if old_id:
-                        decoded_data = await decode_string(old_id)
-                        chat_id = int(f"-100{decoded_data['chat_id']}")
-                        msg_id = int(decoded_data['msg_id'])
-                        create_task(delete_message(chat_id, msg_id))
-                except Exception as e:
-                    LOGGER.error(f"Failed to queue file for deletion: {e}")
+                self._queue_delete_telegram_source(q)
                 break
         
         original_len = len(movie["telegram"])
@@ -1092,15 +1146,7 @@ class Database:
                 for ep in season["episodes"]:
                     if ep.get("episode_number") == episode_number:
                         for quality in ep.get("telegram", []):
-                            try:
-                                old_id = quality.get("id")
-                                if old_id:
-                                    decoded_data = await decode_string(old_id)
-                                    chat_id = int(f"-100{decoded_data['chat_id']}")
-                                    msg_id = int(decoded_data['msg_id'])
-                                    create_task(delete_message(chat_id, msg_id))
-                            except Exception as e:
-                                LOGGER.error(f"Failed to queue file for deletion: {e}")
+                            self._queue_delete_telegram_source(quality)
                         break
                 
                 original_len = len(season["episodes"])
@@ -1126,15 +1172,7 @@ class Database:
             if season.get("season_number") == season_number:
                 for episode in season.get("episodes", []):
                     for quality in episode.get("telegram", []):
-                        try:
-                            old_id = quality.get("id")
-                            if old_id:
-                                decoded_data = await decode_string(old_id)
-                                chat_id = int(f"-100{decoded_data['chat_id']}")
-                                msg_id = int(decoded_data['msg_id'])
-                                create_task(delete_message(chat_id, msg_id))
-                        except Exception as e:
-                            LOGGER.error(f"Failed to queue file for deletion: {e}")
+                        self._queue_delete_telegram_source(quality)
                 break
         
         original_len = len(tv["seasons"])
@@ -1161,15 +1199,7 @@ class Database:
                     if episode.get("episode_number") == episode_number and "telegram" in episode:
                         for q in episode["telegram"]:
                             if q.get("id") == id:
-                                try:
-                                    old_id = q.get("id")
-                                    if old_id:
-                                        decoded_data = await decode_string(old_id)
-                                        chat_id = int(f"-100{decoded_data['chat_id']}")
-                                        msg_id = int(decoded_data['msg_id'])
-                                        create_task(delete_message(chat_id, msg_id))
-                                except Exception as e:
-                                    LOGGER.error(f"Failed to queue file for deletion: {e}")
+                                self._queue_delete_telegram_source(q)
                                 break
                         
                         original_len = len(episode["telegram"])
