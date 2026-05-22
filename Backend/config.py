@@ -100,3 +100,28 @@ class Telegram:
         STREAM_SLO_BUFFERING_WARN_RATE = float(getenv("STREAM_SLO_BUFFERING_WARN_RATE", "0.05") or 0.05)
     except Exception:
         STREAM_SLO_BUFFERING_WARN_RATE = 0.05
+
+    # -------------------------------
+    # Torrent tracker scrape stats (optional, lightweight)
+    # -------------------------------
+    TORRENT_STATS_ENABLED = getenv("TORRENT_STATS_ENABLED", "true").lower() == "true"
+    try:
+        TORRENT_STATS_TTL_SEC = int(getenv("TORRENT_STATS_TTL_SEC", "21600") or 21600)
+    except Exception:
+        TORRENT_STATS_TTL_SEC = 21600
+    try:
+        TORRENT_STATS_FAILURE_TTL_SEC = int(getenv("TORRENT_STATS_FAILURE_TTL_SEC", "3600") or 3600)
+    except Exception:
+        TORRENT_STATS_FAILURE_TTL_SEC = 3600
+    try:
+        TORRENT_STATS_MAX_TRACKERS = int(getenv("TORRENT_STATS_MAX_TRACKERS", "5") or 5)
+    except Exception:
+        TORRENT_STATS_MAX_TRACKERS = 5
+    try:
+        TORRENT_STATS_TIMEOUT_SEC = float(getenv("TORRENT_STATS_TIMEOUT_SEC", "2.5") or 2.5)
+    except Exception:
+        TORRENT_STATS_TIMEOUT_SEC = 2.5
+    try:
+        TORRENT_STATS_CONCURRENCY = int(getenv("TORRENT_STATS_CONCURRENCY", "3") or 3)
+    except Exception:
+        TORRENT_STATS_CONCURRENCY = 3
