@@ -2,11 +2,14 @@ services:
   telegram-stremio:
     build: .
     container_name: tg_stremio  
+    depends_on:
+      - qbittorrent
     ports:
       - "8000:8000"
     volumes:
       - ./config.env:/app/config.env
       - ./cache:/app/cache
+      - /mnt/stremio-downloads/torrents/completed:/downloads/completed:ro
     restart: unless-stopped
     mem_limit: 768m
     memswap_limit: 1536m
@@ -14,4 +17,33 @@ services:
       driver: "json-file"
       options:
         max-size: "1m"     
+        max-file: "3"
+
+  qbittorrent:
+    image: qbittorrentofficial/qbittorrent-nox:latest
+    container_name: qbittorrent
+    environment:
+      - QBT_LEGAL_NOTICE=confirm
+      - QBT_TORRENTING_PORT=6881
+      - QBT_WEBUI_PORT=8080
+      - PUID=1000
+      - PGID=1000
+      - UMASK=002
+      - TZ=Asia/Kolkata
+    ports:
+      - "6881:6881/tcp"
+      - "6881:6881/udp"
+    volumes:
+      - /mnt/stremio-downloads/torrents/qbit-config:/config
+      - /mnt/stremio-downloads/torrents:/downloads
+    restart: unless-stopped
+    stop_grace_period: 30m
+    tmpfs:
+      - /tmp
+    mem_limit: 384m
+    memswap_limit: 768m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
         max-file: "3"

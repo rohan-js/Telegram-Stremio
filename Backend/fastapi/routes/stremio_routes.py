@@ -6,6 +6,8 @@ from Backend import db, __version__
 import PTN
 from datetime import datetime, timezone, timedelta
 from Backend.fastapi.security.tokens import verify_token
+from Backend.helper.encrypt import encode_string
+from Backend.helper.torrent_downloads import select_completed_torrent_file
 
 
 # --- Configuration ---
@@ -201,6 +203,59 @@ def build_torrent_stream(
         stream["behaviorHints"] = behavior_hints
 
     return stream
+
+
+async def build_downloaded_torrent_stream(
+    token: str,
+    quality: dict,
+    stream_name: str,
+    download_job: Optional[dict],
+    season_number: Optional[int] = None,
+    episode_number: Optional[int] = None,
+) -> Optional[dict]:
+    if not download_job or download_job.get("status") != "completed":
+        return None
+
+    selected = select_completed_torrent_file(
+        download_job.get("files") or [],
+        quality,
+        season_number=season_number,
+        episode_number=episode_number,
+    )
+    if not selected:
+        return None
+
+    rel_path = selected.get("rel_path")
+    if not rel_path:
+        return None
+
+    payload = {
+        "source_type": "downloaded_torrent",
+        "info_hash": str(quality.get("info_hash") or "").lower(),
+        "rel_path": rel_path,
+        "name": selected.get("name") or selected.get("rel_path") or quality.get("filename") or "video.mkv",
+        "size": int(selected.get("size") or 0),
+    }
+    encoded = await encode_string(payload)
+    filename = selected.get("name") or selected.get("rel_path") or quality.get("filename") or "video.mkv"
+    size_text = selected.get("size_text") or quality.get("size") or ""
+
+    downloaded_name = stream_name.replace("Telegram", "Downloaded", 1)
+    if downloaded_name == stream_name:
+        downloaded_name = f"Downloaded {stream_name}".strip()
+
+    return {
+        "name": downloaded_name,
+        "title": "\n".join(
+            part for part in [
+                f"📁 {filename}",
+                f"💾 {size_text}" if size_text else "",
+                "✅ Downloaded to VPS",
+            ]
+            if part
+        ),
+        "url": f"{BASE_URL}/downloaded/{token}/{encoded}/video.mkv",
+    }
 
 
 def get_resolution_priority(stream_name: str) -> int:
@@ -725,6 +780,7 @@ async def get_streams(
         if (quality.get("source_type") or "telegram") == "torrent":
             info_hash = quality.get("info_hash")
             torrent_stats = await db.get_torrent_stats(info_hash) if info_hash else None
+            download_job = await db.get_torrent_download(info_hash) if info_hash else None
             db.queue_torrent_stats_refresh(
                 info_hash,
                 quality.get("sources") or [],
@@ -733,6 +789,16 @@ async def get_streams(
             torrent_stream = build_torrent_stream(quality, stream_name, stream_title, torrent_stats)
             if torrent_stream:
                 streams.append(torrent_stream)
+            downloaded_stream = await build_downloaded_torrent_stream(
+                token,
+                quality,
+                stream_name,
+                download_job,
+                season_number=season_num,
+                episode_number=episode_num,
+            )
+            if downloaded_stream:
+                streams.append(downloaded_stream)
             continue
 
         if not quality.get("id"):

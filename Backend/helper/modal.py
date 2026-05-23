@@ -19,6 +19,9 @@ class QualityDetail(BaseModel):
     origin_chat_id: Optional[int] = None
     origin_msg_id: Optional[int] = None
     torrent_private: bool = False
+    torrent_source_uri: Optional[str] = None
+    torrent_file_chat_id: Optional[int] = None
+    torrent_file_msg_id: Optional[int] = None
 
 
 # ---------------------------

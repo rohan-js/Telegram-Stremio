@@ -125,3 +125,42 @@ class Telegram:
         TORRENT_STATS_CONCURRENCY = int(getenv("TORRENT_STATS_CONCURRENCY", "3") or 3)
     except Exception:
         TORRENT_STATS_CONCURRENCY = 3
+
+    # -------------------------------
+    # Torrent download-to-VPS cache (manual)
+    # -------------------------------
+    TORRENT_DOWNLOADS_ENABLED = getenv("TORRENT_DOWNLOADS_ENABLED", "true").lower() == "true"
+    TORRENT_DOWNLOAD_ROOT = getenv("TORRENT_DOWNLOAD_ROOT", "/downloads/completed")
+    try:
+        TORRENT_DOWNLOAD_MIN_FREE_GB = float(getenv("TORRENT_DOWNLOAD_MIN_FREE_GB", "10") or 10)
+    except Exception:
+        TORRENT_DOWNLOAD_MIN_FREE_GB = 10.0
+    try:
+        TORRENT_DOWNLOAD_CONCURRENCY = int(getenv("TORRENT_DOWNLOAD_CONCURRENCY", "1") or 1)
+    except Exception:
+        TORRENT_DOWNLOAD_CONCURRENCY = 1
+    try:
+        TORRENT_DOWNLOAD_POLL_SEC = int(getenv("TORRENT_DOWNLOAD_POLL_SEC", "15") or 15)
+    except Exception:
+        TORRENT_DOWNLOAD_POLL_SEC = 15
+    try:
+        TORRENT_DOWNLOAD_PROGRESS_EDIT_SEC = int(getenv("TORRENT_DOWNLOAD_PROGRESS_EDIT_SEC", "60") or 60)
+    except Exception:
+        TORRENT_DOWNLOAD_PROGRESS_EDIT_SEC = 60
+    try:
+        TORRENT_DOWNLOAD_STALL_TIMEOUT_SEC = int(getenv("TORRENT_DOWNLOAD_STALL_TIMEOUT_SEC", "3600") or 3600)
+    except Exception:
+        TORRENT_DOWNLOAD_STALL_TIMEOUT_SEC = 3600
+    try:
+        TORRENT_DOWNLOAD_MAX_RUNTIME_SEC = int(getenv("TORRENT_DOWNLOAD_MAX_RUNTIME_SEC", "172800") or 172800)
+    except Exception:
+        TORRENT_DOWNLOAD_MAX_RUNTIME_SEC = 172800
+
+    QBITTORRENT_BASE_URL = getenv("QBITTORRENT_BASE_URL", "http://qbittorrent:8080").rstrip("/")
+    QBITTORRENT_USERNAME = getenv("QBITTORRENT_USERNAME", "")
+    QBITTORRENT_PASSWORD = getenv("QBITTORRENT_PASSWORD", "")
+    QBITTORRENT_SAVE_PATH = getenv("QBITTORRENT_SAVE_PATH", "/downloads/completed")
+    QBITTORRENT_TEMP_PATH = getenv("QBITTORRENT_TEMP_PATH", "/downloads/incomplete")
+
+    NGINX_DOWNLOAD_ACCEL_REDIRECT_ENABLED = getenv("NGINX_DOWNLOAD_ACCEL_REDIRECT_ENABLED", "true").lower() == "true"
+    NGINX_DOWNLOAD_ACCEL_REDIRECT_LOCATION = getenv("NGINX_DOWNLOAD_ACCEL_REDIRECT_LOCATION", "/_downloads/")

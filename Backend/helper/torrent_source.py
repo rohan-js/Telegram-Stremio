@@ -34,6 +34,7 @@ class TorrentItem:
     sources: list[str]
     source_label: str
     is_private: bool = False
+    source_uri: str | None = None
 
     @property
     def unique_id(self) -> str:
@@ -143,6 +144,7 @@ def parse_magnet(magnet: str, fallback_name: str | None = None) -> TorrentItem:
         sources=_tracker_sources(trackers),
         source_label="magnet",
         is_private=False,
+        source_uri=magnet,
     )
 
 

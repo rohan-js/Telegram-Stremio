@@ -4,7 +4,7 @@ import Backend
 from pyrogram import Client, filters
 from pyrogram.enums.parse_mode import ParseMode
 from pyrogram.errors import FloodWait
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from Backend import db
 from Backend.config import Telegram
@@ -17,6 +17,10 @@ from Backend.helper.torrent_source import (
     extract_magnet_links,
     parse_magnet,
     parse_torrent,
+)
+from Backend.helper.torrent_downloads import (
+    TORRENT_DOWNLOAD_MANAGER,
+    torrent_download_callback_data,
 )
 from Backend.logger import LOGGER
 from Backend.helper.disk_cache import PRECACHE_MANAGER, PrecacheJob
@@ -147,7 +151,15 @@ async def send_reply_messages():
             buttons_row = [InlineKeyboardButton("▶️ Watch in Stremio", url=stremio_link)]
             if vlc_page:
                 buttons_row.append(InlineKeyboardButton("🎬 Watch in VLC", url=vlc_page))
-            buttons = InlineKeyboardMarkup([buttons_row])
+            button_rows = [buttons_row]
+            if source_type == "torrent" and metadata_info.get("info_hash"):
+                button_rows.append([
+                    InlineKeyboardButton(
+                        "⬇️ Download to VPS",
+                        callback_data=torrent_download_callback_data(metadata_info["info_hash"]),
+                    )
+                ])
+            buttons = InlineKeyboardMarkup(button_rows)
 
             await StreamBot.send_message(
                 chat_id=chat_id,
@@ -204,6 +216,28 @@ def _torrent_title(item: TorrentItem, text: str) -> str:
     return cleaned_text or item.display_name
 
 
+@Client.on_callback_query(filters.regex(r"^tdl_([a-fA-F0-9]{40})$"))
+async def torrent_download_callback(client: Client, callback_query: CallbackQuery):
+    try:
+        info_hash = callback_query.matches[0].group(1).lower()
+        requester_id = callback_query.from_user.id if callback_query.from_user else None
+        message = callback_query.message
+        if not message:
+            return await callback_query.answer("Missing status message.", show_alert=True)
+
+        ok, text, _ = await TORRENT_DOWNLOAD_MANAGER.queue_from_info_hash(
+            client=client,
+            info_hash=info_hash,
+            requester_user_id=requester_id,
+            status_message_chat_id=message.chat.id,
+            status_message_id=message.id,
+        )
+        await callback_query.answer(text, show_alert=not ok)
+    except Exception as e:
+        LOGGER.error(f"Torrent download callback failed: {e}")
+        await callback_query.answer("Could not queue torrent download.", show_alert=True)
+
+
 async def _queue_torrent_item(message: Message, item: TorrentItem, override_id: str | None) -> bool:
     channel = int(str(message.chat.id).replace("-100", ""))
     msg_id = message.id
@@ -240,6 +274,9 @@ async def _queue_torrent_item(message: Message, item: TorrentItem, override_id: 
         "origin_chat_id": int(message.chat.id),
         "origin_msg_id": int(msg_id),
         "torrent_private": bool(item.is_private),
+        "torrent_source_uri": item.source_uri,
+        "torrent_file_chat_id": int(message.chat.id) if not item.source_uri and _is_torrent_document(message) else None,
+        "torrent_file_msg_id": int(msg_id) if not item.source_uri and _is_torrent_document(message) else None,
     })
     await file_queue.put((
         metadata_info,

@@ -6,7 +6,7 @@ from bson import ObjectId
 import motor.motor_asyncio
 from datetime import datetime, timezone, timedelta
 from pydantic import ValidationError
-from pymongo import ASCENDING, DESCENDING
+from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from typing import Dict, List, Optional, Tuple, Any
 
 from Backend.logger import LOGGER
@@ -201,6 +201,176 @@ class Database:
             return doc
         finally:
             self._torrent_stats_refreshing.discard(info_hash)
+
+    # -------------------------------
+    # Torrent download-to-VPS tracking
+    # -------------------------------
+    async def get_torrent_download(self, info_hash: str) -> Optional[dict]:
+        if not info_hash:
+            return None
+        try:
+            return await self.dbs["tracking"]["torrent_downloads"].find_one({"_id": str(info_hash).lower()})
+        except Exception as e:
+            LOGGER.debug(f"Torrent download lookup failed for {info_hash}: {e}")
+            return None
+
+    async def update_torrent_download_job(self, info_hash: str, update_data: dict) -> None:
+        if not info_hash:
+            return
+        update_data = dict(update_data or {})
+        update_data.pop("_id", None)
+        await self.dbs["tracking"]["torrent_downloads"].update_one(
+            {"_id": str(info_hash).lower()},
+            {"$set": update_data},
+            upsert=True,
+        )
+
+    async def get_next_torrent_download_job(self) -> Optional[dict]:
+        try:
+            now = datetime.utcnow()
+            return await self.dbs["tracking"]["torrent_downloads"].find_one_and_update(
+                {"status": {"$in": ["queued", "downloading"]}},
+                {"$set": {"status": "downloading", "started_at": now, "updated_at": now}},
+                sort=[("created_at", ASCENDING)],
+                return_document=ReturnDocument.AFTER,
+            )
+        except Exception as e:
+            LOGGER.warning(f"Could not claim torrent download job: {e}")
+            return None
+
+    async def upsert_torrent_download_job(self, source: dict) -> dict:
+        info_hash = str(source.get("info_hash") or "").lower()
+        if not info_hash:
+            raise ValueError("Missing torrent info_hash")
+
+        now = datetime.utcnow()
+        existing = await self.get_torrent_download(info_hash)
+
+        status_message_fields = {
+            "requester_user_id": source.get("requester_user_id"),
+            "status_message_chat_id": source.get("status_message_chat_id"),
+            "status_message_id": source.get("status_message_id"),
+            "stremio_link": source.get("stremio_link"),
+        }
+
+        if existing and existing.get("status") in {"queued", "downloading"}:
+            await self.dbs["tracking"]["torrent_downloads"].update_one(
+                {"_id": info_hash},
+                {"$set": {**status_message_fields, "updated_at": now}},
+            )
+            existing.update(status_message_fields)
+            existing["updated_at"] = now
+            return existing
+
+        if existing and existing.get("status") == "completed":
+            await self.dbs["tracking"]["torrent_downloads"].update_one(
+                {"_id": info_hash},
+                {"$set": {**status_message_fields, "updated_at": now}},
+            )
+            existing.update(status_message_fields)
+            existing["updated_at"] = now
+            return existing
+
+        doc = {
+            "_id": info_hash,
+            "info_hash": info_hash,
+            "status": "queued",
+            "qbit_hash": None,
+            "name": source.get("name") or source.get("filename") or info_hash,
+            "title": source.get("title"),
+            "size": int(source.get("video_size") or 0),
+            "progress": 0.0,
+            "downloaded": 0,
+            "dlspeed": 0,
+            "eta": 0,
+            "save_path": None,
+            "content_path": None,
+            "files": [],
+            "sources": source.get("sources") or [],
+            "file_idx": source.get("file_idx"),
+            "filename": source.get("filename"),
+            "torrent_private": bool(source.get("torrent_private", False)),
+            "torrent_source_uri": source.get("torrent_source_uri"),
+            "torrent_file_chat_id": source.get("torrent_file_chat_id"),
+            "torrent_file_msg_id": source.get("torrent_file_msg_id"),
+            "origin_chat_id": source.get("origin_chat_id"),
+            "origin_msg_id": source.get("origin_msg_id"),
+            "media_type": source.get("media_type"),
+            "imdb_id": source.get("imdb_id"),
+            "season_number": source.get("season_number"),
+            "episode_number": source.get("episode_number"),
+            "created_at": existing.get("created_at") if existing else now,
+            "updated_at": now,
+            "started_at": None,
+            "last_progress_at": None,
+            "last_status_edit_at": None,
+            "completed_at": None,
+            "failed_at": None,
+            "failed_reason": None,
+            **status_message_fields,
+        }
+        await self.dbs["tracking"]["torrent_downloads"].replace_one({"_id": info_hash}, doc, upsert=True)
+        return doc
+
+    def _stremio_open_link(self, media_type: str, imdb_id: str, season_number=None, episode_number=None) -> str:
+        base_url = Telegram.BASE_URL.rstrip("/")
+        token = Telegram.DEFAULT_ADDON_TOKEN
+        if not imdb_id:
+            return f"{base_url}/stremio/{token}/configure" if token else f"{base_url}/stremio"
+        if media_type == "tv":
+            return f"{base_url}/stremio/open/series/{imdb_id}?season={int(season_number or 1)}&episode={int(episode_number or 1)}"
+        return f"{base_url}/stremio/open/movie/{imdb_id}"
+
+    async def find_torrent_download_source(self, info_hash: str) -> Optional[dict]:
+        info_hash = str(info_hash or "").lower()
+        if not info_hash:
+            return None
+
+        for i in range(1, self.current_db_index + 1):
+            db = self.dbs[f"storage_{i}"]
+
+            movie = await db["movie"].find_one({"telegram.info_hash": info_hash})
+            if movie:
+                for quality in movie.get("telegram", []):
+                    if str(quality.get("info_hash") or "").lower() == info_hash:
+                        source = dict(quality)
+                        source.update(
+                            {
+                                "media_type": "movie",
+                                "imdb_id": movie.get("imdb_id"),
+                                "title": movie.get("title"),
+                                "stremio_link": self._stremio_open_link("movie", movie.get("imdb_id")),
+                            }
+                        )
+                        return source
+
+            tv = await db["tv"].find_one({"seasons.episodes.telegram.info_hash": info_hash})
+            if tv:
+                for season in tv.get("seasons", []):
+                    for episode in season.get("episodes", []):
+                        for quality in episode.get("telegram", []):
+                            if str(quality.get("info_hash") or "").lower() == info_hash:
+                                source = dict(quality)
+                                season_number = season.get("season_number")
+                                episode_number = episode.get("episode_number")
+                                source.update(
+                                    {
+                                        "media_type": "tv",
+                                        "imdb_id": tv.get("imdb_id"),
+                                        "title": tv.get("title"),
+                                        "season_number": season_number,
+                                        "episode_number": episode_number,
+                                        "stremio_link": self._stremio_open_link(
+                                            "tv",
+                                            tv.get("imdb_id"),
+                                            season_number=season_number,
+                                            episode_number=episode_number,
+                                        ),
+                                    }
+                                )
+                                return source
+
+        return None
 
     # -------------------------------
     # User Subscription Management
@@ -594,6 +764,9 @@ class Database:
             origin_chat_id=metadata_info.get("origin_chat_id"),
             origin_msg_id=metadata_info.get("origin_msg_id"),
             torrent_private=bool(metadata_info.get("torrent_private", False)),
+            torrent_source_uri=metadata_info.get("torrent_source_uri"),
+            torrent_file_chat_id=metadata_info.get("torrent_file_chat_id"),
+            torrent_file_msg_id=metadata_info.get("torrent_file_msg_id"),
         )
 
     def _source_type(self, quality: dict) -> str:

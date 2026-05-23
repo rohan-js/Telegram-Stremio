@@ -14,6 +14,7 @@ from Backend.pyrofork.clients import initialize_clients
 from Backend.pyrofork.plugins.channels import _load_channels_from_db
 from Backend.helper.subscription_checker import subscription_checker_loop
 from Backend.helper.link_checker import DeadLinkChecker
+from Backend.helper.torrent_downloads import TORRENT_DOWNLOAD_MANAGER
 from Backend.fastapi.main import app
 
 
@@ -46,6 +47,9 @@ async def start_services():
         
         await setup_bot_commands(StreamBot)
         await asleep(2)
+
+        if Telegram.TORRENT_DOWNLOADS_ENABLED:
+            await TORRENT_DOWNLOAD_MANAGER.start()
 
         LOGGER.info('Initializing Telegram-Stremio Web Server...')
         await restart_notification()

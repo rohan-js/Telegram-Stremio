@@ -47,6 +47,7 @@ class TorrentStatsTests(unittest.TestCase):
         self.assertEqual(item.file_name, "Movie.Name.2026.1080p.mkv")
         self.assertEqual(item.sources, ["tracker:udp://tracker.example:80/announce"])
         self.assertFalse(item.is_private)
+        self.assertTrue(item.source_uri.startswith("magnet:?"))
 
     def test_torrent_parsing_preserves_file_idx_and_private_flag(self):
         info = {

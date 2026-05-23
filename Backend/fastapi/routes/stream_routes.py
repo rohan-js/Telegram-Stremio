@@ -2,6 +2,7 @@ import secrets
 import mimetypes
 import time
 from typing import Dict
+from pathlib import Path
 
 from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -27,6 +28,12 @@ from Backend.helper.disk_cache import (
     touch_cache_file,
     nginx_accel_enabled,
     nginx_accel_redirect_uri,
+)
+from Backend.helper.torrent_downloads import (
+    download_root_dir,
+    guess_mime_type,
+    nginx_download_redirect_uri,
+    safe_download_file_path,
 )
 from Backend.pyrofork.bot import StreamBot, work_loads, multi_clients, client_dc_map, client_failures, client_avg_mbps
 from Backend.config import Telegram
@@ -302,6 +309,87 @@ async def track_usage_from_stats(stream_id: str, token: str, token_data: dict):
                     LOGGER.info(f"Cancelled - final update for {stream_id}: {delta} bytes")
                 except Exception as e:
                     LOGGER.error(f"Cancelled usage update failed: {e}")
+
+
+@router.get("/downloaded/{token}/{id}/{name}")
+@router.head("/downloaded/{token}/{id}/{name}")
+async def downloaded_torrent_stream_handler(
+    request: Request,
+    token: str,
+    id: str,
+    name: str,
+    token_data: dict = Depends(verify_token),
+):
+    decoded = await decode_string(id)
+    if decoded.get("source_type") != "downloaded_torrent":
+        raise HTTPException(status_code=400, detail="Invalid downloaded stream id")
+
+    rel_path = decoded.get("rel_path")
+    if not rel_path:
+        raise HTTPException(status_code=400, detail="Missing downloaded file path")
+
+    try:
+        file_path = safe_download_file_path(download_root_dir(), rel_path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid downloaded file path")
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Downloaded file not found")
+
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("Range", "")
+    start, end = parse_range_header(range_header, file_size)
+    req_length = end - start + 1
+
+    file_name = Path(str(decoded.get("name") or file_path.name)).name or file_path.name
+    mime_type = guess_mime_type(file_path)
+    headers = {
+        "Content-Type": mime_type,
+        "Content-Disposition": f'inline; filename="{file_name}"',
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=3600",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+    }
+    if range_header:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+    if request.method == "HEAD":
+        headers["Content-Length"] = str(req_length)
+
+    if request.method != "HEAD":
+        try:
+            asyncio.create_task(db.update_token_usage(token, int(req_length)))
+        except Exception:
+            pass
+
+    from fastapi.responses import Response as PlainResponse
+
+    if getattr(Telegram, "NGINX_DOWNLOAD_ACCEL_REDIRECT_ENABLED", True):
+        headers["X-Accel-Redirect"] = nginx_download_redirect_uri(rel_path)
+        return PlainResponse(status_code=206 if range_header else 200, headers=headers)
+
+    if request.method == "HEAD":
+        return PlainResponse(status_code=206 if range_header else 200, headers=headers)
+
+    import aiofiles
+
+    async def _iter_file_range(path: Path, start_pos: int, end_pos: int, read_size: int = 1024 * 1024):
+        remaining = (end_pos - start_pos) + 1
+        async with aiofiles.open(path, "rb") as f:
+            await f.seek(start_pos)
+            while remaining > 0:
+                chunk = await f.read(min(read_size, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(
+        _iter_file_range(file_path, start, end),
+        headers=headers,
+        status_code=206 if range_header else 200,
+        media_type=mime_type,
+    )
 
 
 @router.get("/dl/{token}/{id}/{name}")
