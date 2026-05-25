@@ -298,6 +298,9 @@ class QBitTorrentClient:
             "category": "stremio",
             "paused": "false",
             "root_folder": "true",
+            "ratioLimit": "0",
+            "seedingTimeLimit": "0",
+            "inactiveSeedingTimeLimit": "0",
         }
         temp_path = temp_path or getattr(Telegram, "QBITTORRENT_TEMP_PATH", "")
         if temp_path:
@@ -334,6 +337,27 @@ class QBitTorrentClient:
         )
         return response.json() or []
 
+    async def list_torrents(self, category: Optional[str] = None) -> list[dict]:
+        params = {}
+        if category:
+            params["category"] = category
+        response = await self._request("GET", "/api/v2/torrents/info", params=params)
+        return response.json() or []
+
+    async def set_no_seed_share_limits(self, info_hash: str) -> None:
+        data = {
+            "hashes": str(info_hash).lower(),
+            "ratioLimit": "0",
+            "seedingTimeLimit": "0",
+            "inactiveSeedingTimeLimit": "0",
+            "shareLimitAction": "Stop",
+        }
+        try:
+            await self._request("POST", "/api/v2/torrents/setShareLimits", data=data)
+        except QBitTorrentError:
+            data.pop("shareLimitAction", None)
+            await self._request("POST", "/api/v2/torrents/setShareLimits", data=data)
+
     async def stop_torrent(self, info_hash: str) -> None:
         try:
             await self._request("POST", "/api/v2/torrents/stop", data={"hashes": str(info_hash).lower()})
@@ -367,6 +391,7 @@ class TorrentDownloadManager:
             for worker_id in range(concurrency):
                 asyncio.create_task(self._worker_loop(worker_id))
             self._started = True
+            asyncio.create_task(self.stop_completed_stremio_seeders())
             LOGGER.info("Torrent download manager started (concurrency=%s)", concurrency)
 
     def wake(self) -> None:
@@ -498,6 +523,10 @@ class TorrentDownloadManager:
         info_hash = str(job.get("info_hash") or "").lower()
         existing = await qbit.torrent_info(info_hash)
         if existing:
+            try:
+                await qbit.set_no_seed_share_limits(info_hash)
+            except Exception as e:
+                LOGGER.debug("Could not apply no-seed limits for existing torrent %s: %s", info_hash, e)
             return
 
         magnet_uri = job.get("torrent_source_uri")
@@ -511,6 +540,10 @@ class TorrentDownloadManager:
             save_path=getattr(Telegram, "QBITTORRENT_SAVE_PATH", "/downloads/completed"),
             temp_path=getattr(Telegram, "QBITTORRENT_TEMP_PATH", "/downloads/incomplete"),
         )
+        try:
+            await qbit.set_no_seed_share_limits(info_hash)
+        except Exception as e:
+            LOGGER.debug("Could not apply no-seed limits immediately for %s: %s", info_hash, e)
 
     async def _download_torrent_file_bytes(self, client, job: dict) -> bytes:
         chat_id = int(job.get("torrent_file_chat_id") or job.get("origin_chat_id") or 0)
@@ -535,6 +568,7 @@ class TorrentDownloadManager:
         started_mono = time.monotonic()
         last_progress_mono = time.monotonic()
         last_progress = 0.0
+        share_limits_applied = False
 
         while True:
             info = await qbit.torrent_info(info_hash)
@@ -549,6 +583,13 @@ class TorrentDownloadManager:
                 continue
 
             progress = float(info.get("progress") or 0.0)
+            if not share_limits_applied:
+                try:
+                    await qbit.set_no_seed_share_limits(str(info.get("hash") or info_hash).lower())
+                    share_limits_applied = True
+                except Exception as e:
+                    LOGGER.debug("Could not apply no-seed limits for %s: %s", info_hash, e)
+
             last_progress_at = None
             if progress > last_progress + 0.0001:
                 last_progress = progress
@@ -616,6 +657,31 @@ class TorrentDownloadManager:
                 return
 
             await asyncio.sleep(poll_sec)
+
+    async def stop_completed_stremio_seeders(self) -> int:
+        qbit = QBitTorrentClient()
+        stopped = 0
+        try:
+            torrents = await qbit.list_torrents(category="stremio")
+            for item in torrents:
+                info_hash = str(item.get("hash") or "").lower()
+                state = str(item.get("state") or "")
+                progress = float(item.get("progress") or 0.0)
+                if info_hash and (progress >= 0.999 or state in DONE_STATES):
+                    try:
+                        await qbit.set_no_seed_share_limits(info_hash)
+                    except Exception as e:
+                        LOGGER.debug("Could not apply no-seed limits during cleanup for %s: %s", info_hash, e)
+                    if state in DONE_STATES:
+                        await qbit.stop_torrent(info_hash)
+                        stopped += 1
+            if stopped:
+                LOGGER.info("Stopped %s completed qBittorrent stremio torrent(s)", stopped)
+        except Exception as e:
+            LOGGER.debug("Completed qBittorrent seeder cleanup failed: %s", e)
+        finally:
+            await qbit.close()
+        return stopped
 
     async def _fail_job(self, client, qbit: QBitTorrentClient, info_hash: str, reason: str) -> None:
         from Backend import db

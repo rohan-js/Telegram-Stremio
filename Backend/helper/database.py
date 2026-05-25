@@ -16,6 +16,7 @@ from Backend.helper.encrypt import decode_string
 from Backend.helper.modal import Episode, MovieSchema, QualityDetail, Season, TVShowSchema
 from Backend.helper.task_manager import delete_message
 from Backend.helper.torrent_stats import scrape_torrent_trackers
+from Backend.helper.host_outbound import build_vps_outbound_sample
 
 
 def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
@@ -80,6 +81,34 @@ class Database:
             {"$set": {"current_index": self.current_db_index}},
             upsert=True
         )
+
+    async def record_vps_outbound_sample(
+        self,
+        interface: str,
+        current_tx_bytes: int,
+        monthly_limit_bytes: int,
+        force: bool = False,
+    ) -> dict:
+        now = datetime.now(timezone.utc)
+        current_tx_bytes = max(0, int(current_tx_bytes or 0))
+        monthly_limit_bytes = max(1, int(monthly_limit_bytes or 1))
+
+        collection = self.dbs["tracking"]["state"]
+        existing = await collection.find_one({"_id": "vps_outbound_tx"})
+        update = build_vps_outbound_sample(
+            existing,
+            interface=interface,
+            current_tx_bytes=current_tx_bytes,
+            monthly_limit_bytes=monthly_limit_bytes,
+            now=now,
+        )
+        await collection.update_one({"_id": "vps_outbound_tx"}, {"$set": update}, upsert=True)
+        return {
+            "enabled": True,
+            "status": "ok",
+            "source": "host interface tx",
+            **update,
+        }
 
     # -------------------------------
     # Torrent tracker stats cache

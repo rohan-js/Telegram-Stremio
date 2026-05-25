@@ -11,6 +11,8 @@ services:
       - ./cache:/app/cache
       - /mnt/stremio-downloads/torrents/completed:/downloads/completed:ro
       - /var/log/nginx:/host/var/log/nginx:ro
+      - /sys/class/net/ens3/statistics/tx_bytes:/host/ens3_tx_bytes:ro
+      - /proc/net:/host/proc/net:ro
     restart: unless-stopped
     mem_limit: 768m
     memswap_limit: 1536m

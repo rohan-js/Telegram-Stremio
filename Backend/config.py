@@ -186,3 +186,12 @@ class Telegram:
         NGINX_EGRESS_CACHE_SEC = int(getenv("NGINX_EGRESS_CACHE_SEC", "30") or 30)
     except Exception:
         NGINX_EGRESS_CACHE_SEC = 30
+
+    VPS_OUTBOUND_ENABLED = getenv("VPS_OUTBOUND_ENABLED", "true").lower() == "true"
+    VPS_OUTBOUND_INTERFACE = getenv("VPS_OUTBOUND_INTERFACE", "ens3")
+    VPS_OUTBOUND_TX_BYTES_PATH = getenv("VPS_OUTBOUND_TX_BYTES_PATH", "/host/ens3_tx_bytes")
+    VPS_OUTBOUND_NET_DEV_PATH = getenv("VPS_OUTBOUND_NET_DEV_PATH", "/host/proc/net/dev")
+    try:
+        VPS_OUTBOUND_MONTHLY_LIMIT_BYTES = int(getenv("VPS_OUTBOUND_MONTHLY_LIMIT_BYTES", str(10 * 1024 ** 4)) or 10 * 1024 ** 4)
+    except Exception:
+        VPS_OUTBOUND_MONTHLY_LIMIT_BYTES = 10 * 1024 ** 4

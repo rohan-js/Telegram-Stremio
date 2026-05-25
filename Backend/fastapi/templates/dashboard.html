@@ -21,7 +21,7 @@
         </div>
     </header>
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
         <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
             <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-glow">
                 <i class="fa-solid fa-clock"></i>
@@ -61,6 +61,25 @@
                 <p id="sys-egress-today" class="text-lg font-bold text-text" data-bytes="{{ system_stats.egress.today.bytes|default(0) }}"></p>
                 <p class="text-[10px] text-text-secondary">
                     Month: <span id="sys-egress-month" data-bytes="{{ system_stats.egress.month.bytes|default(0) }}"></span>
+                </p>
+            </div>
+        </div>
+
+        <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center text-sky-300">
+                <i class="fa-solid fa-network-wired"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+                <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">VPS TX Outbound</p>
+                <p id="sys-vps-outbound-month" class="text-lg font-bold text-text" data-bytes="{{ system_stats.vps_outbound.month.bytes|default(0) }}"></p>
+                <p class="text-[10px] text-text-secondary">
+                    Today: <span id="sys-vps-outbound-today" data-bytes="{{ system_stats.vps_outbound.today.bytes|default(0) }}"></span>
+                </p>
+                <div class="mt-2 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                    <div id="sys-vps-outbound-progress" class="h-full bg-sky-400 transition-all duration-700" style="width: {{ [system_stats.vps_outbound.month.percent|default(0), 100]|min }}%"></div>
+                </div>
+                <p class="mt-1 text-[9px] text-text-secondary">
+                    <span id="sys-vps-outbound-percent">{{ "%.1f"|format(system_stats.vps_outbound.month.percent|default(0)) }}%</span> of 10 TB
                 </p>
             </div>
         </div>
@@ -243,7 +262,7 @@
             <div class="p-8 border-b border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
                 <div>
                     <h3 class="text-xl font-bold text-text">Access Management</h3>
-                    <p class="text-sm text-text-secondary">Control API tokens, daily quotas, and monthly quotas. HTTP egress is tracked separately in System Overview.</p>
+                    <p class="text-sm text-text-secondary">Control API tokens, daily quotas, and monthly quotas. HTTP egress and VPS TX outbound are tracked separately in System Overview.</p>
                 </div>
                 <button onclick="toggleCreateForm()" id="create-btn-container"
                     class="px-6 py-3 bg-primary text-background font-bold rounded-2xl hover:brightness-110 transition-all flex items-center gap-2">
@@ -860,6 +879,32 @@
                     const monthBytes = egress.month?.bytes || 0;
                     elEgressMonth.setAttribute('data-bytes', monthBytes);
                     elEgressMonth.textContent = formatBytes(monthBytes);
+                }
+
+                const vpsOutbound = stats.vps_outbound || {};
+                const elVpsOutboundMonth = document.getElementById('sys-vps-outbound-month');
+                if (elVpsOutboundMonth) {
+                    const monthBytes = vpsOutbound.month?.bytes || 0;
+                    elVpsOutboundMonth.setAttribute('data-bytes', monthBytes);
+                    elVpsOutboundMonth.textContent = formatBytes(monthBytes);
+                }
+
+                const elVpsOutboundToday = document.getElementById('sys-vps-outbound-today');
+                if (elVpsOutboundToday) {
+                    const todayBytes = vpsOutbound.today?.bytes || 0;
+                    elVpsOutboundToday.setAttribute('data-bytes', todayBytes);
+                    elVpsOutboundToday.textContent = formatBytes(todayBytes);
+                }
+
+                const outboundPercent = Number(vpsOutbound.month?.percent || 0);
+                const elVpsOutboundProgress = document.getElementById('sys-vps-outbound-progress');
+                if (elVpsOutboundProgress) {
+                    elVpsOutboundProgress.style.width = Math.max(0, Math.min(100, outboundPercent)).toFixed(1) + '%';
+                }
+
+                const elVpsOutboundPercent = document.getElementById('sys-vps-outbound-percent');
+                if (elVpsOutboundPercent) {
+                    elVpsOutboundPercent.textContent = outboundPercent.toFixed(1) + '%';
                 }
 
                 if (stats.databases && Array.isArray(stats.databases)) {

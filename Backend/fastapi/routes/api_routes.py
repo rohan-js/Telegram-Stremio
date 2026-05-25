@@ -8,6 +8,7 @@ from Backend.helper.pyro import get_readable_time
 from Backend.pyrofork.bot import multi_clients, StreamBot
 from Backend.helper.custom_dl import run_speed_test, _speed_test_single_client
 from Backend.helper.nginx_egress import get_nginx_egress_summary
+from Backend.helper.host_outbound import get_vps_outbound_summary
 from time import time
 
 
@@ -32,6 +33,7 @@ async def get_system_stats_api():
             "total_databases": len(db_stats),
             "current_db_index": db.current_db_index,
             "egress": get_nginx_egress_summary(),
+            "vps_outbound": await get_vps_outbound_summary(db),
             "api_tokens": api_tokens
         }
     except Exception as e:

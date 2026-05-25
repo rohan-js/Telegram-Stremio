@@ -14,6 +14,7 @@ from Backend.fastapi.routes import stream_routes
 from Backend.fastapi.routes.stremio_routes import build_downloaded_torrent_stream
 from Backend.helper.torrent_downloads import (
     QBitTorrentClient,
+    TorrentDownloadManager,
     has_enough_download_space,
     nginx_download_redirect_uri,
     safe_download_file_path,
@@ -100,10 +101,14 @@ class QBitTorrentClientTests(unittest.IsolatedAsyncioTestCase):
         requests = []
 
         async def handler(request: httpx.Request) -> httpx.Response:
-            requests.append((request.method, request.url.path))
+            requests.append((request.method, request.url.path, request.content.decode(errors="replace")))
             if request.url.path == "/api/v2/torrents/add":
                 return httpx.Response(200, text="Ok.")
+            if request.url.path == "/api/v2/torrents/setShareLimits":
+                return httpx.Response(200, text="Ok.")
             if request.url.path == "/api/v2/torrents/info":
+                if "category=stremio" in str(request.url):
+                    return httpx.Response(200, json=[])
                 return httpx.Response(
                     200,
                     json=[
@@ -135,6 +140,7 @@ class QBitTorrentClientTests(unittest.IsolatedAsyncioTestCase):
             await client.add_torrent(magnet_uri="magnet:?xt=urn:btih:abc")
             info = await client.torrent_info("abc")
             files = await client.torrent_files("abc")
+            await client.set_no_seed_share_limits("abc")
             await client.stop_torrent("abc")
             await client.delete_torrent("abc", delete_files=True)
         finally:
@@ -142,9 +148,41 @@ class QBitTorrentClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(info["name"], "Movie")
         self.assertEqual(files[0]["name"], "Movie.mkv")
-        self.assertIn(("POST", "/api/v2/torrents/add"), requests)
-        self.assertIn(("POST", "/api/v2/torrents/stop"), requests)
-        self.assertIn(("POST", "/api/v2/torrents/delete"), requests)
+        self.assertTrue(any(item[0:2] == ("POST", "/api/v2/torrents/add") and "ratioLimit=0" in item[2] and "seedingTimeLimit=0" in item[2] for item in requests))
+        self.assertTrue(any(item[0:2] == ("POST", "/api/v2/torrents/setShareLimits") and "inactiveSeedingTimeLimit=0" in item[2] for item in requests))
+        self.assertTrue(any(item[0:2] == ("POST", "/api/v2/torrents/stop") for item in requests))
+        self.assertTrue(any(item[0:2] == ("POST", "/api/v2/torrents/delete") for item in requests))
+
+    async def test_download_manager_stops_completed_stremio_seeders(self):
+        class FakeQBit:
+            def __init__(self):
+                self.share_limited = []
+                self.stopped = []
+
+            async def list_torrents(self, category=None):
+                self.category = category
+                return [
+                    {"hash": "done", "state": "uploading", "progress": 1.0},
+                    {"hash": "active", "state": "downloading", "progress": 0.5},
+                ]
+
+            async def set_no_seed_share_limits(self, info_hash):
+                self.share_limited.append(info_hash)
+
+            async def stop_torrent(self, info_hash):
+                self.stopped.append(info_hash)
+
+            async def close(self):
+                pass
+
+        fake_qbit = FakeQBit()
+        with patch("Backend.helper.torrent_downloads.QBitTorrentClient", lambda: fake_qbit):
+            stopped = await TorrentDownloadManager().stop_completed_stremio_seeders()
+
+        self.assertEqual(stopped, 1)
+        self.assertEqual(fake_qbit.category, "stremio")
+        self.assertIn("done", fake_qbit.share_limited)
+        self.assertEqual(fake_qbit.stopped, ["done"])
 
 
 class StremioDownloadedStreamTests(unittest.IsolatedAsyncioTestCase):
