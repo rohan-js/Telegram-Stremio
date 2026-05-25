@@ -1,13 +1,16 @@
 import os
+import tempfile
 import unittest
 from collections import namedtuple
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 
 
 os.environ.setdefault("DATABASE", "mongodb://tracking,mongodb://storage")
 
+from Backend.fastapi.routes import stream_routes
 from Backend.fastapi.routes.stremio_routes import build_downloaded_torrent_stream
 from Backend.helper.torrent_downloads import (
     QBitTorrentClient,
@@ -173,6 +176,74 @@ class StremioDownloadedStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stream["name"], "Downloaded 1080p")
         self.assertIn("Downloaded to VPS", stream["title"])
         self.assertIn("/downloaded/token/", stream["url"])
+
+
+class DownloadedUsageAccountingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_file_range_stream_counts_only_yielded_bytes(self):
+        class FakeDB:
+            def __init__(self):
+                self.total = 0
+
+            async def update_token_usage(self, _token, bytes_delta):
+                self.total += bytes_delta
+
+        fake_db = FakeDB()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "video.mkv"
+            path.write_bytes(b"0123456789")
+
+            with patch.object(stream_routes, "db", fake_db):
+                chunks = []
+                async for chunk in stream_routes.stream_file_range_with_usage(
+                    path,
+                    0,
+                    9,
+                    token="token",
+                    read_size=4,
+                ):
+                    chunks.append(chunk)
+
+        self.assertEqual(b"".join(chunks), b"0123456789")
+        self.assertEqual(fake_db.total, 10)
+
+    async def test_downloaded_nginx_offload_does_not_count_requested_range(self):
+        class FakeDB:
+            def __init__(self):
+                self.calls = []
+
+            async def update_token_usage(self, token, bytes_delta):
+                self.calls.append((token, bytes_delta))
+
+        class FakeRequest:
+            method = "GET"
+            headers = {"Range": "bytes=0-"}
+
+        async def fake_decode(_encoded):
+            return {"source_type": "downloaded_torrent", "rel_path": "video.mkv", "name": "video.mkv"}
+
+        fake_db = FakeDB()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "video.mkv").write_bytes(b"0123456789")
+
+            with (
+                patch.object(stream_routes, "db", fake_db),
+                patch.object(stream_routes, "decode_string", fake_decode),
+                patch.object(stream_routes, "download_root_dir", lambda: root),
+                patch.object(stream_routes.Telegram, "NGINX_DOWNLOAD_ACCEL_REDIRECT_ENABLED", True),
+            ):
+                response = await stream_routes.downloaded_torrent_stream_handler(
+                    FakeRequest(),
+                    token="token",
+                    id="encoded",
+                    name="video.mkv",
+                    token_data={"name": "test"},
+                )
+
+        self.assertEqual(response.status_code, 206)
+        self.assertIn("x-accel-redirect", response.headers)
+        self.assertEqual(fake_db.calls, [])
 
 
 if __name__ == "__main__":

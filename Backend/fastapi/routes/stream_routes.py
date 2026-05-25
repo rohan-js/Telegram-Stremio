@@ -112,6 +112,35 @@ def parse_range_header(range_header: str, file_size: int):
     return start, end
 
 
+async def stream_file_range_with_usage(
+    path: Path | str,
+    start_pos: int,
+    end_pos: int,
+    token: str | None = None,
+    read_size: int = 1024 * 1024,
+):
+    import aiofiles
+
+    remaining = (end_pos - start_pos) + 1
+    pending_usage = 0
+    async with aiofiles.open(path, "rb") as f:
+        await f.seek(start_pos)
+        try:
+            while remaining > 0:
+                chunk = await f.read(min(read_size, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                pending_usage += len(chunk)
+                if token and pending_usage >= 8 * 1024 * 1024:
+                    await db.update_token_usage(token, pending_usage)
+                    pending_usage = 0
+                yield chunk
+        finally:
+            if token and pending_usage > 0:
+                await db.update_token_usage(token, pending_usage)
+
+
 def select_best_client(target_dc: int) -> int:
     """Pick the best available helper using DC-aware live performance."""
     if multi_clients:
@@ -356,36 +385,20 @@ async def downloaded_torrent_stream_handler(
     if request.method == "HEAD":
         headers["Content-Length"] = str(req_length)
 
-    if request.method != "HEAD":
-        try:
-            asyncio.create_task(db.update_token_usage(token, int(req_length)))
-        except Exception:
-            pass
-
     from fastapi.responses import Response as PlainResponse
 
     if getattr(Telegram, "NGINX_DOWNLOAD_ACCEL_REDIRECT_ENABLED", True):
+        # Nginx sends the body after this internal redirect. Counting the full
+        # requested range here overcounts badly when players request "bytes=N-"
+        # and disconnect before reading the rest of a large file.
         headers["X-Accel-Redirect"] = nginx_download_redirect_uri(rel_path)
         return PlainResponse(status_code=206 if range_header else 200, headers=headers)
 
     if request.method == "HEAD":
         return PlainResponse(status_code=206 if range_header else 200, headers=headers)
 
-    import aiofiles
-
-    async def _iter_file_range(path: Path, start_pos: int, end_pos: int, read_size: int = 1024 * 1024):
-        remaining = (end_pos - start_pos) + 1
-        async with aiofiles.open(path, "rb") as f:
-            await f.seek(start_pos)
-            while remaining > 0:
-                chunk = await f.read(min(read_size, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                yield chunk
-
     return StreamingResponse(
-        _iter_file_range(file_path, start, end),
+        stream_file_range_with_usage(file_path, start, end, token),
         headers=headers,
         status_code=206 if range_header else 200,
         media_type=mime_type,
@@ -546,15 +559,6 @@ async def media_streamer(
             if unique_id and is_complete_cache_file(cache_path, expected_size=file_size):
                 touch_cache_file(cache_path)
 
-                # Best-effort usage accounting: when offloading to nginx (or
-                # streaming from disk), we may not observe actual bytes sent.
-                # Count requested bytes to avoid undercounting.
-                if request.method != "HEAD":
-                    try:
-                        asyncio.create_task(db.update_token_usage(token, int(req_length)))
-                    except Exception:
-                        pass
-
                 asyncio.create_task(
                     db.log_stream_stats(
                         {
@@ -563,7 +567,7 @@ async def media_streamer(
                             "chat_id": chat_id,
                             "dc_id": file_id.dc_id,
                             "client_index": index,
-                            "total_bytes": req_length,
+                            "total_bytes": 0 if nginx_accel_enabled() else req_length,
                             "duration": 0.0,
                             "avg_mbps": 0.0,
                             "peak_mbps": 0.0,
@@ -577,6 +581,7 @@ async def media_streamer(
                             "zero_pad_chunks": 0,
                             "cached": True,
                             "served_via": "nginx" if nginx_accel_enabled() else "disk",
+                            "usage_accounted": not nginx_accel_enabled(),
                             "meta": meta,
                         }
                     )
@@ -602,25 +607,13 @@ async def media_streamer(
                     headers["X-Accel-Redirect"] = nginx_accel_redirect_uri(chat_id, msg_id, unique_id)
                     return PlainResponse(status_code=206 if range_header else 200, headers=headers)
 
-                # Fallback: stream from disk directly (still supports Range)
-                import aiofiles
-
-                async def _iter_file_range(path, start_pos: int, end_pos: int, read_size: int = 1024 * 1024):
-                    remaining = (end_pos - start_pos) + 1
-                    async with aiofiles.open(path, "rb") as f:
-                        await f.seek(start_pos)
-                        while remaining > 0:
-                            chunk = await f.read(min(read_size, remaining))
-                            if not chunk:
-                                break
-                            remaining -= len(chunk)
-                            yield chunk
-
                 if request.method == "HEAD":
                     return PlainResponse(status_code=206 if range_header else 200, headers=headers)
 
+                # Fallback: stream from disk directly and account only bytes
+                # actually yielded by the app process.
                 return StreamingResponse(
-                    _iter_file_range(str(cache_path), start, end),
+                    stream_file_range_with_usage(str(cache_path), start, end, token),
                     headers=headers,
                     status_code=206 if range_header else 200,
                     media_type=mime_type,
