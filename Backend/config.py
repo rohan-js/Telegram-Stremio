@@ -164,3 +164,25 @@ class Telegram:
 
     NGINX_DOWNLOAD_ACCEL_REDIRECT_ENABLED = getenv("NGINX_DOWNLOAD_ACCEL_REDIRECT_ENABLED", "true").lower() == "true"
     NGINX_DOWNLOAD_ACCEL_REDIRECT_LOCATION = getenv("NGINX_DOWNLOAD_ACCEL_REDIRECT_LOCATION", "/_downloads/")
+
+    # -------------------------------
+    # Dashboard egress reporting
+    # -------------------------------
+    NGINX_EGRESS_ENABLED = getenv("NGINX_EGRESS_ENABLED", "true").lower() == "true"
+    NGINX_EGRESS_LOG_PATHS = [
+        p.strip()
+        for p in getenv(
+            "NGINX_EGRESS_LOG_PATHS",
+            "/host/var/log/nginx/access.log,/host/var/log/nginx/access.log.1",
+        ).split(",")
+        if p.strip()
+    ]
+    NGINX_EGRESS_STREAM_PREFIXES = [
+        p.strip()
+        for p in getenv("NGINX_EGRESS_STREAM_PREFIXES", "/dl/,/downloaded/").split(",")
+        if p.strip()
+    ]
+    try:
+        NGINX_EGRESS_CACHE_SEC = int(getenv("NGINX_EGRESS_CACHE_SEC", "30") or 30)
+    except Exception:
+        NGINX_EGRESS_CACHE_SEC = 30

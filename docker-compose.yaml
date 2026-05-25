@@ -10,6 +10,7 @@ services:
       - ./config.env:/app/config.env
       - ./cache:/app/cache
       - /mnt/stremio-downloads/torrents/completed:/downloads/completed:ro
+      - /var/log/nginx:/host/var/log/nginx:ro
     restart: unless-stopped
     mem_limit: 768m
     memswap_limit: 1536m

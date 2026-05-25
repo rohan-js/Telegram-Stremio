@@ -9,6 +9,7 @@ from Backend.helper.pyro import get_readable_time
 from Backend import StartTime, __version__
 import time
 from Backend.helper.custom_dl import ACTIVE_STREAMS, RECENT_STREAMS
+from Backend.helper.nginx_egress import get_nginx_egress_summary
 
 templates = Jinja2Templates(directory="Backend/fastapi/templates")
 
@@ -123,6 +124,7 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
             "databases": db_stats,
             "total_databases": len(db_stats),
             "current_db_index": db.current_db_index,
+            "egress": get_nginx_egress_summary(),
             "active_streams": active_streams_data,
             "total_active_streams": len(active_streams_data)
         }
@@ -142,6 +144,7 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
             "databases": [],
             "total_databases": 0,
             "current_db_index": 1,
+            "egress": get_nginx_egress_summary(),
             "active_streams": [],
             "total_active_streams": 0
         }
