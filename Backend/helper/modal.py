@@ -22,6 +22,8 @@ class QualityDetail(BaseModel):
     torrent_source_uri: Optional[str] = None
     torrent_file_chat_id: Optional[int] = None
     torrent_file_msg_id: Optional[int] = None
+    mkv_seek_risk: bool = False
+    mkv_seek_risk_reason: Optional[str] = None
 
 
 # ---------------------------

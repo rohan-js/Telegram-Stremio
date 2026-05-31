@@ -11,6 +11,7 @@ from Backend.config import Telegram
 from Backend.helper.encrypt import encode_string
 from Backend.helper.metadata import metadata, extract_default_id
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
+from Backend.helper.reply_text import build_stream_reply_text
 from Backend.helper.task_manager import edit_message
 from Backend.helper.torrent_source import (
     TorrentItem,
@@ -22,6 +23,8 @@ from Backend.helper.torrent_downloads import (
     TORRENT_DOWNLOAD_MANAGER,
     torrent_download_callback_data,
 )
+from Backend.helper.custom_dl import ByteStreamer
+from Backend.helper.mkv_seek_risk import analyze_mkv_seek_risk
 from Backend.logger import LOGGER
 from Backend.helper.disk_cache import PRECACHE_MANAGER, PrecacheJob
 
@@ -43,6 +46,9 @@ TORRENT_METADATA_FAILED_TEXT = (
 )
 
 VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".flv", ".wmv")
+MKV_SEEK_SCAN_BYTES = 1024 * 1024
+MKV_SEEK_SCAN_TIMEOUT_SEC = 5.0
+_mkv_scan_streamers = {}
 
 
 async def process_file():
@@ -74,11 +80,7 @@ async def send_reply_messages():
             token = Telegram.DEFAULT_ADDON_TOKEN
             imdb_id = metadata_info.get("imdb_id", "")
             media_type = metadata_info.get("media_type", "movie")
-            movie_title = metadata_info.get("title", "Unknown")
-            year = metadata_info.get("year", "")
-            quality = metadata_info.get("quality", "")
             encoded_string = metadata_info.get("encoded_string", "")
-            rating = metadata_info.get("rate", "")
             source_type = metadata_info.get("source_type", "telegram")
 
             if imdb_id:
@@ -98,55 +100,7 @@ async def send_reply_messages():
                 direct_stream = "N/A"
                 vlc_page = None
 
-            rating_str = f"⭐ {rating}" if rating else ""
-            if source_type == "torrent":
-                help_note = "🧲 Torrent stream. Playback speed depends on seeders/peers.\n\n"
-                stream_note = ""
-            else:
-                help_note = (
-                    "⚠️ If streaming is slow or not loading, turn on Cloudflare WARP and try again.\n"
-                    "Facing any issues? Type it here itself.\n\n"
-                )
-                stream_note = f"▶️ <b>Direct Stream Link:</b>\n<code>{direct_stream}</code>"
-            if media_type == "tv":
-                season = int(metadata_info.get("season_number", 0) or 0)
-                episode = int(metadata_info.get("episode_number", 0) or 0)
-                ep_title = metadata_info.get("episode_title", "")
-                if metadata_info.get("season_pack"):
-                    episode_count = int(metadata_info.get("season_pack_episode_count", 0) or 0)
-                    reply_text = (
-                        f"🎬 <b>{movie_title}</b>"
-                        f"{f' ({year})' if year else ''}\n"
-                        f"📺 Season {season:02d} Pack"
-                        f"{f' | {episode_count} episodes' if episode_count else ''}\n"
-                        f"{rating_str}"
-                        f"{f' | {quality}' if quality else ''}"
-                        f" | {size}\n\n"
-                        f"{help_note}"
-                        f"{stream_note}"
-                    )
-                else:
-                    reply_text = (
-                        f"🎬 <b>{movie_title}</b>"
-                        f"{f' ({year})' if year else ''}\n"
-                        f"📺 S{season:02d}E{episode:02d}"
-                        f"{f' - {ep_title}' if ep_title else ''}\n"
-                        f"{rating_str}"
-                        f"{f' | {quality}' if quality else ''}"
-                        f" | {size}\n\n"
-                        f"{help_note}"
-                        f"{stream_note}"
-                    )
-            else:
-                reply_text = (
-                    f"🎬 <b>{movie_title}</b>"
-                    f"{f' ({year})' if year else ''}\n"
-                    f"{rating_str}"
-                    f"{f' | {quality}' if quality else ''}"
-                    f" | {size}\n\n"
-                    f"{help_note}"
-                    f"{stream_note}"
-                )
+            reply_text = build_stream_reply_text(metadata_info, size, direct_stream)
 
             buttons_row = [InlineKeyboardButton("▶️ Watch in Stremio", url=stremio_link)]
             if vlc_page:
@@ -169,7 +123,7 @@ async def send_reply_messages():
                 disable_web_page_preview=True,
                 reply_markup=buttons,
             )
-            LOGGER.info(f"Sent stream link reply for: {movie_title}")
+            LOGGER.info(f"Sent stream link reply for: {metadata_info.get('title', 'Unknown')}")
         except FloodWait as e:
             LOGGER.info(f"FloodWait in reply: sleeping for {e.value}s")
             await asleep(e.value)
@@ -202,6 +156,47 @@ def _is_torrent_document(message: Message) -> bool:
 
 def _message_text(message: Message) -> str:
     return message.text or message.caption or ""
+
+
+def _get_mkv_scan_streamer(client: Client) -> ByteStreamer:
+    key = id(client)
+    if key not in _mkv_scan_streamers:
+        _mkv_scan_streamers[key] = ByteStreamer(client)
+    return _mkv_scan_streamers[key]
+
+
+async def _detect_mkv_seek_risk(client: Client, message: Message, file_name: str, file_size: int) -> dict:
+    if not file_name or not file_name.lower().endswith(".mkv"):
+        return {}
+    if not file_size or file_size <= MKV_SEEK_SCAN_BYTES:
+        return {}
+
+    try:
+        streamer = _get_mkv_scan_streamer(client)
+        head = await streamer.read_file_range(
+            chat_id=int(message.chat.id),
+            message_id=int(message.id),
+            offset=0,
+            limit=MKV_SEEK_SCAN_BYTES,
+            timeout=MKV_SEEK_SCAN_TIMEOUT_SEC,
+        )
+        tail = await streamer.read_file_range(
+            chat_id=int(message.chat.id),
+            message_id=int(message.id),
+            offset=max(0, int(file_size) - MKV_SEEK_SCAN_BYTES),
+            limit=MKV_SEEK_SCAN_BYTES,
+            timeout=MKV_SEEK_SCAN_TIMEOUT_SEC,
+        )
+        result = analyze_mkv_seek_risk(head, tail)
+        if result.risk:
+            LOGGER.warning("MKV seek-risk detected for msg %s: %s", message.id, result.reason)
+            return {
+                "mkv_seek_risk": True,
+                "mkv_seek_risk_reason": result.reason,
+            }
+    except Exception as e:
+        LOGGER.debug(f"MKV seek-risk scan skipped for msg {message.id}: {e}")
+    return {}
 
 
 def _torrent_title(item: TorrentItem, text: str) -> str:
@@ -374,6 +369,10 @@ async def file_receive_handler(client: Client, message: Message):
                     await message.reply_text(METADATA_FAILED_TEXT)
                     return
 
+                metadata_info.update(
+                    await _detect_mkv_seek_risk(client, message, file_name or title, int(file.file_size or 0))
+                )
+
                 title = remove_urls(title)
                 if not title.endswith((".mkv", ".mp4")):
                     title += ".mkv"
@@ -438,6 +437,14 @@ async def file_edited_handler(client: Client, message: Message):
                         LOGGER.warning(f"Metadata failed for edited file: {title} (ID: {msg_id})")
                         await message.reply_text(METADATA_FAILED_TEXT)
                         return
+                    metadata_info.update(
+                        await _detect_mkv_seek_risk(
+                            client,
+                            message,
+                            getattr(file, "file_name", None) or title,
+                            int(file.file_size or 0),
+                        )
+                    )
                     title = remove_urls(title)
                     if not title.endswith((".mkv", ".mp4")):
                         title += ".mkv"
