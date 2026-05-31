@@ -382,7 +382,7 @@ async def downloaded_torrent_stream_handler(
     }
     if range_header:
         headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-    if request.method == "HEAD":
+    if range_header or request.method == "HEAD":
         headers["Content-Length"] = str(req_length)
 
     from fastapi.responses import Response as PlainResponse
@@ -600,7 +600,7 @@ async def media_streamer(
                 if range_header:
                     headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
 
-                if request.method == "HEAD":
+                if range_header or request.method == "HEAD":
                     headers["Content-Length"] = str(req_length)
 
                 if nginx_accel_enabled():
@@ -624,15 +624,12 @@ async def media_streamer(
     prefetch_count = Telegram.PARALLEL
     parallelism = Telegram.PRE_FETCH
 
-    # HEAD: return headers only (no body), include Content-Length so the
-    # client knows the file size without opening a stream.
-    # GET: do NOT set Content-Length on the StreamingResponse.
-    # If a Telegram chunk fetch times out mid-stream the generator exits early,
-    # delivering fewer bytes than the declared length.  h11 enforces
-    # Content-Length strictly and raises LocalProtocolError in that case.
-    # Without Content-Length, uvicorn uses chunked transfer encoding which
-    # handles early termination gracefully.  Stremio / media players
-    # are fine with chunked 206 responses.
+    # HEAD: return headers only, include Content-Length so the client knows
+    # the file/range size without opening a stream.
+    # GET 200: keep full-file Telegram streams chunked. If Telegram ends early,
+    # h11 would enforce Content-Length strictly and log protocol errors.
+    # GET 206: include Content-Length for strict TV/mobile players. Some clients
+    # restart from byte 0 after seeking when partial responses are chunked.
 
     # HEAD request support
     from fastapi.responses import Response as PlainResponse
@@ -686,6 +683,7 @@ async def media_streamer(
 
     if range_header:
         headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        headers["Content-Length"] = str(req_length)
         status = 206
     else:
         status = 200
