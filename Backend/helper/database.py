@@ -796,8 +796,6 @@ class Database:
             torrent_source_uri=metadata_info.get("torrent_source_uri"),
             torrent_file_chat_id=metadata_info.get("torrent_file_chat_id"),
             torrent_file_msg_id=metadata_info.get("torrent_file_msg_id"),
-            mkv_seek_risk=bool(metadata_info.get("mkv_seek_risk", False)),
-            mkv_seek_risk_reason=metadata_info.get("mkv_seek_risk_reason"),
         )
 
     def _source_type(self, quality: dict) -> str:

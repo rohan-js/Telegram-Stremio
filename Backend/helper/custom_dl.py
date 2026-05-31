@@ -688,44 +688,6 @@ class ByteStreamer:
             result["error"] = str(getattr(e, "args", e))
             return result
 
-    async def read_file_range(
-        self,
-        chat_id: int,
-        message_id: int,
-        offset: int = 0,
-        limit: int = 1024 * 1024,
-        timeout: float = 5.0,
-    ) -> bytes:
-        """Fetch a small byte range from Telegram for metadata inspection."""
-        file_id = await self.get_file_properties(chat_id=chat_id, message_id=message_id)
-        media_session = await self._get_media_session(file_id)
-        location = await self._get_location(file_id)
-
-        file_size = max(0, int(getattr(file_id, "file_size", 0) or 0))
-        offset = max(0, int(offset or 0))
-        if file_size:
-            offset = min(offset, file_size)
-
-        limit = max(1, min(int(limit or 1), 1024 * 1024))
-        timeout = max(1.0, float(timeout or 5.0))
-
-        aligned_offset = offset - (offset % 4096)
-        trim_left = offset - aligned_offset
-        request_limit = min(1024 * 1024, limit + trim_left)
-
-        response = await asyncio.wait_for(
-            media_session.send(
-                raw.functions.upload.GetFile(
-                    location=location,
-                    offset=aligned_offset,
-                    limit=request_limit,
-                )
-            ),
-            timeout=timeout,
-        )
-        chunk = getattr(response, "bytes", b"") if response else b""
-        return bytes(chunk or b"")[trim_left:trim_left + limit]
-
     async def _get_media_session(self, file_id: FileId) -> Session:
         dc = file_id.dc_id
         media_session = self.client.media_sessions.get(dc)
