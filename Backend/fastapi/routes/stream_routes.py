@@ -47,6 +47,31 @@ router = APIRouter(tags=["Streaming"])
 _streamer_by_client: Dict = {}
 _failure_decay_started: bool = False
 
+VIDEO_MIME_BY_EXTENSION = {
+    ".mkv": "video/x-matroska",
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".webm": "video/webm",
+    ".avi": "video/x-msvideo",
+    ".mov": "video/quicktime",
+    ".flv": "video/x-flv",
+    ".wmv": "video/x-ms-wmv",
+    ".ts": "video/mp2t",
+}
+
+
+def resolve_video_mime_type(file_name: str | None, telegram_mime: str | None = None) -> str:
+    ext = Path(file_name or "").suffix.lower()
+    if ext in VIDEO_MIME_BY_EXTENSION:
+        return VIDEO_MIME_BY_EXTENSION[ext]
+
+    telegram_mime = (telegram_mime or "").split(";", 1)[0].strip().lower()
+    if telegram_mime.startswith("video/"):
+        return telegram_mime
+
+    guessed_mime = mimetypes.guess_type(file_name or "")[0]
+    return guessed_mime or "application/octet-stream"
+
 
 def make_json_safe(obj):
     if isinstance(obj, deque):
@@ -508,7 +533,7 @@ async def media_streamer(
     part_count = (end // chunk_size) - (offset // chunk_size) + 1
 
     file_name = file_id.file_name or f"{secrets.token_hex(4)}.bin"
-    mime_type = file_id.mime_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    mime_type = resolve_video_mime_type(file_name, file_id.mime_type)
 
     if "." not in file_name and "/" in mime_type:
         file_name = f"{file_name}.{mime_type.split('/')[1]}"
