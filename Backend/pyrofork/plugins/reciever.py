@@ -104,9 +104,10 @@ async def send_reply_messages():
                 stream_note = ""
             else:
                 help_note = (
-                    "⚠️ If streaming is slow or not loading, turn on Cloudflare WARP and try again.\n"
-                    "If seeking jumps back to the beginning on TV/mobile, the file may not be fully compatible there; try another release/file or use VLC/Windows.\n"
-                    "Facing any issues? Type it here itself.\n\n"
+                    "⚠️ If streaming is slow or not loading, turn on 🌐 Cloudflare WARP and try again.\n\n"
+                    "⏪ If seeking/jumping through the video goes back to the beginning on 📺 TV or 📱 mobile. "
+                    "Try another file or use VLC Player / Windows\n\n"
+                    "🛠️ Facing any issues? Just type them here and I'll help!\n\n"
                 )
                 stream_note = f"▶️ <b>Direct Stream Link:</b>\n<code>{direct_stream}</code>"
             if media_type == "tv":
