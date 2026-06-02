@@ -405,10 +405,6 @@ async def downloaded_torrent_stream_handler(
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
     }
-    if range_header:
-        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-    if range_header or request.method == "HEAD":
-        headers["Content-Length"] = str(req_length)
 
     from fastapi.responses import Response as PlainResponse
 
@@ -416,8 +412,16 @@ async def downloaded_torrent_stream_handler(
         # Nginx sends the body after this internal redirect. Counting the full
         # requested range here overcounts badly when players request "bytes=N-"
         # and disconnect before reading the rest of a large file.
+        # Do not set Content-Length/Content-Range here: this response has no
+        # app body, and h11 will reject a non-zero declared length before nginx
+        # can serve the redirected file.
         headers["X-Accel-Redirect"] = nginx_download_redirect_uri(rel_path)
-        return PlainResponse(status_code=206 if range_header else 200, headers=headers)
+        return PlainResponse(status_code=200, headers=headers)
+
+    if range_header:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+    if range_header or request.method == "HEAD":
+        headers["Content-Length"] = str(req_length)
 
     if request.method == "HEAD":
         return PlainResponse(status_code=206 if range_header else 200, headers=headers)

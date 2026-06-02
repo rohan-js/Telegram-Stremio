@@ -279,8 +279,10 @@ class DownloadedUsageAccountingTests(unittest.IsolatedAsyncioTestCase):
                     token_data={"name": "test"},
                 )
 
-        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.status_code, 200)
         self.assertIn("x-accel-redirect", response.headers)
+        self.assertNotIn("content-range", response.headers)
+        self.assertNotEqual(response.headers.get("content-length"), "10")
         self.assertEqual(fake_db.calls, [])
 
 
