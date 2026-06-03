@@ -121,11 +121,6 @@ async def _metadata_for_job(job: dict) -> dict | None:
 
 async def _process_ingest_job(job: dict) -> None:
     title = job.get("title") or job.get("file_name") or "unknown"
-    await _edit_status(
-        job.get("status_chat_id"),
-        job.get("status_msg_id"),
-        _format_queue_status("processing", title),
-    )
 
     metadata_info = await _metadata_for_job(job)
     if metadata_info is None:
@@ -484,11 +479,6 @@ async def _queue_torrent_item(message: Message, item: TorrentItem, override_id: 
     if display_title and not display_title.lower().endswith(VIDEO_EXTENSIONS):
         display_title += ".mkv"
 
-    position = file_queue.qsize() + 1
-    status_msg = await message.reply_text(
-        _format_queue_status("queued", display_title or title, position=position),
-        parse_mode=ParseMode.HTML,
-    )
     await file_queue.put({
         "source_type": "torrent",
         "source_key": f"torrent:{message.chat.id}:{msg_id}:{item.info_hash}:{item.file_idx}",
@@ -497,8 +487,8 @@ async def _queue_torrent_item(message: Message, item: TorrentItem, override_id: 
         "chat_id": int(message.chat.id),
         "msg_id": msg_id,
         "original_msg_id": message.id,
-        "status_chat_id": status_msg.chat.id,
-        "status_msg_id": status_msg.id,
+        "status_chat_id": None,
+        "status_msg_id": None,
         "title": title,
         "file_name": item.file_name or display_title,
         "display_name": display_title or title,
@@ -606,11 +596,6 @@ async def file_receive_handler(client: Client, message: Message):
                     new_caption = (message.caption + "\n\n" + Backend.USE_DEFAULT_ID) if message.caption else Backend.USE_DEFAULT_ID
                     create_task(edit_message(chat_id=message.chat.id, msg_id=message.id, new_caption=new_caption))
 
-                position = file_queue.qsize() + 1
-                status_msg = await message.reply_text(
-                    _format_queue_status("queued", title, position=position),
-                    parse_mode=ParseMode.HTML,
-                )
                 await file_queue.put({
                     "source_type": "telegram",
                     "source_key": f"telegram:{message.chat.id}:{msg_id}",
@@ -618,8 +603,8 @@ async def file_receive_handler(client: Client, message: Message):
                     "chat_id": int(message.chat.id),
                     "msg_id": int(msg_id),
                     "original_msg_id": message.id,
-                    "status_chat_id": status_msg.chat.id,
-                    "status_msg_id": status_msg.id,
+                    "status_chat_id": None,
+                    "status_msg_id": None,
                     "title": title,
                     "file_name": file_name or title,
                     "display_name": title,
@@ -680,11 +665,6 @@ async def file_edited_handler(client: Client, message: Message):
                     title = remove_urls(title)
                     if not title.endswith((".mkv", ".mp4")):
                         title += ".mkv"
-                    position = file_queue.qsize() + 1
-                    status_msg = await message.reply_text(
-                        _format_queue_status("queued", title, position=position),
-                        parse_mode=ParseMode.HTML,
-                    )
                     await file_queue.put({
                         "source_type": "telegram",
                         "source_key": f"telegram:{message.chat.id}:{msg_id}",
@@ -692,8 +672,8 @@ async def file_edited_handler(client: Client, message: Message):
                         "chat_id": int(message.chat.id),
                         "msg_id": int(msg_id),
                         "original_msg_id": message.id,
-                        "status_chat_id": status_msg.chat.id,
-                        "status_msg_id": status_msg.id,
+                        "status_chat_id": None,
+                        "status_msg_id": None,
                         "title": title,
                         "file_name": getattr(file, "file_name", None) or title,
                         "display_name": title,
