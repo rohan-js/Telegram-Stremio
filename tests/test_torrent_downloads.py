@@ -11,6 +11,7 @@ import httpx
 os.environ.setdefault("DATABASE", "mongodb://tracking,mongodb://storage")
 
 from Backend.fastapi.routes import stream_routes
+from Backend.config import Telegram
 from Backend.fastapi.routes.stremio_routes import build_downloaded_torrent_stream
 from Backend.helper.torrent_downloads import (
     QBitTorrentClient,
@@ -85,6 +86,12 @@ class TorrentDownloadHelperTests(unittest.TestCase):
 
     def test_nginx_download_redirect_quotes_relative_path(self):
         uri = nginx_download_redirect_uri("Movie Folder/video file.mkv")
+
+        self.assertEqual(uri, "/_downloads/Movie%20Folder/video%20file.mkv")
+
+    def test_nginx_download_redirect_strips_quoted_prefix(self):
+        with patch.object(Telegram, "NGINX_DOWNLOAD_ACCEL_REDIRECT_LOCATION", '"/_downloads/"'):
+            uri = nginx_download_redirect_uri("Movie Folder/video file.mkv")
 
         self.assertEqual(uri, "/_downloads/Movie%20Folder/video%20file.mkv")
 

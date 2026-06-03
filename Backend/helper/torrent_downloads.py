@@ -84,6 +84,7 @@ def safe_download_file_path(root: Path, rel_path: str) -> Path:
 
 def nginx_download_redirect_uri(rel_path: str) -> str:
     prefix = (getattr(Telegram, "NGINX_DOWNLOAD_ACCEL_REDIRECT_LOCATION", "") or "/_downloads/").strip()
+    prefix = prefix.strip("\"'").strip()
     if not prefix.startswith("/"):
         prefix = "/" + prefix
     if not prefix.endswith("/"):
