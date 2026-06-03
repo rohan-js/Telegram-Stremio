@@ -9,6 +9,7 @@ CONTAINER="${CONTAINER:-tg_stremio}"
 LOCAL_URL="${LOCAL_URL:-http://127.0.0.1:8000/login}"
 DUCKDNS_UPDATE="${DUCKDNS_UPDATE:-/home/ubuntu/duckdns_update.sh}"
 STREAM_STATS_URL="${STREAM_STATS_URL:-http://127.0.0.1:8000/stream/stats}"
+STARTUP_GRACE_SECONDS="${STARTUP_GRACE_SECONDS:-240}"
 
 exec 9>"${LOCK_FILE}"
 if ! flock -n 9; then
@@ -53,6 +54,22 @@ compose_cmd() {
 
 container_state() {
   docker inspect -f '{{.State.Status}}{{if .State.Health}}/{{.State.Health.Status}}{{end}}' "${CONTAINER}" 2>/dev/null || echo "missing"
+}
+
+container_uptime_sec() {
+  local started_at started_epoch now_epoch
+  started_at=$(docker inspect -f '{{.State.StartedAt}}' "${CONTAINER}" 2>/dev/null || true)
+  if [ -z "${started_at}" ] || [ "${started_at}" = "0001-01-01T00:00:00Z" ]; then
+    echo "-1"
+    return
+  fi
+  started_epoch=$(date -u -d "${started_at}" +%s 2>/dev/null || echo "")
+  if [ -z "${started_epoch}" ]; then
+    echo "-1"
+    return
+  fi
+  now_epoch=$(date -u +%s)
+  echo $((now_epoch - started_epoch))
 }
 
 check_local_ready() {
@@ -100,16 +117,17 @@ wait_for_local_ready() {
 log_line() {
   local status="$1"
   shift || true
-  local mem_avail_mb swap_total_mb swap_free_mb root_used_pct state app_response_ms active_streams last_stream_error
+  local mem_avail_mb swap_total_mb swap_free_mb root_used_pct state uptime_sec app_response_ms active_streams last_stream_error
   mem_avail_mb=$(metric_mem_available_mb)
   swap_total_mb=$(metric_swap_total_mb)
   swap_free_mb=$(metric_swap_free_mb)
   root_used_pct=$(metric_root_used_pct)
   state=$(container_state)
+  uptime_sec=$(container_uptime_sec)
   app_response_ms=$(metric_app_response_ms)
   active_streams=$(metric_active_streams)
   last_stream_error=$(metric_last_stream_error)
-  echo "${STAMP} status=${status} $* mem_avail_mb=${mem_avail_mb} swap_free_mb=${swap_free_mb} swap_total_mb=${swap_total_mb} root_used_pct=${root_used_pct} container=${state} app_response_ms=${app_response_ms} active_streams=${active_streams} last_stream_error=${last_stream_error:-none}" >> "${LOG_FILE}"
+  echo "${STAMP} status=${status} $* mem_avail_mb=${mem_avail_mb} swap_free_mb=${swap_free_mb} swap_total_mb=${swap_total_mb} root_used_pct=${root_used_pct} container=${state} container_uptime_sec=${uptime_sec} app_response_ms=${app_response_ms} active_streams=${active_streams} last_stream_error=${last_stream_error:-none}" >> "${LOG_FILE}"
 }
 
 DNS_OK=0
@@ -124,6 +142,7 @@ getent hosts "${HOST}" >/dev/null 2>&1 && DNS_OK=1
 curl -fsS --max-time 15 -o /dev/null "${MANIFEST_URL}" && PUBLIC_OK=1 || true
 check_local_ready && LOCAL_OK=1 || true
 ACTIVE_STREAMS=$(metric_active_streams)
+CONTAINER_UPTIME_SEC=$(container_uptime_sec)
 
 STATE=$(container_state)
 case "${STATE}" in
@@ -168,6 +187,8 @@ fi
 if [ -n "${RESTART_REASON}" ]; then
   if [ "${ACTIVE_STREAMS}" -gt 0 ] 2>/dev/null && [ "${LOCAL_OK}" -eq 1 ]; then
     log_line "restart_skipped" "reason=${RESTART_REASON} active_streams=${ACTIVE_STREAMS}"
+  elif [ "${RESTART_REASON}" != "memory_critical" ] && [ "${CONTAINER_UPTIME_SEC}" -ge 0 ] 2>/dev/null && [ "${CONTAINER_UPTIME_SEC}" -lt "${STARTUP_GRACE_SECONDS}" ] 2>/dev/null; then
+    log_line "restart_skipped" "reason=${RESTART_REASON} startup_grace=true uptime_sec=${CONTAINER_UPTIME_SEC} grace_sec=${STARTUP_GRACE_SECONDS}"
   elif docker inspect "${CONTAINER}" >/dev/null 2>&1; then
     log_line "restarting" "reason=${RESTART_REASON}"
     docker restart "${CONTAINER}" >/dev/null || true
