@@ -90,6 +90,16 @@ async def _edit_status(chat_id: int | None, msg_id: int | None, text: str) -> No
         LOGGER.debug(f"Could not edit ingest status message {msg_id}: {e}")
 
 
+async def _delete_status(chat_id: int | None, msg_id: int | None) -> None:
+    if not chat_id or not msg_id:
+        return
+    try:
+        from Backend.pyrofork.bot import StreamBot
+        await StreamBot.delete_messages(chat_id=int(chat_id), message_ids=int(msg_id))
+    except Exception as e:
+        LOGGER.debug(f"Could not delete ingest status message {msg_id}: {e}")
+
+
 def _format_queue_status(state: str, title: str, position: int | None = None, reason: str | None = None) -> str:
     parts = [f"📥 <b>Ingestion {escape(state)}</b>", f"<code>{escape(title)}</code>"]
     if position:
@@ -168,10 +178,9 @@ async def _process_ingest_job(job: dict) -> None:
     )
     if updated_id:
         LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
-        await _edit_status(
+        await _delete_status(
             job.get("status_chat_id"),
             job.get("status_msg_id"),
-            _format_queue_status("indexed", title),
         )
         await reply_queue.put((job["chat_id"], job["original_msg_id"], metadata_info, job.get("display_name") or title, job.get("size") or ""))
     else:
@@ -435,8 +444,11 @@ async def watch_link_callback(client: Client, callback_query: CallbackQuery):
         if media_type == "tv" and season and episode:
             episode_text = f"\n📺 S{int(season):02d}E{int(episode):02d}"
 
+        message = callback_query.message
+        target_chat_id = message.chat.id if message else int(requester["user_id"])
+        reply_to_message_id = message.id if message else None
         await client.send_message(
-            chat_id=int(requester["user_id"]),
+            chat_id=target_chat_id,
             text=(
                 f"▶️ <b>Watch in Stremio</b>\n\n"
                 f"🎬 <b>{escape(str(title))}</b>{episode_text}\n\n"
@@ -447,9 +459,10 @@ async def watch_link_callback(client: Client, callback_query: CallbackQuery):
                 [InlineKeyboardButton("▶️ Watch in Stremio", url=watch_request["stremio_link"])]
             ]),
             disable_web_page_preview=True,
+            reply_to_message_id=reply_to_message_id,
         )
         await db.mark_watch_link_delivery(request_id, "sent")
-        await callback_query.answer("I sent the Stremio link in your DM.", show_alert=False)
+        await callback_query.answer("Watch link posted in the channel.", show_alert=False)
     except Exception as e:
         LOGGER.warning(f"Could not deliver watch link callback {request_id}: {e}")
         try:
