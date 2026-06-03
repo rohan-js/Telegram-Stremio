@@ -51,6 +51,23 @@ class Telegram:
     REPLACE_MODE = getenv("REPLACE_MODE", "true").lower() == "true"
     HIDE_CATALOG = getenv("HIDE_CATALOG", "false").lower() == "true"
 
+    AUTO_CATALOG_REGION = getenv("AUTO_CATALOG_REGION", "IN")
+    AUTO_CATALOG_ON_STARTUP = getenv("AUTO_CATALOG_ON_STARTUP", "true").lower() == "true"
+    AUTO_CATALOG_FULL_REBUILD_ON_STARTUP = getenv("AUTO_CATALOG_FULL_REBUILD_ON_STARTUP", "false").lower() == "true"
+    try:
+        AUTO_SYNC_DELAY_SECONDS = int(getenv("AUTO_SYNC_DELAY_SECONDS", "20") or 20)
+    except Exception:
+        AUTO_SYNC_DELAY_SECONDS = 20
+    try:
+        AUTO_SYNC_CONCURRENCY = int(getenv("AUTO_SYNC_CONCURRENCY", "5") or 5)
+    except Exception:
+        AUTO_SYNC_CONCURRENCY = 5
+    AUTO_CATALOG_INTERVAL_SYNC = getenv("AUTO_CATALOG_INTERVAL_SYNC", "true").lower() == "true"
+    try:
+        AUTO_CATALOG_SYNC_INTERVAL_MINUTES = int(getenv("AUTO_CATALOG_SYNC_INTERVAL_MINUTES", "60") or 60)
+    except Exception:
+        AUTO_CATALOG_SYNC_INTERVAL_MINUTES = 60
+
     ADMIN_USERNAME = getenv("ADMIN_USERNAME", "fyvio")
     ADMIN_PASSWORD = getenv("ADMIN_PASSWORD", "fyvio")
     DEFAULT_ADDON_TOKEN = getenv("DEFAULT_ADDON_TOKEN", "").strip()

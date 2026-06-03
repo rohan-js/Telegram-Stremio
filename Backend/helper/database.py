@@ -402,6 +402,239 @@ class Database:
         return None
 
     # -------------------------------
+    # Custom Catalog Management
+    # -------------------------------
+    async def create_custom_catalog(self, name: str, visible: bool = True) -> Optional[str]:
+        name = (name or "").strip()
+        if not name:
+            return None
+
+        now = datetime.utcnow()
+        result = await self.dbs["tracking"]["custom_catalogs"].insert_one({
+            "name": name,
+            "visible": bool(visible),
+            "auto": False,
+            "auto_key": None,
+            "items": [],
+            "item_count": 0,
+            "created_at": now,
+            "updated_at": now,
+        })
+        return str(result.inserted_id)
+
+    async def get_custom_catalogs(self, visible_only: bool = False) -> List[dict]:
+        query = {"visible": True} if visible_only else {}
+        cursor = self.dbs["tracking"]["custom_catalogs"].find(query).sort("updated_at", DESCENDING)
+        catalogs = await cursor.to_list(None)
+        return [convert_objectid_to_str(catalog) for catalog in catalogs]
+
+    async def get_custom_catalog(self, catalog_id: str) -> Optional[dict]:
+        try:
+            catalog = await self.dbs["tracking"]["custom_catalogs"].find_one({"_id": ObjectId(catalog_id)})
+            return convert_objectid_to_str(catalog) if catalog else None
+        except Exception:
+            return None
+
+    async def update_custom_catalog(self, catalog_id: str, name: Optional[str] = None, visible: Optional[bool] = None) -> bool:
+        update_data = {"updated_at": datetime.utcnow()}
+        if name is not None:
+            clean_name = name.strip()
+            if clean_name:
+                update_data["name"] = clean_name
+        if visible is not None:
+            update_data["visible"] = bool(visible)
+
+        try:
+            result = await self.dbs["tracking"]["custom_catalogs"].update_one(
+                {"_id": ObjectId(catalog_id)},
+                {"$set": update_data}
+            )
+            return result.modified_count > 0
+        except Exception:
+            return False
+
+    async def delete_custom_catalog(self, catalog_id: str) -> bool:
+        try:
+            result = await self.dbs["tracking"]["custom_catalogs"].delete_one({"_id": ObjectId(catalog_id)})
+            return result.deleted_count > 0
+        except Exception:
+            return False
+
+    async def add_item_to_custom_catalog(
+        self, catalog_id: str, tmdb_id: int, db_index: int, media_type: str
+    ) -> bool:
+        media_type = "tv" if media_type in ["tv", "series"] else "movie"
+        item = {
+            "tmdb_id": int(tmdb_id),
+            "db_index": int(db_index),
+            "media_type": media_type,
+            "added_at": datetime.utcnow(),
+        }
+        try:
+            result = await self.dbs["tracking"]["custom_catalogs"].update_one(
+                {
+                    "_id": ObjectId(catalog_id),
+                    "items": {
+                        "$not": {
+                            "$elemMatch": {
+                                "tmdb_id": int(tmdb_id),
+                                "db_index": int(db_index),
+                                "media_type": media_type,
+                            }
+                        }
+                    },
+                },
+                {
+                    "$push": {"items": {"$each": [item], "$position": 0}},
+                    "$set": {"updated_at": datetime.utcnow()},
+                    "$inc": {"item_count": 1},
+                }
+            )
+            return result.modified_count > 0
+        except Exception:
+            return False
+
+    async def remove_item_from_custom_catalog(
+        self, catalog_id: str, tmdb_id: int, db_index: int, media_type: str
+    ) -> bool:
+        media_type = "tv" if media_type in ["tv", "series"] else "movie"
+        try:
+            result = await self.dbs["tracking"]["custom_catalogs"].update_one(
+                {
+                    "_id": ObjectId(catalog_id),
+                    "items": {
+                        "$elemMatch": {
+                            "tmdb_id": int(tmdb_id),
+                            "db_index": int(db_index),
+                            "media_type": media_type,
+                        }
+                    },
+                },
+                {
+                    "$pull": {
+                        "items": {
+                            "tmdb_id": int(tmdb_id),
+                            "db_index": int(db_index),
+                            "media_type": media_type,
+                        }
+                    },
+                    "$set": {"updated_at": datetime.utcnow()},
+                    "$inc": {"item_count": -1},
+                }
+            )
+            if result.modified_count > 0:
+                await self._repair_custom_catalog_item_count(catalog_id)
+            return result.modified_count > 0
+        except Exception:
+            return False
+
+    async def _repair_custom_catalog_item_count(self, catalog_id: str) -> None:
+        try:
+            catalog = await self.dbs["tracking"]["custom_catalogs"].find_one({"_id": ObjectId(catalog_id)})
+            if catalog:
+                count = len(catalog.get("items", []) or [])
+                await self.dbs["tracking"]["custom_catalogs"].update_one(
+                    {"_id": ObjectId(catalog_id)},
+                    {"$set": {"item_count": count}},
+                )
+        except Exception:
+            pass
+
+    async def custom_catalog_contains_item(
+        self, catalog_id: str, tmdb_id: int, db_index: int, media_type: str
+    ) -> bool:
+        media_type = "tv" if media_type in ["tv", "series"] else "movie"
+        try:
+            catalog = await self.dbs["tracking"]["custom_catalogs"].find_one({
+                "_id": ObjectId(catalog_id),
+                "items": {
+                    "$elemMatch": {
+                        "tmdb_id": int(tmdb_id),
+                        "db_index": int(db_index),
+                        "media_type": media_type,
+                    }
+                }
+            })
+            return bool(catalog)
+        except Exception:
+            return False
+
+    async def get_custom_catalog_items(
+        self, catalog_id: str, media_type: Optional[str] = None, page: int = 1, page_size: int = 24
+    ) -> dict:
+        catalog = await self.get_custom_catalog(catalog_id)
+        if not catalog:
+            return {"catalog": None, "items": [], "total_count": 0, "current_page": page, "total_pages": 0}
+
+        db_media_type = None
+        if media_type:
+            db_media_type = "tv" if media_type in ["tv", "series"] else "movie"
+
+        raw_items = catalog.get("items", []) or []
+        if db_media_type:
+            raw_items = [item for item in raw_items if item.get("media_type") == db_media_type]
+
+        total_count = len(raw_items)
+        skip = (page - 1) * page_size
+        selected_items = raw_items[skip:skip + page_size]
+
+        hydrated_items = []
+        for item in selected_items:
+            doc = await self.get_document(
+                item.get("media_type", "movie"),
+                int(item.get("tmdb_id")),
+                int(item.get("db_index", 1))
+            )
+            if doc:
+                hydrated_items.append(doc)
+
+        total_pages = (total_count + page_size - 1) // page_size if total_count else 0
+        return {
+            "catalog": catalog,
+            "items": hydrated_items,
+            "total_count": total_count,
+            "current_page": page,
+            "total_pages": total_pages,
+        }
+
+    async def update_custom_catalog_item_reference(
+        self,
+        media_type: str,
+        old_tmdb_id: int,
+        new_tmdb_id: int,
+        db_index: int,
+    ) -> None:
+        media_type = "tv" if media_type in ["tv", "series"] else "movie"
+        if int(old_tmdb_id) == int(new_tmdb_id):
+            return
+        now = datetime.utcnow()
+        await self.dbs["tracking"]["custom_catalogs"].update_many(
+            {
+                "items": {
+                    "$elemMatch": {
+                        "tmdb_id": int(old_tmdb_id),
+                        "db_index": int(db_index),
+                        "media_type": media_type,
+                    }
+                }
+            },
+            {
+                "$set": {
+                    "items.$[item].tmdb_id": int(new_tmdb_id),
+                    "items.$[item].added_at": now,
+                    "updated_at": now,
+                }
+            },
+            array_filters=[
+                {
+                    "item.tmdb_id": int(old_tmdb_id),
+                    "item.db_index": int(db_index),
+                    "item.media_type": media_type,
+                }
+            ],
+        )
+
+    # -------------------------------
     # User Subscription Management
     # -------------------------------
     async def get_user(self, user_id: int) -> Optional[dict]:
@@ -1280,6 +1513,75 @@ class Database:
                     LOGGER.error(f"Error migrating document tmdb_id {tmdb_id} to {new_db_key}: {migrate_error}")
                     return False
             raise
+
+    async def replace_media_metadata(
+        self,
+        media_type: str,
+        tmdb_id: int,
+        db_index: int,
+        metadata: Dict[str, Any]
+    ) -> Optional[dict]:
+        db_key = f"storage_{db_index}"
+        collection_name = "tv" if media_type.lower() in ["tv", "series"] else "movie"
+        collection = self.dbs[db_key][collection_name]
+
+        current_doc = await collection.find_one({"tmdb_id": int(tmdb_id)})
+        if not current_doc:
+            return None
+
+        current_doc.pop("_id", None)
+        old_tmdb_id = int(tmdb_id)
+        new_tmdb_id = int(metadata.get("tmdb_id") or old_tmdb_id)
+        now = datetime.utcnow()
+
+        common_update = {
+            "tmdb_id": new_tmdb_id,
+            "imdb_id": metadata.get("imdb_id") or current_doc.get("imdb_id"),
+            "title": metadata.get("title") or current_doc.get("title"),
+            "release_year": metadata.get("release_year", current_doc.get("release_year")),
+            "rating": metadata.get("rating", current_doc.get("rating")),
+            "description": metadata.get("description", current_doc.get("description")),
+            "poster": metadata.get("poster", current_doc.get("poster")),
+            "backdrop": metadata.get("backdrop", current_doc.get("backdrop")),
+            "logo": metadata.get("logo", current_doc.get("logo")),
+            "genres": metadata.get("genres", current_doc.get("genres", [])),
+            "cast": metadata.get("cast", current_doc.get("cast", [])),
+            "runtime": metadata.get("runtime", current_doc.get("runtime")),
+            "updated_on": now,
+        }
+
+        if collection_name == "movie":
+            preserved_telegram = current_doc.get("telegram", [])
+            current_doc.update({
+                **common_update,
+                "media_type": "movie",
+                "telegram": preserved_telegram,
+            })
+        else:
+            preserved_seasons = current_doc.get("seasons", [])
+            current_doc.update({
+                **common_update,
+                "media_type": "tv",
+                "seasons": preserved_seasons,
+            })
+
+        current_doc.pop("auto_catalog", None)
+        current_doc.pop("auto_tags_updated_at", None)
+
+        if new_tmdb_id != old_tmdb_id:
+            await collection.delete_one({"tmdb_id": old_tmdb_id})
+            await collection.replace_one({"tmdb_id": new_tmdb_id}, current_doc, upsert=True)
+            await self.update_custom_catalog_item_reference(
+                collection_name,
+                old_tmdb_id,
+                new_tmdb_id,
+                db_index,
+            )
+        else:
+            await collection.replace_one({"tmdb_id": old_tmdb_id}, current_doc, upsert=True)
+
+        updated_doc = await collection.find_one({"tmdb_id": new_tmdb_id})
+        return convert_objectid_to_str(updated_doc) if updated_doc else None
 
     async def delete_document(self, media_type: str, tmdb_id: int, db_index: int) -> bool:
         db_key = f"storage_{db_index}"

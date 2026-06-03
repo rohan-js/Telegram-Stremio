@@ -333,6 +333,28 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
             }
         ]
 
+        try:
+            custom_catalogs = await db.get_custom_catalogs(visible_only=True)
+            for catalog in custom_catalogs:
+                catalog_id = str(catalog.get("_id"))
+                catalog_name = catalog.get("name") or "Custom Catalog"
+                catalogs.append({
+                    "type": "movie",
+                    "id": f"custom_{catalog_id}",
+                    "name": catalog_name,
+                    "extra": [{"name": "skip"}],
+                    "extraSupported": ["skip"],
+                })
+                catalogs.append({
+                    "type": "series",
+                    "id": f"custom_{catalog_id}",
+                    "name": catalog_name,
+                    "extra": [{"name": "skip"}],
+                    "extraSupported": ["skip"],
+                })
+        except Exception:
+            pass
+
     # Build dynamic name/description/version with subscription info
     addon_name = ADDON_NAME
     addon_desc = "Streams movies and series from your Telegram."
@@ -588,7 +610,26 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
     page = (stremio_skip // PAGE_SIZE) + 1
 
     try:
-        if search_query:
+        if id.startswith("custom_"):
+            catalog_id = id.removeprefix("custom_")
+            catalog = await db.get_custom_catalog(catalog_id)
+            if not catalog or not catalog.get("visible", True):
+                return {
+                    "metas": [],
+                    "cacheMaxAge": 0,
+                    "staleRevalidate": 0,
+                    "staleError": 0,
+                }
+
+            db_media_type = "tv" if media_type == "series" else "movie"
+            data = await db.get_custom_catalog_items(
+                catalog_id=catalog_id,
+                media_type=db_media_type,
+                page=page,
+                page_size=PAGE_SIZE,
+            )
+            items = data.get("items", [])
+        elif search_query:
             search_results = await db.search_documents(query=search_query, page=page, page_size=PAGE_SIZE)
             all_items = search_results.get("results", [])
             db_media_type = "tv" if media_type == "series" else "movie"

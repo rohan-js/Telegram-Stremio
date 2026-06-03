@@ -10,7 +10,8 @@ from Backend.fastapi.routes.stremio_routes import router as stremio_router
 from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page, public_status_page, stremio_guide_page,
-    admin_dashboard_page, admin_subscriptions_page, admin_access_page, vlc_redirect
+    admin_dashboard_page, admin_subscriptions_page, admin_access_page, vlc_redirect,
+    custom_catalogs_page
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
@@ -23,7 +24,13 @@ from Backend.fastapi.routes.api_routes import (
     get_subscription_plans_api, add_subscription_plan_api,
     update_subscription_plan_api, delete_subscription_plan_api,
     get_all_subscribers_api, manage_subscriber_api,
-    get_all_tokens_api, assign_plan_api, link_token_user_api
+    get_all_tokens_api, assign_plan_api, link_token_user_api,
+    search_media_rescan_api, apply_media_rescan_api,
+    list_custom_catalogs_api, create_custom_catalog_api, update_custom_catalog_api,
+    delete_custom_catalog_api, get_custom_catalog_items_api, search_catalog_media_api,
+    add_custom_catalog_item_api, remove_custom_catalog_item_api,
+    auto_sync_custom_catalogs_api, auto_catalog_sync_status_api,
+    get_auto_catalog_settings_api, update_auto_catalog_settings_api
 )
 
 app = FastAPI(
@@ -102,6 +109,10 @@ async def admin_dashboard(request: Request, _: bool = Depends(require_auth)):
 async def media_management(request: Request, media_type: str = "movie", _: bool = Depends(require_auth)):
     return await media_management_page(request, media_type, _)
 
+@app.get("/catalogs", response_class=HTMLResponse)
+async def custom_catalogs(request: Request, _: bool = Depends(require_auth)):
+    return await custom_catalogs_page(request, _)
+
 @app.get("/media/edit", response_class=HTMLResponse)
 async def edit_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
     return await edit_media_page(request, tmdb_id, db_index, media_type, _)
@@ -123,6 +134,25 @@ async def delete_media(tmdb_id: int, db_index: int, media_type: str, _: bool = D
 @app.put("/api/media/update")
 async def update_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
     return await update_media_api(request, tmdb_id, db_index, media_type)
+
+@app.get("/api/media/rescan/search")
+async def search_media_rescan(
+    media_type: str = Query(..., regex="^(movie|tv)$"),
+    query: str = Query(..., min_length=1, max_length=120),
+    year: int | None = Query(None),
+    _: bool = Depends(require_auth),
+):
+    return await search_media_rescan_api(media_type, query, year)
+
+@app.post("/api/media/rescan/apply")
+async def apply_media_rescan(
+    request: Request,
+    tmdb_id: int,
+    db_index: int,
+    media_type: str = Query(..., regex="^(movie|tv)$"),
+    _: bool = Depends(require_auth),
+):
+    return await apply_media_rescan_api(request, tmdb_id, db_index, media_type)
 
 @app.delete("/api/media/delete-quality")
 async def delete_movie_quality(tmdb_id: int, db_index: int, id: str, _: bool = Depends(require_auth)):
@@ -246,6 +276,80 @@ async def link_token_to_user(token: str, payload: dict, _: bool = Depends(requir
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="user_id is required.")
     return await link_token_user_api(token, user_id)
+
+@app.get("/api/custom-catalogs")
+async def list_custom_catalogs(
+    tmdb_id: int | None = None,
+    db_index: int | None = None,
+    media_type: str | None = None,
+    _: bool = Depends(require_auth),
+):
+    return await list_custom_catalogs_api(tmdb_id, db_index, media_type)
+
+@app.post("/api/custom-catalogs")
+async def create_custom_catalog(payload: dict, _: bool = Depends(require_auth)):
+    return await create_custom_catalog_api(payload)
+
+@app.put("/api/custom-catalogs/{catalog_id}")
+async def update_custom_catalog(catalog_id: str, payload: dict, _: bool = Depends(require_auth)):
+    return await update_custom_catalog_api(catalog_id, payload)
+
+@app.delete("/api/custom-catalogs/{catalog_id}")
+async def delete_custom_catalog(catalog_id: str, _: bool = Depends(require_auth)):
+    return await delete_custom_catalog_api(catalog_id)
+
+@app.get("/api/custom-catalogs/search-media")
+async def search_catalog_media(
+    query: str,
+    media_type: str = "movie",
+    page: int = 1,
+    page_size: int = 12,
+    _: bool = Depends(require_auth),
+):
+    return await search_catalog_media_api(query, media_type, page, page_size)
+
+@app.post("/api/custom-catalogs/auto-sync")
+async def auto_sync_custom_catalogs(
+    full_rebuild: bool = False,
+    _: bool = Depends(require_auth),
+):
+    return await auto_sync_custom_catalogs_api(full_rebuild)
+
+@app.get("/api/custom-catalogs/auto-sync/status")
+async def auto_catalog_sync_status(_: bool = Depends(require_auth)):
+    return await auto_catalog_sync_status_api()
+
+@app.get("/api/custom-catalogs/auto-sync/settings")
+async def get_auto_catalog_settings_route(_: bool = Depends(require_auth)):
+    return await get_auto_catalog_settings_api()
+
+@app.put("/api/custom-catalogs/auto-sync/settings")
+async def update_auto_catalog_settings_route(payload: dict, _: bool = Depends(require_auth)):
+    return await update_auto_catalog_settings_api(payload)
+
+@app.get("/api/custom-catalogs/{catalog_id}/items")
+async def get_custom_catalog_items(
+    catalog_id: str,
+    media_type: str | None = None,
+    page: int = 1,
+    page_size: int = 24,
+    _: bool = Depends(require_auth),
+):
+    return await get_custom_catalog_items_api(catalog_id, media_type, page, page_size)
+
+@app.post("/api/custom-catalogs/{catalog_id}/items")
+async def add_custom_catalog_item(catalog_id: str, payload: dict, _: bool = Depends(require_auth)):
+    return await add_custom_catalog_item_api(catalog_id, payload)
+
+@app.delete("/api/custom-catalogs/{catalog_id}/items")
+async def remove_custom_catalog_item(
+    catalog_id: str,
+    tmdb_id: int,
+    db_index: int,
+    media_type: str,
+    _: bool = Depends(require_auth),
+):
+    return await remove_custom_catalog_item_api(catalog_id, tmdb_id, db_index, media_type)
 
 @app.get("/api/system/speedtest")
 async def speed_test(

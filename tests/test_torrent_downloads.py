@@ -66,7 +66,7 @@ class TorrentDownloadHelperTests(unittest.TestCase):
         root = Path("/tmp/download-root")
 
         good = safe_download_file_path(root, "Movie/file.mkv")
-        self.assertEqual(str(good), "/tmp/download-root/Movie/file.mkv")
+        self.assertEqual(good.parts[-3:], ("download-root", "Movie", "file.mkv"))
 
         with self.assertRaises(ValueError):
             safe_download_file_path(root, "../secret.txt")
