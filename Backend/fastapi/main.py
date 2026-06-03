@@ -105,6 +105,10 @@ async def vlc(request: Request, token: str, id: str):
 async def root(request: Request, _: bool = Depends(require_auth)):
     return await dashboard_page(request, _)
 
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request, _: bool = Depends(require_auth)):
+    return await dashboard_page(request, _)
+
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, _: bool = Depends(require_auth)):
     return await admin_dashboard_page(request, _)
