@@ -1953,6 +1953,113 @@ class Database:
             }
         )
 
+    # -------------------------------
+    # Watch Link Request Methods
+    # -------------------------------
+
+    async def create_watch_link_request(self, payload: dict, ttl_days: int = 7) -> str:
+        """Create a short callback lookup for channel Watch in Stremio buttons."""
+        col = self.dbs["tracking"]["watch_link_requests"]
+        now = datetime.utcnow()
+        expires_at = now + timedelta(days=int(ttl_days or 7))
+        try:
+            await col.create_index("expires_at", expireAfterSeconds=0)
+            await col.create_index([("clicked_at", DESCENDING)])
+            await col.delete_many({"expires_at": {"$lt": now}})
+        except Exception as e:
+            LOGGER.debug(f"Watch link index/cleanup skipped: {e}")
+
+        for _ in range(5):
+            request_id = secrets.token_urlsafe(6)
+            doc = {
+                "_id": request_id,
+                "stremio_link": payload.get("stremio_link"),
+                "media_title": payload.get("media_title"),
+                "media_type": payload.get("media_type"),
+                "imdb_id": payload.get("imdb_id"),
+                "season_number": payload.get("season_number"),
+                "episode_number": payload.get("episode_number"),
+                "source_type": payload.get("source_type"),
+                "origin_chat_id": payload.get("origin_chat_id"),
+                "origin_msg_id": payload.get("origin_msg_id"),
+                "created_at": now,
+                "expires_at": expires_at,
+                "click_count": 0,
+            }
+            try:
+                await col.insert_one(doc)
+                return request_id
+            except Exception as e:
+                if "duplicate" not in str(e).lower():
+                    raise
+        raise RuntimeError("Could not create unique watch link request id")
+
+    async def get_watch_link_request(self, request_id: str) -> Optional[dict]:
+        doc = await self.dbs["tracking"]["watch_link_requests"].find_one({"_id": str(request_id)})
+        return convert_objectid_to_str(doc) if doc else None
+
+    async def mark_watch_link_requested(self, request_id: str, requester: dict) -> Optional[dict]:
+        now = datetime.utcnow()
+        update = {
+            "$set": {
+                "requester_user_id": requester.get("user_id"),
+                "requester_first_name": requester.get("first_name"),
+                "requester_last_name": requester.get("last_name"),
+                "requester_username": requester.get("username"),
+                "requester_name": requester.get("name"),
+                "clicked_at": now,
+                "last_delivery_status": "pending",
+            },
+            "$inc": {"click_count": 1},
+        }
+        doc = await self.dbs["tracking"]["watch_link_requests"].find_one_and_update(
+            {"_id": str(request_id), "expires_at": {"$gt": now}},
+            update,
+            return_document=ReturnDocument.AFTER,
+        )
+        return convert_objectid_to_str(doc) if doc else None
+
+    async def mark_watch_link_delivery(self, request_id: str, status: str, error: str | None = None) -> None:
+        update = {
+            "$set": {
+                "last_delivery_status": status,
+                "last_delivery_at": datetime.utcnow(),
+            }
+        }
+        if error:
+            update["$set"]["last_delivery_error"] = str(error)[:240]
+        await self.dbs["tracking"]["watch_link_requests"].update_one({"_id": str(request_id)}, update)
+
+    async def get_recent_watch_link_requests(self, limit: int = 20) -> List[dict]:
+        cursor = self.dbs["tracking"]["watch_link_requests"].find(
+            {"clicked_at": {"$exists": True}},
+            {
+                "_id": 1,
+                "media_title": 1,
+                "media_type": 1,
+                "imdb_id": 1,
+                "season_number": 1,
+                "episode_number": 1,
+                "source_type": 1,
+                "origin_chat_id": 1,
+                "origin_msg_id": 1,
+                "requester_user_id": 1,
+                "requester_name": 1,
+                "requester_username": 1,
+                "clicked_at": 1,
+                "click_count": 1,
+                "last_delivery_status": 1,
+                "last_delivery_error": 1,
+            },
+        ).sort("clicked_at", DESCENDING).limit(int(limit or 20))
+        docs = await cursor.to_list(None)
+        for doc in docs:
+            doc["request_id"] = str(doc.pop("_id"))
+            for key in ("clicked_at",):
+                if doc.get(key):
+                    doc[key] = doc[key].isoformat()
+        return [convert_objectid_to_str(doc) for doc in docs]
+
     async def update_api_token_limits(self, token: str, daily_limit_gb: float, monthly_limit_gb: float) -> bool:
         result = await self.dbs["tracking"]["api_tokens"].update_one(
             {"token": token},

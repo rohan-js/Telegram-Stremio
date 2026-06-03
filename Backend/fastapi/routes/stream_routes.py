@@ -953,11 +953,18 @@ async def get_stream_stats():
         if stream.get("status") == "error" or stream.get("error_reason")
     ]
 
+    try:
+        recent_watch_requests = await db.get_recent_watch_link_requests(20)
+    except Exception as e:
+        LOGGER.warning(f"Could not load recent watch link requests: {e}")
+        recent_watch_requests = []
+
     return JSONResponse(
         {
             "active_streams": active,
             "recent_streams": recent,
             "recent_failed_streams": recent_failed,
+            "recent_watch_requests": recent_watch_requests,
             "client_dc_map": client_dc_map,
             "work_loads": work_loads,
             "client_cooldowns": get_client_cooldown_state(),

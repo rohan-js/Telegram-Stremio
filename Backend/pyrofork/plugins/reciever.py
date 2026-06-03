@@ -23,6 +23,11 @@ from Backend.helper.torrent_downloads import (
     TORRENT_DOWNLOAD_MANAGER,
     torrent_download_callback_data,
 )
+from Backend.helper.watch_links import (
+    callback_data_fits,
+    telegram_user_display_name,
+    watch_callback_data,
+)
 from Backend.logger import LOGGER
 from Backend.helper.disk_cache import PRECACHE_MANAGER, PrecacheJob
 
@@ -44,6 +49,30 @@ TORRENT_METADATA_FAILED_TEXT = (
 )
 
 VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".flv", ".wmv")
+
+
+def _telegram_user_name(user) -> str:
+    if not user:
+        return "Telegram User"
+    return telegram_user_display_name(
+        getattr(user, "first_name", None),
+        getattr(user, "last_name", None),
+        getattr(user, "username", None),
+        getattr(user, "id", None),
+    )
+
+
+def _requester_from_callback(callback_query: CallbackQuery) -> dict:
+    user = callback_query.from_user
+    if not user:
+        return {}
+    return {
+        "user_id": user.id,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "username": user.username,
+        "name": _telegram_user_name(user),
+    }
 
 
 async def _edit_status(chat_id: int | None, msg_id: int | None, text: str) -> None:
@@ -269,7 +298,28 @@ async def send_reply_messages():
                     f"{stream_note}"
                 )
 
-            buttons_row = [InlineKeyboardButton("▶️ Watch in Stremio", url=stremio_link)]
+            buttons_row = []
+            try:
+                watch_request_id = await db.create_watch_link_request({
+                    "stremio_link": stremio_link,
+                    "media_title": movie_title,
+                    "media_type": media_type,
+                    "imdb_id": imdb_id,
+                    "season_number": metadata_info.get("season_number"),
+                    "episode_number": metadata_info.get("episode_number"),
+                    "source_type": source_type,
+                    "origin_chat_id": chat_id,
+                    "origin_msg_id": msg_id,
+                })
+                watch_data = watch_callback_data(watch_request_id)
+                if callback_data_fits(watch_data):
+                    buttons_row.append(InlineKeyboardButton("▶️ Watch in Stremio", callback_data=watch_data))
+                else:
+                    buttons_row.append(InlineKeyboardButton("▶️ Watch in Stremio", url=stremio_link))
+            except Exception as e:
+                LOGGER.warning(f"Could not create watch callback link, falling back to direct URL: {e}")
+                buttons_row.append(InlineKeyboardButton("▶️ Watch in Stremio", url=stremio_link))
+
             if vlc_page:
                 buttons_row.append(InlineKeyboardButton("🎬 Watch in VLC", url=vlc_page))
             button_rows = [buttons_row]
@@ -357,6 +407,56 @@ async def torrent_download_callback(client: Client, callback_query: CallbackQuer
     except Exception as e:
         LOGGER.error(f"Torrent download callback failed: {e}")
         await callback_query.answer("Could not queue torrent download.", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^watch_([A-Za-z0-9_-]{6,24})$"))
+async def watch_link_callback(client: Client, callback_query: CallbackQuery):
+    request_id = callback_query.matches[0].group(1)
+    requester = _requester_from_callback(callback_query)
+    if not requester.get("user_id"):
+        return await callback_query.answer("Could not identify your Telegram account.", show_alert=True)
+
+    try:
+        watch_request = await db.mark_watch_link_requested(request_id, requester)
+        if not watch_request:
+            return await callback_query.answer("This watch link expired. Please use a newer post.", show_alert=True)
+
+        await db.update_user_interaction(
+            int(requester["user_id"]),
+            requester.get("first_name") or requester.get("name") or f"User {requester['user_id']}",
+            requester.get("username"),
+        )
+
+        title = watch_request.get("media_title") or "this title"
+        media_type = watch_request.get("media_type") or "media"
+        season = watch_request.get("season_number")
+        episode = watch_request.get("episode_number")
+        episode_text = ""
+        if media_type == "tv" and season and episode:
+            episode_text = f"\n📺 S{int(season):02d}E{int(episode):02d}"
+
+        await client.send_message(
+            chat_id=int(requester["user_id"]),
+            text=(
+                f"▶️ <b>Watch in Stremio</b>\n\n"
+                f"🎬 <b>{escape(str(title))}</b>{episode_text}\n\n"
+                "Tap the button below to open this title in Stremio."
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("▶️ Watch in Stremio", url=watch_request["stremio_link"])]
+            ]),
+            disable_web_page_preview=True,
+        )
+        await db.mark_watch_link_delivery(request_id, "sent")
+        await callback_query.answer("I sent the Stremio link in your DM.", show_alert=False)
+    except Exception as e:
+        LOGGER.warning(f"Could not deliver watch link callback {request_id}: {e}")
+        try:
+            await db.mark_watch_link_delivery(request_id, "failed", str(e))
+        except Exception:
+            pass
+        await callback_query.answer("Please start the bot first, then tap Watch again.", show_alert=True)
 
 
 async def _queue_torrent_item(message: Message, item: TorrentItem, override_id: str | None) -> bool:
