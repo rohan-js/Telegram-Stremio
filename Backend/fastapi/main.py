@@ -11,7 +11,7 @@ from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page, public_status_page, stremio_guide_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, vlc_redirect,
-    custom_catalogs_page, unmatched_media_page
+    custom_catalogs_page, unmatched_media_page, watch_requests_page
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
@@ -124,6 +124,10 @@ async def custom_catalogs(request: Request, _: bool = Depends(require_auth)):
 @app.get("/unmatched", response_class=HTMLResponse)
 async def unmatched_media(request: Request, _: bool = Depends(require_auth)):
     return await unmatched_media_page(request, _)
+
+@app.get("/watch-requests", response_class=HTMLResponse)
+async def watch_requests(request: Request, _: bool = Depends(require_auth)):
+    return await watch_requests_page(request, _)
 
 @app.get("/media/edit", response_class=HTMLResponse)
 async def edit_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):

@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block title %}Watch Requests - TG Stremio{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <section class="glass-panel rounded-[2.5rem] p-6 sm:p-8">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+            <div>
+                <div class="flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.22em] text-text-secondary">
+                    <span class="w-2 h-2 rounded-full bg-primary shadow-[0_0_12px_var(--primary)]"></span>
+                    Telegram Watch Links
+                </div>
+                <h1 class="mt-3 text-2xl sm:text-3xl lg:text-4xl font-extrabold text-text">Watch Requests</h1>
+                <p class="mt-2 text-sm text-text-secondary max-w-2xl">
+                    See who clicked the channel Watch in Stremio callback and when the final watch link was posted.
+                </p>
+            </div>
+            <button onclick="loadWatchRequests()" class="px-5 py-3 rounded-2xl bg-primary text-background font-bold hover:brightness-110 transition-all inline-flex items-center justify-center gap-2">
+                <i id="refresh-icon" class="fa-solid fa-rotate text-sm"></i>
+                Refresh
+            </button>
+        </div>
+    </section>
+
+    <section class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div class="glass-panel rounded-[2rem] p-5">
+            <p class="text-[10px] uppercase tracking-[0.18em] text-text-secondary font-bold">Total Clicks</p>
+            <p id="total-clicks" class="mt-2 text-3xl font-extrabold text-text">0</p>
+        </div>
+        <div class="glass-panel rounded-[2rem] p-5">
+            <p class="text-[10px] uppercase tracking-[0.18em] text-text-secondary font-bold">Unique Users</p>
+            <p id="unique-users" class="mt-2 text-3xl font-extrabold text-text">0</p>
+        </div>
+        <div class="glass-panel rounded-[2rem] p-5">
+            <p class="text-[10px] uppercase tracking-[0.18em] text-text-secondary font-bold">Recent Items</p>
+            <p id="recent-count" class="mt-2 text-3xl font-extrabold text-text">0</p>
+        </div>
+        <div class="glass-panel rounded-[2rem] p-5">
+            <p class="text-[10px] uppercase tracking-[0.18em] text-text-secondary font-bold">Latest Click</p>
+            <p id="latest-click" class="mt-2 text-sm font-bold text-text leading-snug">-</p>
+        </div>
+    </section>
+
+    <section class="glass-panel rounded-[2.5rem] overflow-hidden">
+        <div class="p-6 border-b border-white/5 flex items-center justify-between gap-3">
+            <div>
+                <h2 class="text-lg font-bold text-text">Recent Requests</h2>
+                <p class="text-xs text-text-secondary mt-1">Latest callback clicks from Telegram channel posts.</p>
+            </div>
+            <span class="text-[10px] font-bold uppercase tracking-[0.18em] text-primary bg-primary/10 px-3 py-1 rounded-full">Live</span>
+        </div>
+
+        <div id="watch-empty" class="hidden p-10 text-center">
+            <i class="fa-solid fa-circle-play text-4xl text-white/10 mb-3"></i>
+            <p class="text-sm text-text-secondary font-medium">No watch requests yet.</p>
+            <p class="text-xs text-text-secondary mt-1">Clicks will appear here after someone taps Watch in Stremio in Telegram.</p>
+        </div>
+
+        <div id="watch-error" class="hidden p-10 text-center">
+            <i class="fa-solid fa-triangle-exclamation text-4xl text-red-400/30 mb-3"></i>
+            <p class="text-sm text-red-300 font-medium">Unable to load watch requests.</p>
+            <p class="text-xs text-text-secondary mt-1">Refresh the page or check the server logs.</p>
+        </div>
+
+        <div id="watch-loading" class="p-10 text-center text-text-secondary text-sm">Loading watch requests...</div>
+
+        <div id="watch-mobile" class="md:hidden p-4 space-y-4"></div>
+
+        <div id="watch-table-wrap" class="hidden md:block overflow-x-auto">
+            <table class="w-full text-left">
+                <thead>
+                    <tr class="bg-white/5 text-[10px] uppercase tracking-[0.2em] font-bold text-text-secondary">
+                        <th class="py-5 px-6">Media</th>
+                        <th class="py-5 px-6">Requester</th>
+                        <th class="py-5 px-6">Username</th>
+                        <th class="py-5 px-6">User ID</th>
+                        <th class="py-5 px-6">Type</th>
+                        <th class="py-5 px-6">Status</th>
+                        <th class="py-5 px-6">Clicks</th>
+                        <th class="py-5 px-6">Clicked</th>
+                        <th class="py-5 px-6">Channel / Msg</th>
+                    </tr>
+                </thead>
+                <tbody id="watch-table" class="divide-y divide-white/5"></tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+<script>
+let watchRefreshTimer = null;
+
+function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function formatTimestamp(value) {
+    if (typeof value === 'string') {
+        const parsed = new Date(value);
+        if (!Number.isNaN(parsed.getTime())) return parsed.toLocaleString();
+    }
+    const numeric = Number(value || 0);
+    if (!numeric) return '-';
+    const parsed = new Date(numeric * 1000);
+    if (Number.isNaN(parsed.getTime())) return '-';
+    return parsed.toLocaleString();
+}
+
+function sourceLabel(item) {
+    const chat = item?.origin_chat_id ?? '-';
+    const msg = item?.origin_msg_id ?? '-';
+    return `Chat ${chat} / Msg ${msg}`;
+}
+
+function mediaSubtitle(item) {
+    const parts = [];
+    if (item?.media_type === 'tv' && item?.season_number && item?.episode_number) {
+        parts.push(`S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`);
+    } else if (item?.media_type) {
+        parts.push(item.media_type);
+    }
+    if (item?.imdb_id) parts.push(item.imdb_id);
+    return parts.join(' - ');
+}
+
+function statusClass(status) {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'sent') return 'bg-primary/10 text-primary';
+    if (normalized === 'failed') return 'bg-red-500/15 text-red-300';
+    return 'bg-white/10 text-text-secondary';
+}
+
+function renderMobileCard(item) {
+    const username = item?.requester_username ? '@' + item.requester_username : 'No username';
+    const status = item?.last_delivery_status || 'requested';
+    const clickCount = Number(item?.click_count || 0);
+    return `
+        <article class="glass-panel rounded-[2rem] p-5">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <h3 class="text-sm font-bold text-text truncate">${escapeHtml(item?.media_title || 'Unknown Title')}</h3>
+                    <p class="mt-1 text-xs text-text-secondary">${escapeHtml(mediaSubtitle(item))}</p>
+                </div>
+                <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap ${statusClass(status)}">${escapeHtml(status)}</span>
+            </div>
+            <div class="mt-4 pt-4 border-t border-white/5 grid grid-cols-1 gap-2 text-xs">
+                <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Requester</span><span class="text-text text-right truncate max-w-[65%]">${escapeHtml(item?.requester_name || 'Telegram User')}</span></div>
+                <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Username</span><span class="text-text text-right truncate max-w-[65%]">${escapeHtml(username)}</span></div>
+                <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">User ID</span><span class="font-mono text-text text-right truncate max-w-[65%]">${escapeHtml(item?.requester_user_id || 'Unknown')}</span></div>
+                <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Source Type</span><span class="text-text text-right truncate max-w-[65%]">${escapeHtml(item?.source_type || 'media')}</span></div>
+                <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Clicks</span><span class="font-mono text-text text-right truncate max-w-[65%]">${escapeHtml(clickCount)}</span></div>
+                <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Clicked</span><span class="text-text text-right truncate max-w-[65%]">${escapeHtml(formatTimestamp(item?.clicked_at))}</span></div>
+                <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Channel / Msg</span><span class="font-mono text-text text-right truncate max-w-[65%]">${escapeHtml(sourceLabel(item))}</span></div>
+            </div>
+        </article>
+    `;
+}
+
+function renderTableRow(item) {
+    const username = item?.requester_username ? '@' + item.requester_username : 'No username';
+    const status = item?.last_delivery_status || 'requested';
+    const clickCount = Number(item?.click_count || 0);
+    return `
+        <tr class="group hover:bg-white/[0.02] transition-colors">
+            <td class="py-5 px-6 min-w-[260px]">
+                <p class="font-bold text-text truncate max-w-[320px]">${escapeHtml(item?.media_title || 'Unknown Title')}</p>
+                <p class="text-[10px] uppercase tracking-[0.16em] text-text-secondary mt-1">${escapeHtml(mediaSubtitle(item))}</p>
+            </td>
+            <td class="py-5 px-6">
+                <p class="font-bold text-text">${escapeHtml(item?.requester_name || 'Telegram User')}</p>
+            </td>
+            <td class="py-5 px-6 text-xs text-text-secondary">${escapeHtml(username)}</td>
+            <td class="py-5 px-6 font-mono text-xs text-text">${escapeHtml(item?.requester_user_id || 'Unknown')}</td>
+            <td class="py-5 px-6 text-xs text-text">${escapeHtml(item?.source_type || 'media')}</td>
+            <td class="py-5 px-6"><span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase ${statusClass(status)}">${escapeHtml(status)}</span></td>
+            <td class="py-5 px-6 font-mono text-xs text-text">${escapeHtml(clickCount)}</td>
+            <td class="py-5 px-6 text-xs text-text">${escapeHtml(formatTimestamp(item?.clicked_at))}</td>
+            <td class="py-5 px-6 font-mono text-xs text-text-secondary">${escapeHtml(sourceLabel(item))}</td>
+        </tr>
+    `;
+}
+
+function updateSummary(items) {
+    const totalClicks = items.reduce((sum, item) => sum + Number(item?.click_count || 0), 0);
+    const uniqueUsers = new Set(items.map(item => item?.requester_user_id).filter(Boolean)).size;
+    document.getElementById('total-clicks').textContent = String(totalClicks);
+    document.getElementById('unique-users').textContent = String(uniqueUsers);
+    document.getElementById('recent-count').textContent = String(items.length);
+    document.getElementById('latest-click').textContent = items.length ? formatTimestamp(items[0]?.clicked_at) : '-';
+}
+
+async function loadWatchRequests() {
+    const refreshIcon = document.getElementById('refresh-icon');
+    const loading = document.getElementById('watch-loading');
+    const empty = document.getElementById('watch-empty');
+    const error = document.getElementById('watch-error');
+    const mobile = document.getElementById('watch-mobile');
+    const tableWrap = document.getElementById('watch-table-wrap');
+    const table = document.getElementById('watch-table');
+
+    if (refreshIcon) refreshIcon.classList.add('animate-spin');
+    loading.classList.remove('hidden');
+    empty.classList.add('hidden');
+    error.classList.add('hidden');
+
+    try {
+        const response = await fetch('/stream/stats', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Failed to fetch watch requests');
+        const data = await response.json();
+        const items = Array.isArray(data.recent_watch_requests) ? data.recent_watch_requests : [];
+        updateSummary(items);
+
+        if (!items.length) {
+            mobile.innerHTML = '';
+            table.innerHTML = '';
+            tableWrap.classList.add('hidden');
+            empty.classList.remove('hidden');
+            return;
+        }
+
+        mobile.innerHTML = items.map(renderMobileCard).join('');
+        table.innerHTML = items.map(renderTableRow).join('');
+        tableWrap.classList.remove('hidden');
+    } catch (err) {
+        console.error(err);
+        updateSummary([]);
+        error.classList.remove('hidden');
+        mobile.innerHTML = '';
+        table.innerHTML = '';
+        tableWrap.classList.add('hidden');
+    } finally {
+        loading.classList.add('hidden');
+        if (refreshIcon) refreshIcon.classList.remove('animate-spin');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadWatchRequests();
+    watchRefreshTimer = setInterval(loadWatchRequests, 30000);
+});
+</script>
+{% endblock %}
