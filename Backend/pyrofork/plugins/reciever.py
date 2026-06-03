@@ -1,4 +1,5 @@
 from asyncio import Queue, Lock, create_task, sleep as asleep
+from html import escape
 
 import Backend
 from pyrogram import Client, filters
@@ -45,23 +46,141 @@ TORRENT_METADATA_FAILED_TEXT = (
 VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".flv", ".wmv")
 
 
+async def _edit_status(chat_id: int | None, msg_id: int | None, text: str) -> None:
+    if not chat_id or not msg_id:
+        return
+    try:
+        from Backend.pyrofork.bot import StreamBot
+        await StreamBot.edit_message_text(
+            chat_id=int(chat_id),
+            message_id=int(msg_id),
+            text=text,
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as e:
+        LOGGER.debug(f"Could not edit ingest status message {msg_id}: {e}")
+
+
+def _format_queue_status(state: str, title: str, position: int | None = None, reason: str | None = None) -> str:
+    parts = [f"📥 <b>Ingestion {escape(state)}</b>", f"<code>{escape(title)}</code>"]
+    if position:
+        parts.append(f"Queue position: <code>{position}</code>")
+    if reason:
+        parts.append(f"Reason: <code>{escape(reason[:220])}</code>")
+    return "\n".join(parts)
+
+
+async def _metadata_for_job(job: dict) -> dict | None:
+    title = job.get("title") or job.get("file_name") or "unknown"
+    return await metadata(
+        clean_filename(title),
+        int(job["channel"]),
+        int(job["msg_id"]),
+        override_id=job.get("override_id"),
+    )
+
+
+async def _process_ingest_job(job: dict) -> None:
+    title = job.get("title") or job.get("file_name") or "unknown"
+    await _edit_status(
+        job.get("status_chat_id"),
+        job.get("status_msg_id"),
+        _format_queue_status("processing", title),
+    )
+
+    metadata_info = await _metadata_for_job(job)
+    if metadata_info is None:
+        reason = "metadata_failed"
+        await db.upsert_unmatched_media(job, reason)
+        await _edit_status(
+            job.get("status_chat_id"),
+            job.get("status_msg_id"),
+            _format_queue_status("failed", title, reason=reason),
+        )
+        if job.get("source_type") == "torrent":
+            await job["message"].reply_text(TORRENT_METADATA_FAILED_TEXT)
+        else:
+            await job["message"].reply_text(METADATA_FAILED_TEXT)
+        LOGGER.warning(f"Metadata failed for queued {job.get('source_type')} item: {title} (ID: {job.get('msg_id')})")
+        return
+
+    if job.get("source_type") == "torrent":
+        torrent = job.get("torrent") or {}
+        encoded_string = await encode_string({
+            "source_type": "torrent",
+            "chat_id": int(job["channel"]),
+            "msg_id": int(job["msg_id"]),
+            "info_hash": torrent.get("info_hash"),
+            "file_idx": torrent.get("file_idx"),
+            "name": torrent.get("file_name"),
+        })
+        metadata_info.update({
+            "source_type": "torrent",
+            "encoded_string": encoded_string,
+            "info_hash": torrent.get("info_hash"),
+            "file_idx": torrent.get("file_idx"),
+            "sources": torrent.get("sources") or [],
+            "filename": torrent.get("file_name") or title,
+            "video_size": torrent.get("video_size"),
+            "origin_chat_id": int(job["chat_id"]),
+            "origin_msg_id": int(job["msg_id"]),
+            "torrent_private": bool(torrent.get("torrent_private", False)),
+            "torrent_source_uri": torrent.get("torrent_source_uri"),
+            "torrent_file_chat_id": torrent.get("torrent_file_chat_id"),
+            "torrent_file_msg_id": torrent.get("torrent_file_msg_id"),
+        })
+
+    updated_id = await db.insert_media(
+        metadata_info,
+        channel=int(job["channel"]),
+        msg_id=int(job["msg_id"]),
+        size=job.get("size") or "",
+        name=job.get("display_name") or title,
+    )
+    if updated_id:
+        LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
+        await _edit_status(
+            job.get("status_chat_id"),
+            job.get("status_msg_id"),
+            _format_queue_status("indexed", title),
+        )
+        await reply_queue.put((job["chat_id"], job["original_msg_id"], metadata_info, job.get("display_name") or title, job.get("size") or ""))
+    else:
+        reason = "database_insert_failed"
+        await db.upsert_unmatched_media(job, reason)
+        await _edit_status(
+            job.get("status_chat_id"),
+            job.get("status_msg_id"),
+            _format_queue_status("failed", title, reason=reason),
+        )
+        LOGGER.info("Queued update failed due to validation/database errors.")
+
+
 async def process_file():
     while True:
-        metadata_info, channel, msg_id, size, title, chat_id, original_msg_id = await file_queue.get()
-        async with db_lock:
-            updated_id = await db.insert_media(
-                metadata_info,
-                channel=channel,
-                msg_id=msg_id,
-                size=size,
-                name=title,
-            )
-            if updated_id:
-                LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
-                await reply_queue.put((chat_id, original_msg_id, metadata_info, title, size))
-            else:
-                LOGGER.info("Update failed due to validation errors.")
-        file_queue.task_done()
+        job = await file_queue.get()
+        try:
+            async with db_lock:
+                if isinstance(job, dict):
+                    await _process_ingest_job(job)
+                else:
+                    metadata_info, channel, msg_id, size, title, chat_id, original_msg_id = job
+                    updated_id = await db.insert_media(
+                        metadata_info,
+                        channel=channel,
+                        msg_id=msg_id,
+                        size=size,
+                        name=title,
+                    )
+                    if updated_id:
+                        LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
+                        await reply_queue.put((chat_id, original_msg_id, metadata_info, title, size))
+                    else:
+                        LOGGER.info("Update failed due to validation errors.")
+        except Exception as e:
+            LOGGER.exception(f"Ingestion worker failed: {e}")
+        finally:
+            file_queue.task_done()
 
 
 async def send_reply_messages():
@@ -248,47 +367,43 @@ async def _queue_torrent_item(message: Message, item: TorrentItem, override_id: 
     if not title or title == item.info_hash:
         return False
 
-    metadata_info = await metadata(clean_filename(title), channel, msg_id, override_id=override_id)
-    if metadata_info is None:
-        LOGGER.warning(f"Metadata failed for torrent item: {title} (ID: {msg_id})")
-        return False
-
-    encoded_string = await encode_string({
-        "source_type": "torrent",
-        "chat_id": channel,
-        "msg_id": msg_id,
-        "info_hash": item.info_hash,
-        "file_idx": item.file_idx,
-        "name": item.file_name,
-    })
     display_title = remove_urls(item.file_name or title)
     if display_title and not display_title.lower().endswith(VIDEO_EXTENSIONS):
         display_title += ".mkv"
 
-    metadata_info.update({
+    position = file_queue.qsize() + 1
+    status_msg = await message.reply_text(
+        _format_queue_status("queued", display_title or title, position=position),
+        parse_mode=ParseMode.HTML,
+    )
+    await file_queue.put({
         "source_type": "torrent",
-        "encoded_string": encoded_string,
-        "info_hash": item.info_hash,
-        "file_idx": item.file_idx,
-        "sources": item.sources,
-        "filename": item.file_name or display_title,
-        "video_size": item.size_bytes,
-        "origin_chat_id": int(message.chat.id),
-        "origin_msg_id": int(msg_id),
-        "torrent_private": bool(item.is_private),
-        "torrent_source_uri": item.source_uri,
-        "torrent_file_chat_id": int(message.chat.id) if not item.source_uri and _is_torrent_document(message) else None,
-        "torrent_file_msg_id": int(msg_id) if not item.source_uri and _is_torrent_document(message) else None,
+        "source_key": f"torrent:{message.chat.id}:{msg_id}:{item.info_hash}:{item.file_idx}",
+        "item_key": f"{item.info_hash}:{item.file_idx}",
+        "channel": channel,
+        "chat_id": int(message.chat.id),
+        "msg_id": msg_id,
+        "original_msg_id": message.id,
+        "status_chat_id": status_msg.chat.id,
+        "status_msg_id": status_msg.id,
+        "title": title,
+        "file_name": item.file_name or display_title,
+        "display_name": display_title or title,
+        "size": item.size_text,
+        "override_id": override_id,
+        "message": message,
+        "torrent": {
+            "info_hash": item.info_hash,
+            "file_idx": item.file_idx,
+            "sources": item.sources,
+            "file_name": item.file_name or display_title,
+            "video_size": item.size_bytes,
+            "torrent_private": bool(item.is_private),
+            "torrent_source_uri": item.source_uri,
+            "torrent_file_chat_id": int(message.chat.id) if not item.source_uri and _is_torrent_document(message) else None,
+            "torrent_file_msg_id": int(msg_id) if not item.source_uri and _is_torrent_document(message) else None,
+        },
     })
-    await file_queue.put((
-        metadata_info,
-        channel,
-        msg_id,
-        item.size_text,
-        display_title or title,
-        message.chat.id,
-        message.id,
-    ))
     db.queue_torrent_stats_refresh(
         item.info_hash,
         item.sources,
@@ -370,12 +485,6 @@ async def file_receive_handler(client: Client, message: Message):
                 except Exception as e:
                     LOGGER.debug(f"Precache enqueue failed for msg {msg_id}: {e}")
 
-                metadata_info = await metadata(clean_filename(title), int(channel), msg_id)
-                if metadata_info is None:
-                    LOGGER.warning(f"Metadata failed for file: {title} (ID: {msg_id})")
-                    await message.reply_text(METADATA_FAILED_TEXT)
-                    return
-
                 title = remove_urls(title)
                 if not title.endswith((".mkv", ".mp4")):
                     title += ".mkv"
@@ -384,7 +493,27 @@ async def file_receive_handler(client: Client, message: Message):
                     new_caption = (message.caption + "\n\n" + Backend.USE_DEFAULT_ID) if message.caption else Backend.USE_DEFAULT_ID
                     create_task(edit_message(chat_id=message.chat.id, msg_id=message.id, new_caption=new_caption))
 
-                await file_queue.put((metadata_info, int(channel), msg_id, size, title, message.chat.id, message.id))
+                position = file_queue.qsize() + 1
+                status_msg = await message.reply_text(
+                    _format_queue_status("queued", title, position=position),
+                    parse_mode=ParseMode.HTML,
+                )
+                await file_queue.put({
+                    "source_type": "telegram",
+                    "source_key": f"telegram:{message.chat.id}:{msg_id}",
+                    "channel": int(channel),
+                    "chat_id": int(message.chat.id),
+                    "msg_id": int(msg_id),
+                    "original_msg_id": message.id,
+                    "status_chat_id": status_msg.chat.id,
+                    "status_msg_id": status_msg.id,
+                    "title": title,
+                    "file_name": file_name or title,
+                    "display_name": title,
+                    "size": size,
+                    "file_size": int(getattr(file, "file_size", 0) or 0),
+                    "message": message,
+                })
             else:
                 await message.reply_text("> Not supported")
         except FloodWait as e:
@@ -435,15 +564,31 @@ async def file_edited_handler(client: Client, message: Message):
                     LOGGER.info(f"Detected override ID '{override_id}' in edited message {msg_id}")
                     stream_id_hash = await encode_string({"chat_id": int(channel), "msg_id": msg_id})
                     await db.delete_media_by_stream_id(stream_id_hash)
-                    metadata_info = await metadata(clean_filename(title), int(channel), msg_id, override_id=override_id)
-                    if metadata_info is None:
-                        LOGGER.warning(f"Metadata failed for edited file: {title} (ID: {msg_id})")
-                        await message.reply_text(METADATA_FAILED_TEXT)
-                        return
                     title = remove_urls(title)
                     if not title.endswith((".mkv", ".mp4")):
                         title += ".mkv"
-                    await file_queue.put((metadata_info, int(channel), msg_id, size, title, message.chat.id, message.id))
+                    position = file_queue.qsize() + 1
+                    status_msg = await message.reply_text(
+                        _format_queue_status("queued", title, position=position),
+                        parse_mode=ParseMode.HTML,
+                    )
+                    await file_queue.put({
+                        "source_type": "telegram",
+                        "source_key": f"telegram:{message.chat.id}:{msg_id}",
+                        "channel": int(channel),
+                        "chat_id": int(message.chat.id),
+                        "msg_id": int(msg_id),
+                        "original_msg_id": message.id,
+                        "status_chat_id": status_msg.chat.id,
+                        "status_msg_id": status_msg.id,
+                        "title": title,
+                        "file_name": getattr(file, "file_name", None) or title,
+                        "display_name": title,
+                        "size": size,
+                        "file_size": int(getattr(file, "file_size", 0) or 0),
+                        "override_id": override_id,
+                        "message": message,
+                    })
         except Exception as e:
             LOGGER.error(f"Error handling edited generic file {message.id}: {e}")
 

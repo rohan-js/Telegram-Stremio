@@ -13,11 +13,20 @@ from Backend.logger import LOGGER
 from Backend.helper.exceptions import FIleNotFound
 from Backend.helper.pyro import get_file_ids
 from Backend import db
-from Backend.pyrofork.bot import work_loads, multi_clients, client_dc_map, client_failures, client_avg_mbps
+from Backend.pyrofork.bot import (
+    work_loads,
+    multi_clients,
+    client_dc_map,
+    client_failures,
+    client_avg_mbps,
+    client_cooldowns,
+    client_dc_cooldowns,
+    client_last_errors,
+)
 from Backend.config import Telegram
 
 ACTIVE_STREAMS: Dict[str, Dict] = {}
-RECENT_STREAMS = deque(maxlen=3)
+RECENT_STREAMS = deque(maxlen=20)
 client_dc_avg_mbps: Dict[Tuple[int, int], float] = {}
 client_dc_ttfb_sec: Dict[Tuple[int, int], float] = {}
 
@@ -52,9 +61,81 @@ def update_client_dc_metrics(
         pass
 
 
+def _cooldown_until(value) -> float:
+    try:
+        return float(value or 0.0)
+    except Exception:
+        return 0.0
+
+
+def is_client_cooled_down(client_index: int, target_dc: int = 0, now: Optional[float] = None) -> bool:
+    now = time.time() if now is None else now
+    if _cooldown_until(client_cooldowns.get(int(client_index))) > now:
+        return True
+    if target_dc and _cooldown_until(client_dc_cooldowns.get((int(client_index), int(target_dc)))) > now:
+        return True
+    return False
+
+
+def get_client_cooldown_state(now: Optional[float] = None) -> dict:
+    now = time.time() if now is None else now
+    states = {}
+    for idx in set(list(client_cooldowns.keys()) + [k[0] for k in client_dc_cooldowns.keys()]):
+        global_until = _cooldown_until(client_cooldowns.get(idx))
+        dc_states = {
+            str(dc): max(0, round(_cooldown_until(until) - now, 1))
+            for (client_idx, dc), until in client_dc_cooldowns.items()
+            if client_idx == idx and _cooldown_until(until) > now
+        }
+        states[str(idx)] = {
+            "global_sec": max(0, round(global_until - now, 1)),
+            "dc": dc_states,
+            "last_error": client_last_errors.get(idx),
+        }
+    return states
+
+
+def record_route_failure(
+    client_index: int,
+    target_dc: int,
+    reason: str,
+    *,
+    stream_id: Optional[str] = None,
+    offset: Optional[int] = None,
+    attempt: Optional[int] = None,
+) -> None:
+    client_index = int(client_index)
+    target_dc = int(target_dc or 0)
+    client_failures[client_index] = client_failures.get(client_index, 0) + 1
+    client_last_errors[client_index] = {
+        "reason": str(reason)[:240],
+        "target_dc": target_dc,
+        "stream_id": stream_id,
+        "offset": offset,
+        "attempt": attempt,
+        "ts": time.time(),
+    }
+
+    threshold = max(1, int(getattr(Telegram, "SMART_ROUTING_COOLDOWN_FAILURES", 2) or 2))
+    if client_failures.get(client_index, 0) >= threshold:
+        until = time.time() + max(30, int(getattr(Telegram, "SMART_ROUTING_COOLDOWN_SEC", 180) or 180))
+        client_cooldowns[client_index] = until
+        if target_dc:
+            client_dc_cooldowns[(client_index, target_dc)] = until
+        LOGGER.warning(
+            "Client cooldown: client=%s target_dc=%s reason=%s failures=%s until=%s",
+            client_index,
+            target_dc,
+            reason,
+            client_failures.get(client_index),
+            int(until),
+        )
+
+
 def smart_client_score(client_index: int, target_dc: int):
     """Lower score wins. Uses exact DC, live failures, and per-file-DC speed."""
     target_dc = int(target_dc or 0)
+    cooldown_penalty = 1 if is_client_cooled_down(client_index, target_dc) else 0
     same_dc_penalty = 0 if target_dc and client_dc_map.get(client_index) == target_dc else 1
     failure_load = work_loads.get(client_index, 0) + 3 * client_failures.get(client_index, 0)
     dc_speed = float(client_dc_avg_mbps.get((client_index, target_dc), 0.0) or 0.0)
@@ -62,6 +143,7 @@ def smart_client_score(client_index: int, target_dc: int):
     global_speed = float(client_avg_mbps.get(client_index, 0.0) or 0.0)
 
     return (
+        cooldown_penalty,
         same_dc_penalty,
         failure_load,
         dc_ttfb if dc_ttfb > 0 else 999.0,
@@ -211,6 +293,8 @@ class ByteStreamer:
             "chunk_errors": 0,
             "fallback_chunks": 0,
             "zero_pad_chunks": 0,
+            "error_reason": None,
+            "route_attempts": [],
         }
 
         ACTIVE_STREAMS[stream_id] = registry_entry
@@ -224,7 +308,17 @@ class ByteStreamer:
         location = await self._get_location(file_id)
         target_dc = int(getattr(file_id, "dc_id", 0) or 0)
 
-        async def fetch_chunk_with_retries(seq_idx: int, off: int) -> Tuple[int, Optional[bytes]]:
+        def remember_route_attempt(event: dict) -> None:
+            try:
+                attempts = registry_entry.setdefault("route_attempts", [])
+                event["ts"] = round(time.time(), 3)
+                attempts.append(event)
+                if len(attempts) > 30:
+                    del attempts[:-30]
+            except Exception:
+                pass
+
+        async def fetch_chunk_with_retries(seq_idx: int, off: int) -> Tuple[int, Optional[bytes], Optional[str]]:
             """Fetch one chunk with timeout, exponential back-off, and bot fallback.
 
             Retry schedule (max 3 tries):
@@ -242,8 +336,12 @@ class ByteStreamer:
                 use_client_idx = client_index
                 if tries >= 1 and len(multi_clients) > 1:
                     # Pick the best other helper for this file's Telegram DC.
+                    fallback_pool = [
+                        i for i in multi_clients
+                        if i != client_index and not is_client_cooled_down(i, target_dc)
+                    ]
                     fallback_idx = min(
-                        (i for i in multi_clients if i != client_index),
+                        fallback_pool,
                         key=lambda idx: smart_client_score(idx, target_dc),
                         default=None,
                     )
@@ -266,6 +364,15 @@ class ByteStreamer:
                                 seq_idx, tries, client_index, fallback_idx,
                             )
                             registry_entry["fallback_chunks"] = registry_entry.get("fallback_chunks", 0) + 1
+                            remember_route_attempt({
+                                "event": "fallback_selected",
+                                "seq": seq_idx,
+                                "offset": off,
+                                "attempt": tries + 1,
+                                "primary_client": client_index,
+                                "client": fallback_idx,
+                                "target_dc": target_dc,
+                            })
                         except Exception:
                             use_session = media_session  # revert if fallback session fails
                             use_location = location
@@ -280,6 +387,14 @@ class ByteStreamer:
                         timeout = max(1.5, min(first_timeout, base_timeout))
 
                     fetch_started = time.perf_counter()
+                    remember_route_attempt({
+                        "event": "chunk_attempt",
+                        "seq": seq_idx,
+                        "offset": off,
+                        "attempt": tries + 1,
+                        "client": use_client_idx,
+                        "target_dc": target_dc,
+                    })
                     r = await asyncio.wait_for(
                         use_session.send(
                             raw.functions.upload.GetFile(
@@ -292,7 +407,17 @@ class ByteStreamer:
                     chunk_bytes = getattr(r, "bytes", None) if r else None
                     
                     if chunk_bytes == b"":
-                        return seq_idx, None
+                        reason = f"empty_chunk client={use_client_idx} seq={seq_idx} offset={off}"
+                        remember_route_attempt({
+                            "event": "chunk_empty",
+                            "seq": seq_idx,
+                            "offset": off,
+                            "attempt": tries + 1,
+                            "client": use_client_idx,
+                            "target_dc": target_dc,
+                            "reason": reason,
+                        })
+                        return seq_idx, None, reason
 
                     if chunk_bytes:
                         mbps = (len(chunk_bytes) / (1024 * 1024)) / elapsed
@@ -300,33 +425,72 @@ class ByteStreamer:
 
                     # If we succeeded via a fallback, mark primary as degraded
                     if use_client_idx != client_index:
-                        client_failures[client_index] = client_failures.get(client_index, 0) + 1
-                    return seq_idx, chunk_bytes
+                        record_route_failure(
+                            client_index,
+                            target_dc,
+                            "fallback_needed",
+                            stream_id=stream_id,
+                            offset=off,
+                            attempt=tries + 1,
+                        )
+                    return seq_idx, chunk_bytes, None
 
                 except asyncio.TimeoutError:
                     tries += 1
-                    client_failures[use_client_idx] = client_failures.get(use_client_idx, 0) + 1
+                    record_route_failure(
+                        use_client_idx,
+                        target_dc,
+                        "chunk_timeout",
+                        stream_id=stream_id,
+                        offset=off,
+                        attempt=tries,
+                    )
                     registry_entry["chunk_timeouts"] = registry_entry.get("chunk_timeouts", 0) + 1
                     LOGGER.warning(
-                        "Chunk timeout seq=%s off=%s try=%s client=%s",
-                        seq_idx, off, tries, use_client_idx,
+                        "Chunk timeout stream=%s seq=%s off=%s try=%s client=%s target_dc=%s",
+                        stream_id, seq_idx, off, tries, use_client_idx, target_dc,
                     )
+                    remember_route_attempt({
+                        "event": "chunk_timeout",
+                        "seq": seq_idx,
+                        "offset": off,
+                        "attempt": tries,
+                        "client": use_client_idx,
+                        "target_dc": target_dc,
+                    })
                 except Exception as e:
                     tries += 1
+                    record_route_failure(
+                        use_client_idx,
+                        target_dc,
+                        f"chunk_error:{type(e).__name__}",
+                        stream_id=stream_id,
+                        offset=off,
+                        attempt=tries,
+                    )
                     registry_entry["chunk_errors"] = registry_entry.get("chunk_errors", 0) + 1
                     LOGGER.debug(
-                        "Fetch chunk error seq=%s off=%s try=%s client=%s err=%s",
-                        seq_idx, off, tries, use_client_idx, getattr(e, "args", e),
+                        "Fetch chunk error stream=%s seq=%s off=%s try=%s client=%s target_dc=%s err=%s",
+                        stream_id, seq_idx, off, tries, use_client_idx, target_dc, getattr(e, "args", e),
                     )
+                    remember_route_attempt({
+                        "event": "chunk_error",
+                        "seq": seq_idx,
+                        "offset": off,
+                        "attempt": tries,
+                        "client": use_client_idx,
+                        "target_dc": target_dc,
+                        "error": str(e)[:240],
+                    })
 
                 # Exponential back-off: 0.5 s, 1 s, 2 s, 4 s, 8 s, 10 s (cap)
                 await asyncio.sleep(min(0.5 * (2 ** (tries - 1)), 10.0))
 
-            LOGGER.error(
-                "Failed to fetch chunk seq=%s off=%s after 3 retries, client=%s",
-                seq_idx, off, client_index,
-            )
-            return seq_idx, None
+            reason = f"failed_after_retries seq={seq_idx} offset={off} client={client_index} target_dc={target_dc}"
+            registry_entry["status"] = "error"
+            registry_entry["error_reason"] = reason
+            LOGGER.error("Stream chunk failure: stream=%s %s", stream_id, reason)
+            return seq_idx, None, reason
 
         async def producer():
             scheduled_tasks: Dict[int, asyncio.Task] = {}
@@ -372,13 +536,20 @@ class ByteStreamer:
                             if completed_seq is None:
                                 continue
 
-                            seq_idx, chunk_bytes = completed.result()
+                            seq_idx, chunk_bytes, error_reason = completed.result()
                             scheduled_tasks.pop(completed_seq, None)
 
                             if chunk_bytes is None:
-                                LOGGER.error("Chunk fetch returned empty for stream=%s seq=%s. Filling with zero bytes.", stream_id, seq_idx)
-                                registry_entry["zero_pad_chunks"] = registry_entry.get("zero_pad_chunks", 0) + 1
-                                chunk_bytes = b"\x00" * chunk_size
+                                registry_entry["status"] = "error"
+                                registry_entry["error_reason"] = error_reason or f"chunk_unavailable seq={seq_idx}"
+                                LOGGER.error(
+                                    "Chunk unavailable for stream=%s seq=%s reason=%s. Ending stream cleanly.",
+                                    stream_id,
+                                    seq_idx,
+                                    registry_entry["error_reason"],
+                                )
+                                await q.put((None, None))
+                                return
 
                             results_buffer[seq_idx] = chunk_bytes
 
@@ -412,6 +583,8 @@ class ByteStreamer:
                 raise
             except Exception as e:
                 LOGGER.exception("Producer unexpected error for stream %s: %s", stream_id, e)
+                registry_entry["status"] = "error"
+                registry_entry["error_reason"] = f"producer_error:{type(e).__name__}"
                 try:
                     await q.put((None, None))
                 except Exception:
@@ -519,6 +692,7 @@ class ByteStreamer:
             except Exception as e:
                 LOGGER.exception("Consumer error for stream %s: %s", stream_id, e)
                 ACTIVE_STREAMS[stream_id]["status"] = "error"
+                ACTIVE_STREAMS[stream_id]["error_reason"] = f"consumer_error:{type(e).__name__}"
                 if not producer_task.done():
                     producer_task.cancel()
                 raise

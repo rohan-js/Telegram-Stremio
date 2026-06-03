@@ -22,6 +22,10 @@ class QualityDetail(BaseModel):
     torrent_source_uri: Optional[str] = None
     torrent_file_chat_id: Optional[int] = None
     torrent_file_msg_id: Optional[int] = None
+    hidden_from_stremio: bool = False
+    recommended: bool = False
+    quality_note: Optional[str] = None
+    flagged_duplicate: bool = False
 
 
 # ---------------------------

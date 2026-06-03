@@ -1029,6 +1029,10 @@ class Database:
             torrent_source_uri=metadata_info.get("torrent_source_uri"),
             torrent_file_chat_id=metadata_info.get("torrent_file_chat_id"),
             torrent_file_msg_id=metadata_info.get("torrent_file_msg_id"),
+            hidden_from_stremio=bool(metadata_info.get("hidden_from_stremio", False)),
+            recommended=bool(metadata_info.get("recommended", False)),
+            quality_note=metadata_info.get("quality_note"),
+            flagged_duplicate=bool(metadata_info.get("flagged_duplicate", False)),
         )
 
     def _source_type(self, quality: dict) -> str:
@@ -2070,12 +2074,20 @@ class Database:
     async def log_stream_stats(self, stats: dict) -> None:
         """Persist a finished-stream record to the tracking DB for analytics."""
         try:
+            meta = stats.get("meta", {}) or {}
             record = {
                 "stream_id":   stats.get("stream_id"),
                 "msg_id":      stats.get("msg_id"),
                 "chat_id":     stats.get("chat_id"),
                 "dc_id":       stats.get("dc_id"),
-                "title":       stats.get("meta", {}).get("title"),  # Added title
+                "title":       meta.get("title"),
+                "filename":    meta.get("filename"),
+                "source_type": meta.get("source_type", "telegram"),
+                "user_name":   meta.get("user_name"),
+                "client_host": meta.get("client_host"),
+                "user_agent":  meta.get("user_agent"),
+                "request_path": meta.get("request_path"),
+                "request_range": meta.get("request_range"),
                 "client_index": stats.get("client_index"),
                 "total_bytes": stats.get("total_bytes", 0),
                 "ttfb_sec":    stats.get("ttfb_sec"),
@@ -2093,6 +2105,10 @@ class Database:
                 "zero_pad_chunks": stats.get("zero_pad_chunks", 0),
                 "buffering_events": stats.get("buffering_events", 0),
                 "buffering_rate": stats.get("buffering_rate", 0.0),
+                "error_reason": stats.get("error_reason"),
+                "adaptive_prefetch": meta.get("adaptive_prefetch"),
+                "smart_routing": meta.get("smart_routing"),
+                "route_attempts": stats.get("route_attempts", [])[-10:],
                 "logged_at":   datetime.utcnow(),
             }
             await self.dbs["tracking"]["stream_analytics"].insert_one(record)
@@ -2158,6 +2174,9 @@ class Database:
                 {"_id": 0, "stream_id": 1, "client_index": 1, "dc_id": 1,
                  "total_bytes": 1, "duration_sec": 1, "avg_mbps": 1,
                  "peak_mbps": 1, "status": 1, "logged_at": 1, "title": 1,
+                  "filename": 1, "source_type": 1, "user_name": 1, "client_host": 1,
+                  "user_agent": 1, "request_range": 1, "error_reason": 1,
+                  "adaptive_prefetch": 1, "smart_routing": 1, "route_attempts": 1,
                   "cached": 1, "served_via": 1,
                  "ttfb_sec": 1, "chunk_timeouts": 1, "chunk_errors": 1,
                   "fallback_chunks": 1, "zero_pad_chunks": 1,
@@ -2210,3 +2229,197 @@ class Database:
         except Exception as e:
             LOGGER.error(f"get_stream_analytics error: {e}")
             return {"summary": {}, "per_client": [], "recent": []}
+
+    # -------------------------------
+    # Unmatched Media Repair Queue
+    # -------------------------------
+
+    async def upsert_unmatched_media(self, job: dict, reason: str, suggestions: Optional[List[dict]] = None) -> str:
+        """Store a metadata-failed Telegram/torrent item for manual repair."""
+        now = datetime.utcnow()
+        source_key = job.get("source_key") or f"{job.get('source_type', 'telegram')}:{job.get('chat_id')}:{job.get('msg_id')}:{job.get('item_key', '')}"
+        doc = {
+            "source_key": source_key,
+            "source_type": job.get("source_type", "telegram"),
+            "origin_chat_id": job.get("chat_id"),
+            "origin_msg_id": job.get("msg_id"),
+            "channel": job.get("channel"),
+            "title": job.get("title") or job.get("file_name") or "",
+            "file_name": job.get("file_name") or job.get("title") or "",
+            "size": job.get("size"),
+            "file_size": job.get("file_size"),
+            "override_id": job.get("override_id"),
+            "torrent": job.get("torrent"),
+            "failure_reason": str(reason or "metadata_failed")[:500],
+            "suggestions": suggestions or [],
+            "status": "open",
+            "updated_at": now,
+        }
+        result = await self.dbs["tracking"]["unmatched_media"].find_one_and_update(
+            {"source_key": source_key},
+            {"$set": doc, "$setOnInsert": {"created_at": now}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return str(result["_id"])
+
+    async def get_unmatched_media(self, unmatched_id: str) -> Optional[dict]:
+        try:
+            doc = await self.dbs["tracking"]["unmatched_media"].find_one({"_id": ObjectId(unmatched_id)})
+            return convert_objectid_to_str(doc) if doc else None
+        except Exception:
+            return None
+
+    async def list_unmatched_media(self, status: str = "open", limit: int = 100) -> List[dict]:
+        query = {} if status == "all" else {"status": status}
+        docs = await self.dbs["tracking"]["unmatched_media"].find(query).sort("updated_at", DESCENDING).limit(limit).to_list(None)
+        return [convert_objectid_to_str(doc) for doc in docs]
+
+    async def update_unmatched_suggestions(self, unmatched_id: str, suggestions: List[dict]) -> bool:
+        result = await self.dbs["tracking"]["unmatched_media"].update_one(
+            {"_id": ObjectId(unmatched_id)},
+            {"$set": {"suggestions": suggestions, "updated_at": datetime.utcnow()}},
+        )
+        return result.modified_count > 0
+
+    async def mark_unmatched_status(self, unmatched_id: str, status: str, extra: Optional[dict] = None) -> bool:
+        update = {"status": status, "updated_at": datetime.utcnow()}
+        if extra:
+            update.update(extra)
+        result = await self.dbs["tracking"]["unmatched_media"].update_one(
+            {"_id": ObjectId(unmatched_id)},
+            {"$set": update},
+        )
+        return result.modified_count > 0
+
+    # -------------------------------
+    # Manual Quality Flags / Duplicates
+    # -------------------------------
+
+    def _apply_quality_flags(self, quality: dict, flags: dict, clear: bool = False) -> dict:
+        allowed = {"hidden_from_stremio", "recommended", "quality_note", "flagged_duplicate"}
+        for key in allowed:
+            if clear:
+                if key == "quality_note":
+                    quality[key] = None
+                else:
+                    quality[key] = False
+            elif key in flags:
+                if key == "quality_note":
+                    quality[key] = (flags.get(key) or None)
+                else:
+                    quality[key] = bool(flags.get(key))
+        return quality
+
+    async def update_quality_flags(
+        self,
+        media_type: str,
+        tmdb_id: int,
+        db_index: int,
+        quality_id: str,
+        flags: dict,
+        season: Optional[int] = None,
+        episode: Optional[int] = None,
+        clear: bool = False,
+    ) -> bool:
+        db_key = f"storage_{int(db_index)}"
+        collection = "movie" if media_type == "movie" else "tv"
+        doc = await self.dbs[db_key][collection].find_one({"tmdb_id": int(tmdb_id)})
+        if not doc:
+            return False
+
+        updated = False
+        if media_type == "movie":
+            for quality in doc.get("telegram", []):
+                if quality.get("id") == quality_id:
+                    self._apply_quality_flags(quality, flags, clear=clear)
+                    updated = True
+                    break
+        else:
+            for season_doc in doc.get("seasons", []):
+                if season is not None and int(season_doc.get("season_number", 0) or 0) != int(season):
+                    continue
+                for ep_doc in season_doc.get("episodes", []):
+                    if episode is not None and int(ep_doc.get("episode_number", 0) or 0) != int(episode):
+                        continue
+                    for quality in ep_doc.get("telegram", []):
+                        if quality.get("id") == quality_id:
+                            self._apply_quality_flags(quality, flags, clear=clear)
+                            updated = True
+                            break
+                    if updated:
+                        break
+                if updated:
+                    break
+
+        if not updated:
+            return False
+        doc["updated_on"] = datetime.utcnow()
+        result = await self.dbs[db_key][collection].replace_one({"_id": doc["_id"]}, doc)
+        return result.modified_count > 0
+
+    def _duplicate_key_for_quality(self, quality: dict) -> str:
+        source_type = quality.get("source_type") or "telegram"
+        if source_type == "torrent" and quality.get("info_hash"):
+            return f"torrent:{str(quality.get('info_hash')).lower()}:{quality.get('file_idx')}"
+        if quality.get("id"):
+            return f"id:{quality.get('id')}"
+        filename = (quality.get("filename") or quality.get("name") or "").strip().lower()
+        size = quality.get("video_size") or quality.get("size") or ""
+        return f"file:{filename}:{size}"
+
+    def _duplicate_group(self, doc: dict, media_type: str, qualities: list, season: int | None = None, episode: int | None = None) -> Optional[dict]:
+        if len(qualities or []) <= 1:
+            return None
+        buckets = {}
+        for quality in qualities:
+            buckets.setdefault(self._duplicate_key_for_quality(quality), []).append(quality)
+        exact_duplicates = [items for items in buckets.values() if len(items) > 1]
+        return {
+            "media_type": media_type,
+            "tmdb_id": doc.get("tmdb_id"),
+            "db_index": doc.get("db_index"),
+            "title": doc.get("title"),
+            "season": season,
+            "episode": episode,
+            "quality_count": len(qualities),
+            "exact_duplicate_count": sum(len(items) for items in exact_duplicates),
+            "qualities": [
+                {
+                    "id": q.get("id"),
+                    "quality": q.get("quality"),
+                    "name": q.get("name"),
+                    "size": q.get("size"),
+                    "source_type": q.get("source_type", "telegram"),
+                    "hidden_from_stremio": bool(q.get("hidden_from_stremio", False)),
+                    "recommended": bool(q.get("recommended", False)),
+                    "quality_note": q.get("quality_note"),
+                    "flagged_duplicate": bool(q.get("flagged_duplicate", False)),
+                }
+                for q in qualities
+            ],
+        }
+
+    async def get_duplicate_quality_groups(self, limit: int = 200) -> List[dict]:
+        groups: List[dict] = []
+        for db_index in range(1, len(self.dbs)):
+            db_key = f"storage_{db_index}"
+            for doc in await self.dbs[db_key]["movie"].find({"telegram.1": {"$exists": True}}).limit(limit).to_list(None):
+                group = self._duplicate_group(doc, "movie", doc.get("telegram", []))
+                if group:
+                    groups.append(group)
+            cursor = self.dbs[db_key]["tv"].find({})
+            for doc in await cursor.limit(limit).to_list(None):
+                for season_doc in doc.get("seasons", []):
+                    for ep_doc in season_doc.get("episodes", []):
+                        qualities = ep_doc.get("telegram", [])
+                        group = self._duplicate_group(
+                            doc,
+                            "tv",
+                            qualities,
+                            season=int(season_doc.get("season_number", 0) or 0),
+                            episode=int(ep_doc.get("episode_number", 0) or 0),
+                        )
+                        if group:
+                            groups.append(group)
+        return groups[:limit]

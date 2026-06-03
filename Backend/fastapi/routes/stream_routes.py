@@ -20,6 +20,9 @@ from Backend.helper.custom_dl import (
     client_dc_avg_mbps,
     client_dc_ttfb_sec,
     smart_client_score,
+    get_client_cooldown_state,
+    is_client_cooled_down,
+    record_route_failure,
 )
 from Backend.helper.disk_cache import (
     disk_cache_enabled,
@@ -35,7 +38,16 @@ from Backend.helper.torrent_downloads import (
     nginx_download_redirect_uri,
     safe_download_file_path,
 )
-from Backend.pyrofork.bot import StreamBot, work_loads, multi_clients, client_dc_map, client_failures, client_avg_mbps
+from Backend.pyrofork.bot import (
+    StreamBot,
+    work_loads,
+    multi_clients,
+    client_dc_map,
+    client_failures,
+    client_avg_mbps,
+    client_cooldowns,
+    client_dc_cooldowns,
+)
 from Backend.config import Telegram
 from Backend.logger import LOGGER
 from Backend.fastapi.security.tokens import verify_token
@@ -169,7 +181,9 @@ async def stream_file_range_with_usage(
 def select_best_client(target_dc: int) -> int:
     """Pick the best available helper using DC-aware live performance."""
     if multi_clients:
-        selected = min(multi_clients.keys(), key=lambda idx: smart_client_score(idx, target_dc))
+        available = [idx for idx in multi_clients.keys() if not is_client_cooled_down(idx, target_dc)]
+        pool = available or list(multi_clients.keys())
+        selected = min(pool, key=lambda idx: smart_client_score(idx, target_dc))
         LOGGER.debug(
             "Selected client %s (DC %s) score=%s",
             selected, client_dc_map.get(selected, "?"), smart_client_score(selected, target_dc),
@@ -188,9 +202,14 @@ def get_streamer(index: int) -> ByteStreamer:
 
 def select_probe_candidates(target_dc: int, base_index: int) -> list[int]:
     limit = max(1, min(int(getattr(Telegram, "SMART_ROUTING_PROBE_CLIENTS", 3) or 3), len(multi_clients)))
-    ranked = sorted(multi_clients.keys(), key=lambda idx: smart_client_score(idx, target_dc))
+    ranked = sorted(
+        [idx for idx in multi_clients.keys() if not is_client_cooled_down(idx, target_dc)],
+        key=lambda idx: smart_client_score(idx, target_dc),
+    )
+    if not ranked:
+        ranked = sorted(multi_clients.keys(), key=lambda idx: smart_client_score(idx, target_dc))
     candidates = []
-    if base_index in multi_clients:
+    if base_index in multi_clients and not is_client_cooled_down(base_index, target_dc):
         candidates.append(base_index)
     for idx in ranked:
         if idx not in candidates:
@@ -234,14 +253,28 @@ async def choose_smart_client(
             timeout=probe_timeout,
         )
         if not result.get("ok"):
-            client_failures[idx] = client_failures.get(idx, 0) + 1
+            record_route_failure(
+                idx,
+                target_dc,
+                result.get("error") or "probe_failed",
+                stream_id=None,
+                offset=probe_offset,
+                attempt=1,
+            )
         return result
 
     probe_results = await asyncio.gather(*[_probe(idx) for idx in candidates], return_exceptions=True)
     clean_results = []
     for idx, result in zip(candidates, probe_results):
         if isinstance(result, Exception):
-            client_failures[idx] = client_failures.get(idx, 0) + 1
+            record_route_failure(
+                idx,
+                target_dc,
+                f"probe_exception:{type(result).__name__}",
+                stream_id=None,
+                offset=probe_offset,
+                attempt=1,
+            )
             clean_results.append({"client_index": idx, "ok": False, "error": str(result)})
         else:
             clean_results.append(result)
@@ -294,6 +327,60 @@ async def decay_client_failures() -> None:
             if client_failures.get(k, 0) > 0:
                 client_failures[k] = max(0, client_failures[k] - 1)
                 LOGGER.debug("Failure decay: client %s failures → %s", k, client_failures[k])
+        now = time.time()
+        for k in list(client_cooldowns):
+            if float(client_cooldowns.get(k) or 0.0) <= now:
+                client_cooldowns.pop(k, None)
+        for k in list(client_dc_cooldowns):
+            if float(client_dc_cooldowns.get(k) or 0.0) <= now:
+                client_dc_cooldowns.pop(k, None)
+
+
+def get_mem_available_mb() -> int | None:
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(int(line.split()[1]) / 1024)
+    except Exception:
+        return None
+    return None
+
+
+def count_active_telegram_streams() -> int:
+    return sum(1 for info in ACTIVE_STREAMS.values() if info.get("status", "active") == "active")
+
+
+def choose_effective_prefetch(
+    configured_prefetch: int,
+    configured_parallelism: int,
+    *,
+    file_size: int,
+    request_length: int,
+    active_streams: int,
+    mem_available_mb: int | None,
+) -> tuple[int, int, str]:
+    prefetch = max(1, int(configured_prefetch or 1))
+    parallelism = max(1, int(configured_parallelism or 1))
+
+    if not getattr(Telegram, "ADAPTIVE_PREFETCH_ENABLED", True):
+        return prefetch, parallelism, "disabled"
+
+    low_mem_limit = int(getattr(Telegram, "ADAPTIVE_PREFETCH_LOW_MEM_MB", 150) or 150)
+    multi_limit = int(getattr(Telegram, "ADAPTIVE_PREFETCH_MULTI_STREAM_THRESHOLD", 2) or 2)
+    small_req = int(getattr(Telegram, "ADAPTIVE_PREFETCH_SMALL_REQUEST_BYTES", 16 * 1024 * 1024) or 16 * 1024 * 1024)
+    small_file = int(getattr(Telegram, "ADAPTIVE_PREFETCH_SMALL_FILE_BYTES", 64 * 1024 * 1024) or 64 * 1024 * 1024)
+
+    if mem_available_mb is not None and mem_available_mb < low_mem_limit:
+        return min(prefetch, 1), min(parallelism, 1), f"low_mem:{mem_available_mb}mb"
+
+    if request_length <= small_req or file_size <= small_file:
+        return min(prefetch, 1), min(parallelism, 1), "small_request"
+
+    if active_streams >= multi_limit:
+        return min(prefetch, 2), min(parallelism, 2), f"multi_stream:{active_streams}"
+
+    return prefetch, parallelism, "healthy"
 
 
 
@@ -559,8 +646,15 @@ async def media_streamer(
 
     meta = {
         "request_path": str(request.url.path),
+        "request_range": range_header or None,
+        "request_start": start,
+        "request_end": end,
+        "request_length": req_length,
         "client_host": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent"),
         "title": final_title,
+        "filename": file_name,
+        "source_type": "telegram",
         "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
         "smart_routing": {
             "target_dc": real_dc,
@@ -650,8 +744,27 @@ async def media_streamer(
         except Exception as e:
             LOGGER.debug("Disk cache lookup failed: %s", e)
 
-    prefetch_count = Telegram.PARALLEL
-    parallelism = Telegram.PRE_FETCH
+    configured_prefetch = int(getattr(Telegram, "PARALLEL", 1) or 1)
+    configured_parallelism = int(getattr(Telegram, "PRE_FETCH", 1) or 1)
+    active_streams = count_active_telegram_streams()
+    mem_available_mb = get_mem_available_mb()
+    prefetch_count, parallelism, prefetch_reason = choose_effective_prefetch(
+        configured_prefetch,
+        configured_parallelism,
+        file_size=file_size,
+        request_length=req_length,
+        active_streams=active_streams,
+        mem_available_mb=mem_available_mb,
+    )
+    meta["adaptive_prefetch"] = {
+        "configured_prefetch": configured_prefetch,
+        "configured_parallelism": configured_parallelism,
+        "effective_prefetch": prefetch_count,
+        "effective_parallelism": parallelism,
+        "reason": prefetch_reason,
+        "active_streams": active_streams,
+        "mem_available_mb": mem_available_mb,
+    }
 
     # HEAD: return headers only, include Content-Length so the client knows
     # the file/range size without opening a stream.
@@ -764,48 +877,90 @@ async def get_stream_stats():
 
     active = []
     for sid, info in ACTIVE_STREAMS.items():
+        meta = info.get("meta", {}) or {}
         active.append(
             {
                 "stream_id": sid,
                 "msg_id": info.get("msg_id"),
                 "chat_id": info.get("chat_id"),
-                "title": info.get("meta", {}).get("title"),
+                "title": meta.get("title"),
+                "filename": meta.get("filename"),
+                "source_type": meta.get("source_type", "telegram"),
+                "user_name": meta.get("user_name"),
+                "client_host": meta.get("client_host"),
+                "user_agent": meta.get("user_agent"),
+                "request_range": meta.get("request_range"),
+                "request_start": meta.get("request_start"),
+                "request_end": meta.get("request_end"),
+                "request_length": meta.get("request_length"),
+                "adaptive_prefetch": meta.get("adaptive_prefetch"),
+                "smart_routing": meta.get("smart_routing"),
                 "client_index": info.get("client_index"),
                 "dc_id": info.get("dc_id"),
                 "status": info.get("status"),
                 "total_bytes": info.get("total_bytes"),
+                "ttfb_sec": info.get("ttfb_sec"),
                 "instant_mbps": round(info.get("instant_mbps", 0.0), 3),
                 "avg_mbps": round(info.get("avg_mbps", 0.0), 3),
                 "peak_mbps": round(info.get("peak_mbps", 0.0), 3),
+                "chunk_timeouts": info.get("chunk_timeouts", 0),
+                "chunk_errors": info.get("chunk_errors", 0),
+                "fallback_chunks": info.get("fallback_chunks", 0),
+                "zero_pad_chunks": info.get("zero_pad_chunks", 0),
+                "error_reason": info.get("error_reason"),
+                "route_attempts": info.get("route_attempts", []),
                 "start_ts": info.get("start_ts"),
             }
         )
 
     recent = []
     for info in RECENT_STREAMS:
+        meta = info.get("meta", {}) or {}
         recent.append(
             {
                 "stream_id": info.get("stream_id"),
                 "msg_id": info.get("msg_id"),
                 "chat_id": info.get("chat_id"),
-                "title": info.get("meta", {}).get("title"),
+                "title": meta.get("title"),
+                "filename": meta.get("filename"),
+                "source_type": meta.get("source_type", "telegram"),
+                "user_name": meta.get("user_name"),
+                "client_host": meta.get("client_host"),
+                "user_agent": meta.get("user_agent"),
+                "request_range": meta.get("request_range"),
+                "adaptive_prefetch": meta.get("adaptive_prefetch"),
+                "smart_routing": meta.get("smart_routing"),
                 "client_index": info.get("client_index"),
                 "dc_id": info.get("dc_id"),
                 "status": info.get("status"),
                 "total_bytes": info.get("total_bytes"),
+                "ttfb_sec": info.get("ttfb_sec"),
                 "duration": info.get("duration"),
                 "avg_mbps": round(info.get("avg_mbps", 0.0), 3),
+                "peak_mbps": round(info.get("peak_mbps", 0.0), 3),
+                "chunk_timeouts": info.get("chunk_timeouts", 0),
+                "chunk_errors": info.get("chunk_errors", 0),
+                "fallback_chunks": info.get("fallback_chunks", 0),
+                "zero_pad_chunks": info.get("zero_pad_chunks", 0),
+                "error_reason": info.get("error_reason"),
+                "route_attempts": info.get("route_attempts", []),
                 "start_ts": info.get("start_ts"),
                 "end_ts": info.get("end_ts"),
             }
         )
+    recent_failed = [
+        stream for stream in recent
+        if stream.get("status") == "error" or stream.get("error_reason")
+    ]
 
     return JSONResponse(
         {
             "active_streams": active,
             "recent_streams": recent,
+            "recent_failed_streams": recent_failed,
             "client_dc_map": client_dc_map,
             "work_loads": work_loads,
+            "client_cooldowns": get_client_cooldown_state(),
             "client_avg_mibps": {str(k): round(float(v or 0.0), 3) for k, v in client_avg_mbps.items()},
             "client_dc_avg_mibps": {
                 f"{idx}->dc{dc}": round(float(v or 0.0), 3)

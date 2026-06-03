@@ -27,3 +27,6 @@ work_loads = {}
 client_dc_map = {}
 client_failures = {}  
 client_avg_mbps = {}
+client_cooldowns = {}
+client_dc_cooldowns = {}
+client_last_errors = {}

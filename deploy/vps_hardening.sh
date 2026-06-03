@@ -14,6 +14,11 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! docker compose version >/dev/null 2>&1; then
+  sudo apt-get update
+  sudo apt-get install -y docker-compose-plugin || true
+fi
+
 if ! swapon --show | grep -q "^${SWAPFILE}[[:space:]]"; then
   if [ ! -f "${SWAPFILE}" ]; then
     sudo fallocate -l "${SWAP_SIZE}" "${SWAPFILE}" || sudo dd if=/dev/zero of="${SWAPFILE}" bs=1M count=2048
@@ -43,6 +48,7 @@ crontab "${tmp_cron}"
 rm -f "${tmp_cron}"
 
 echo "Hardening applied."
+docker compose version 2>/dev/null || docker-compose version 2>/dev/null || true
 free -h
 swapon --show || true
 cat /proc/sys/vm/swappiness

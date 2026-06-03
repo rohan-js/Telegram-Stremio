@@ -6,6 +6,7 @@ This project can run on very small VPS shapes, but streaming concurrency can cre
 - keep `vm.swappiness=10`
 - run the app container with memory guardrails
 - run the resource-aware watchdog every 5 minutes
+- prefer Docker Compose v2 while keeping legacy `docker-compose` fallback
 
 The default Compose limits are:
 
@@ -23,7 +24,7 @@ From the deployed app directory:
 ```bash
 chmod +x deploy/vps_hardening.sh deploy/duckdns_watchdog.sh
 ./deploy/vps_hardening.sh
-docker-compose up -d --no-build
+docker compose up -d --no-build || docker-compose up -d --no-build
 ```
 
 The script does not read or write secrets. Runtime secrets remain in `config.env`, which must stay untracked.
@@ -37,3 +38,5 @@ docker inspect tg_stremio --format 'mem={{.HostConfig.Memory}} memswap={{.HostCo
 curl -fsS http://127.0.0.1:8000/login >/dev/null
 tail -n 20 /home/ubuntu/duckdns-watchdog.log
 ```
+
+Watchdog log lines include RAM/swap, root disk usage, container state, app response time, active stream count, last stream error, and any restart reason. If streams are active and the app still responds, the watchdog logs `restart_skipped` instead of restarting `tg_stremio`.

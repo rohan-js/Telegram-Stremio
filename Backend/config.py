@@ -119,6 +119,36 @@ class Telegram:
         STREAM_SLO_BUFFERING_WARN_RATE = 0.05
 
     # -------------------------------
+    # Adaptive Telegram stream safety
+    # -------------------------------
+    ADAPTIVE_PREFETCH_ENABLED = getenv("ADAPTIVE_PREFETCH_ENABLED", "true").lower() == "true"
+    try:
+        ADAPTIVE_PREFETCH_LOW_MEM_MB = int(getenv("ADAPTIVE_PREFETCH_LOW_MEM_MB", "150") or 150)
+    except Exception:
+        ADAPTIVE_PREFETCH_LOW_MEM_MB = 150
+    try:
+        ADAPTIVE_PREFETCH_MULTI_STREAM_THRESHOLD = int(getenv("ADAPTIVE_PREFETCH_MULTI_STREAM_THRESHOLD", "2") or 2)
+    except Exception:
+        ADAPTIVE_PREFETCH_MULTI_STREAM_THRESHOLD = 2
+    try:
+        ADAPTIVE_PREFETCH_SMALL_REQUEST_BYTES = int(getenv("ADAPTIVE_PREFETCH_SMALL_REQUEST_BYTES", str(16 * 1024 * 1024)) or 16 * 1024 * 1024)
+    except Exception:
+        ADAPTIVE_PREFETCH_SMALL_REQUEST_BYTES = 16 * 1024 * 1024
+    try:
+        ADAPTIVE_PREFETCH_SMALL_FILE_BYTES = int(getenv("ADAPTIVE_PREFETCH_SMALL_FILE_BYTES", str(64 * 1024 * 1024)) or 64 * 1024 * 1024)
+    except Exception:
+        ADAPTIVE_PREFETCH_SMALL_FILE_BYTES = 64 * 1024 * 1024
+
+    try:
+        SMART_ROUTING_COOLDOWN_FAILURES = int(getenv("SMART_ROUTING_COOLDOWN_FAILURES", "2") or 2)
+    except Exception:
+        SMART_ROUTING_COOLDOWN_FAILURES = 2
+    try:
+        SMART_ROUTING_COOLDOWN_SEC = int(getenv("SMART_ROUTING_COOLDOWN_SEC", "180") or 180)
+    except Exception:
+        SMART_ROUTING_COOLDOWN_SEC = 180
+
+    # -------------------------------
     # Torrent tracker scrape stats (optional, lightweight)
     # -------------------------------
     TORRENT_STATS_ENABLED = getenv("TORRENT_STATS_ENABLED", "true").lower() == "true"

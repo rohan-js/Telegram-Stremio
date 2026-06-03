@@ -252,6 +252,18 @@
                             {% endif %}
                         </div>
                     </div>
+
+                    <div>
+                        <div class="flex items-center justify-between mb-3">
+                            <h4 class="text-sm font-bold text-text">Recent Failed Streams</h4>
+                            <span class="text-[10px] uppercase tracking-widest text-text-secondary">Errors</span>
+                        </div>
+                        <div id="recent-failed-streams-container" class="space-y-4">
+                            <div class="glass-panel p-6 rounded-[2rem] text-center border-dashed border-white/10">
+                                <p class="text-xs text-text-secondary">No recent stream errors.</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -725,6 +737,18 @@
     function renderStreamCard(stream) {
         const status = getStatusBadge(stream?.status);
         const title = escapeHtml(getStreamTitle(stream));
+        const filename = escapeHtml(stream?.filename || stream?.meta?.filename || '');
+        const userName = escapeHtml(stream?.user_name || stream?.meta?.user_name || 'Unknown');
+        const clientHost = escapeHtml(stream?.client_host || stream?.meta?.client_host || 'Unknown');
+        const userAgent = escapeHtml(stream?.user_agent || stream?.meta?.user_agent || '');
+        const range = escapeHtml(stream?.request_range || stream?.meta?.request_range || 'full');
+        const ttfb = stream?.ttfb_sec !== null && stream?.ttfb_sec !== undefined ? Number(stream.ttfb_sec).toFixed(3) + 's' : '—';
+        const timeouts = Number(stream?.chunk_timeouts || 0);
+        const fallbacks = Number(stream?.fallback_chunks || 0);
+        const errorReason = escapeHtml(stream?.error_reason || '');
+        const adaptive = stream?.adaptive_prefetch || stream?.meta?.adaptive_prefetch || {};
+        const prefetch = adaptive?.effective_prefetch ? `${adaptive.effective_prefetch}/${adaptive.effective_parallelism}` : '—';
+        const prefetchReason = escapeHtml(adaptive?.reason || '');
         const streamId = escapeHtml(stream?.stream_id ? String(stream.stream_id).slice(0, 12) + '…' : 'Unknown');
         const label = escapeHtml(getClientLabel(stream));
         const totalBytes = formatBytes(stream?.total_bytes || 0);
@@ -744,6 +768,7 @@
                             <span>•</span>
                             <span>${streamId}</span>
                         </div>
+                        ${filename ? `<p class="muted text-xs mt-2 break-all">${filename}</p>` : ''}
                     </div>
                     <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap ${status.className}">
                         ${escapeHtml(status.text)}
@@ -767,9 +792,37 @@
                         <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Started</p>
                         <p class="text-xs font-bold text-text truncate live-started">${escapeHtml(started)}</p>
                     </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">TTFB</p>
+                        <p class="text-xs font-bold text-text">${ttfb}</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Timeouts</p>
+                        <p class="text-xs font-bold text-text">${timeouts}</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Fallbacks</p>
+                        <p class="text-xs font-bold text-text">${fallbacks}</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Prefetch</p>
+                        <p class="text-xs font-bold text-text" title="${prefetchReason}">${escapeHtml(prefetch)}</p>
+                    </div>
                 </div>
 
                 <div class="mt-4 pt-4 border-t border-white/5 space-y-2">
+                    <div class="flex items-center justify-between text-xs gap-3">
+                        <span class="text-text-secondary">User</span>
+                        <span class="text-text text-right truncate max-w-[65%]">${userName}</span>
+                    </div>
+                    <div class="flex items-center justify-between text-xs gap-3">
+                        <span class="text-text-secondary">Client</span>
+                        <span class="text-text text-right truncate max-w-[65%]" title="${userAgent}">${clientHost}</span>
+                    </div>
+                    <div class="flex items-center justify-between text-xs gap-3">
+                        <span class="text-text-secondary">Range</span>
+                        <span class="font-mono text-text text-right truncate max-w-[65%]">${range}</span>
+                    </div>
                     <div class="flex items-center justify-between text-xs gap-3">
                         <span class="text-text-secondary">Stream ID</span>
                         <span class="font-mono text-text text-right truncate max-w-[65%]">${streamId}</span>
@@ -778,6 +831,7 @@
                         <span class="text-text-secondary">Status</span>
                         <span class="text-text text-right truncate max-w-[65%]">${escapeHtml(stream?.status || 'active')}</span>
                     </div>
+                    ${errorReason ? `<div class="flex items-center justify-between text-xs gap-3"><span class="text-text-secondary">Error</span><span class="text-red-300 text-right break-all max-w-[65%]">${errorReason}</span></div>` : ''}
                 </div>
             </div>
         `;
@@ -798,6 +852,7 @@
         const liveCount = document.getElementById('live-stream-count');
         const liveNowCount = document.getElementById('live-now-count');
         const recentCount = document.getElementById('recent-stream-count');
+        const failedContainer = document.getElementById('recent-failed-streams-container');
 
         try {
             const response = await fetch('/stream/stats', { cache: 'no-store' });
@@ -806,6 +861,7 @@
             const data = await response.json();
             const activeStreams = Array.isArray(data.active_streams) ? data.active_streams : [];
             const recentStreams = Array.isArray(data.recent_streams) ? data.recent_streams : [];
+            const failedStreams = Array.isArray(data.recent_failed_streams) ? data.recent_failed_streams : [];
 
             streamState.activeStreams = activeStreams;
 
@@ -822,12 +878,24 @@
                         'The live network is idle at the moment.'
                     );
             }
+            if (failedContainer) {
+                failedContainer.innerHTML = failedStreams.length
+                    ? failedStreams.slice(0, 5).map(stream => renderStreamCard(stream)).join('')
+                    : '<div class="glass-panel p-6 rounded-[2rem] text-center border-dashed border-white/10"><p class="text-xs text-text-secondary">No recent stream errors.</p></div>';
+            }
         } catch (error) {
             console.error(error);
             if (activeContainer) {
                 activeContainer.innerHTML = renderEmptyState(
                     'fa-solid fa-triangle-exclamation',
                     'Unable to load live network',
+                    'Please try refreshing the page.'
+                );
+            }
+            if (failedContainer) {
+                failedContainer.innerHTML = renderEmptyState(
+                    'fa-solid fa-triangle-exclamation',
+                    'Unable to load stream failures',
                     'Please try refreshing the page.'
                 );
             }

@@ -68,6 +68,50 @@ class CustomCatalogStremioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["metas"][0]["id"], "tt1234567")
         self.assertEqual(result["metas"][0]["name"], "Catalog Movie")
 
+    async def test_streams_hide_flagged_quality_and_prioritize_recommended(self):
+        class FakeStreamDB:
+            async def get_media_details(self, imdb_id, season_number=None, episode_number=None):
+                return {
+                    "telegram": [
+                        {
+                            "quality": "720p",
+                            "id": "hidden",
+                            "name": "Hidden.mkv",
+                            "size": "1 GB",
+                            "hidden_from_stremio": True,
+                        },
+                        {
+                            "quality": "720p",
+                            "id": "normal",
+                            "name": "Normal.mkv",
+                            "size": "1 GB",
+                        },
+                        {
+                            "quality": "1080p",
+                            "id": "recommended",
+                            "name": "Recommended.mkv",
+                            "size": "2 GB",
+                            "recommended": True,
+                        },
+                    ]
+                }
+
+        with patch.object(stremio_routes, "db", FakeStreamDB()), patch.object(stremio_routes, "BASE_URL", "https://example.test"):
+            result = await stremio_routes.get_streams(
+                "token123",
+                "movie",
+                "tt1234567",
+                Response(),
+                token_data={},
+            )
+
+        names = [stream["name"] for stream in result["streams"]]
+        urls = [stream["url"] for stream in result["streams"]]
+        self.assertEqual(len(result["streams"]), 2)
+        self.assertIn("Recommended", names[0])
+        self.assertTrue(any("recommended" in url for url in urls))
+        self.assertFalse(any("hidden" in url for url in urls))
+
 
 class AutoCatalogClassificationTests(unittest.TestCase):
     def test_classification_uses_enabled_language_and_provider_buckets(self):

@@ -810,6 +810,8 @@ async def get_streams(
 
     streams = []
     for quality in media_details.get("telegram", []):
+        if quality.get("hidden_from_stremio"):
+            continue
         filename = quality.get("name", "")
         quality_str = quality.get("quality", "HD")
         size = quality.get("size", "")
@@ -817,6 +819,15 @@ async def get_streams(
         stream_name, stream_title = format_stream_details(
             filename, quality_str, size
         )
+        badges = []
+        if quality.get("recommended"):
+            badges.append("Recommended")
+        if quality.get("flagged_duplicate"):
+            badges.append("Duplicate")
+        if quality.get("quality_note"):
+            badges.append(str(quality.get("quality_note"))[:40])
+        if badges:
+            stream_name = f"{' | '.join(badges)} | {stream_name}"
 
         if (quality.get("source_type") or "telegram") == "torrent":
             info_hash = quality.get("info_hash")
@@ -829,6 +840,7 @@ async def get_streams(
             )
             torrent_stream = build_torrent_stream(quality, stream_name, stream_title, torrent_stats)
             if torrent_stream:
+                torrent_stream["_recommended"] = bool(quality.get("recommended"))
                 streams.append(torrent_stream)
             downloaded_stream = await build_downloaded_torrent_stream(
                 token,
@@ -839,6 +851,7 @@ async def get_streams(
                 episode_number=episode_num,
             )
             if downloaded_stream:
+                downloaded_stream["_recommended"] = bool(quality.get("recommended"))
                 streams.append(downloaded_stream)
             continue
 
@@ -852,30 +865,36 @@ async def get_streams(
             streams.append({
                 "name": f"{stream_name} (Proxy)",
                 "title": stream_title,
-                "url": proxy_url
+                "url": proxy_url,
+                "_recommended": bool(quality.get("recommended")),
             })
             streams.append({
                 "name": f"{stream_name} (Direct)",
                 "title": stream_title,
-                "url": original_url
+                "url": original_url,
+                "_recommended": bool(quality.get("recommended")),
             })
         elif proxy_url:
             streams.append({
                 "name": stream_name,
                 "title": stream_title,
-                "url": proxy_url
+                "url": proxy_url,
+                "_recommended": bool(quality.get("recommended")),
             })
         else:
             streams.append({
                 "name": stream_name,
                 "title": stream_title,
-                "url": original_url
+                "url": original_url,
+                "_recommended": bool(quality.get("recommended")),
             })
 
     streams.sort(
-        key=lambda s: get_resolution_priority(s.get("name", "")),
+        key=lambda s: (1 if s.get("_recommended") else 0, get_resolution_priority(s.get("name", ""))),
         reverse=True
     )
+    for s in streams:
+        s.pop("_recommended", None)
 
     # Deduplicate stream names — Stremio collapses streams with identical names,
     # so when two files share the same caption we append (1), (2) ... to each duplicate.
