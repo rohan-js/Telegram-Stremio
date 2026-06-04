@@ -2,7 +2,12 @@ import unittest
 from unittest.mock import patch
 
 from Backend.fastapi.routes import stream_routes
-from Backend.fastapi.routes.stream_routes import choose_effective_prefetch, resolve_video_mime_type
+from Backend.fastapi.routes.stream_routes import (
+    choose_effective_prefetch,
+    get_configured_stream_concurrency,
+    resolve_video_mime_type,
+    select_telegram_chunk_size,
+)
 from Backend.helper import custom_dl
 
 
@@ -30,6 +35,25 @@ class StreamMimeTypeTests(unittest.TestCase):
 
 
 class AdaptivePrefetchTests(unittest.TestCase):
+    def test_parallel_controls_parallelism_and_pre_fetch_controls_prefetch(self):
+        with (
+            patch.object(stream_routes.Telegram, "PARALLEL", 5),
+            patch.object(stream_routes.Telegram, "PRE_FETCH", 2),
+            patch.object(stream_routes.Telegram, "ADAPTIVE_PREFETCH_ENABLED", True),
+        ):
+            configured_prefetch, configured_parallelism = get_configured_stream_concurrency()
+            result = choose_effective_prefetch(
+                configured_prefetch,
+                configured_parallelism,
+                file_size=2 * 1024 ** 3,
+                request_length=256 * 1024 ** 2,
+                active_streams=1,
+                mem_available_mb=512,
+            )
+
+        self.assertEqual((configured_prefetch, configured_parallelism), (2, 5))
+        self.assertEqual(result, (2, 5, "healthy"))
+
     def test_healthy_single_stream_keeps_configured_values(self):
         with patch.object(stream_routes.Telegram, "ADAPTIVE_PREFETCH_ENABLED", True):
             result = choose_effective_prefetch(
@@ -85,6 +109,15 @@ class ClientCooldownTests(unittest.TestCase):
         state = custom_dl.get_client_cooldown_state()
         self.assertIn("1", state)
         self.assertEqual(state["1"]["last_error"]["reason"], "timeout")
+
+
+class TelegramChunkSizeTests(unittest.TestCase):
+    def test_range_request_uses_seek_friendly_chunk_size(self):
+        self.assertEqual(select_telegram_chunk_size("bytes=1000-"), 512 * 1024)
+
+    def test_full_stream_uses_throughput_chunk_size(self):
+        self.assertEqual(select_telegram_chunk_size(""), 1024 * 1024)
+        self.assertEqual(select_telegram_chunk_size(None), 1024 * 1024)
 
 
 if __name__ == "__main__":

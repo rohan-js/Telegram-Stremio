@@ -16,7 +16,6 @@ from Backend.helper.custom_dl import (
     ByteStreamer,
     ACTIVE_STREAMS,
     RECENT_STREAMS,
-    get_adaptive_chunk_size,
     client_dc_avg_mbps,
     client_dc_ttfb_sec,
     smart_client_score,
@@ -351,6 +350,20 @@ def count_active_telegram_streams() -> int:
     return sum(1 for info in ACTIVE_STREAMS.values() if info.get("status", "active") == "active")
 
 
+def get_configured_stream_concurrency() -> tuple[int, int]:
+    """Return (prefetch, parallelism) from env-backed Telegram config."""
+    prefetch = max(1, int(getattr(Telegram, "PRE_FETCH", 1) or 1))
+    parallelism = max(1, int(getattr(Telegram, "PARALLEL", 1) or 1))
+    return prefetch, parallelism
+
+
+def select_telegram_chunk_size(range_header: str | None) -> int:
+    """Use smaller chunks for seek/range requests and 1 MB for full streams."""
+    if range_header:
+        return 512 * 1024
+    return ByteStreamer.CHUNK_SIZE
+
+
 def choose_effective_prefetch(
     configured_prefetch: int,
     configured_parallelism: int,
@@ -616,8 +629,7 @@ async def media_streamer(
     start, end = parse_range_header(range_header, file_size)
     req_length = end - start + 1
 
-    # Adaptive chunk size based on this client's recent measured throughput
-    chunk_size = get_adaptive_chunk_size(index)
+    chunk_size = select_telegram_chunk_size(range_header)
     offset = start - (start % chunk_size)
     first_part_cut = start - offset
     last_part_cut = (end % chunk_size) + 1
@@ -744,8 +756,7 @@ async def media_streamer(
         except Exception as e:
             LOGGER.debug("Disk cache lookup failed: %s", e)
 
-    configured_prefetch = int(getattr(Telegram, "PARALLEL", 1) or 1)
-    configured_parallelism = int(getattr(Telegram, "PRE_FETCH", 1) or 1)
+    configured_prefetch, configured_parallelism = get_configured_stream_concurrency()
     active_streams = count_active_telegram_streams()
     mem_available_mb = get_mem_available_mb()
     prefetch_count, parallelism, prefetch_reason = choose_effective_prefetch(
