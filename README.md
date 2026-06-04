@@ -1,21 +1,24 @@
-
 <p align="center">
-  <img src="https://iili.io/KhN0ztj.png" alt="Logo" width="400"/>
-</p>
-
-
-<p align="center">
-  A powerful, self-hosted <b>Telegram Stremio Media Server</b> built with <b>FastAPI</b>, <b>MongoDB</b>, and <b>PyroFork</b> — seamlessly integrated with <b>Stremio</b> for automated media streaming and discovery.
+  <img src="https://iili.io/KhN0ztj.png" alt="Telegram Stremio Logo" width="400"/>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/UV%20Package%20Manager-2B7A77?logo=uv&logoColor=white" alt="UV Package Manager" />
-  <img src="https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white" alt="Python" />
+  A powerful, self-hosted <b>Telegram Stremio Media Server</b> built with <b>FastAPI</b>, <b>MongoDB</b>, <b>PyroFork</b>, <b>qBittorrent</b>, and <b>Stremio</b>.
+</p>
+
+<p align="center">
+  Index Telegram files, magnet links, and torrent files, then stream them through a private Stremio addon with admin dashboards, subscriptions, custom catalogs, and repair tools.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python" />
   <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
   <img src="https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white" alt="MongoDB" />
   <img src="https://img.shields.io/badge/PyroFork-EE3A3A?logo=python&logoColor=white" alt="PyroFork" />
   <img src="https://img.shields.io/badge/Stremio-8D3DAF?logo=stremio&logoColor=white" alt="Stremio" />
   <img src="https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/qBittorrent-2F67BA?logo=qbittorrent&logoColor=white" alt="qBittorrent" />
+  <img src="https://img.shields.io/badge/Telegram-26A5E4?logo=telegram&logoColor=white" alt="Telegram" />
 </p>
 
 ---
@@ -24,713 +27,743 @@
 
 - [🚀 Introduction](#-introduction)
   - [✨ Key Features](#-key-features)
-  - [🆕 New Features](#-new-features)
-  - [� Subscription Management](#-subscription-management)
-  - [💳 Subscription Management](#-subscription-management-config)
-  - [📋 Plans](#-subscription-plans)
-  - [🤖 Bot Payment Flow](#-bot-payment-flow)
-  - [🗃️ Access Management](#️-access-management)
-  - [🎬 Stremio Addon Integration](#-stremio-addon-integration)
+  - [🆕 Current Features](#-current-features)
 - [⚙️ How It Works](#️-how-it-works)
   - [Overview](#overview)
-  - [Upload Guidelines](#upload-guidelines)
-  - [Quality Replacement](#-quality-replacement-logic)
-  - [Updating CAMRip](#-updating-camrip-or-low-quality-files)
   - [Behind The Scenes](#behind-the-scenes)
+- [📤 Upload Guidelines](#-upload-guidelines)
+  - [Movies](#-movies)
+  - [TV Episodes](#-tv-episodes)
+  - [Season Packs](#-season-packs)
+  - [Magnet Links And Torrent Files](#-magnet-links-and-torrent-files)
+- [🌊 Stream Types](#-stream-types)
+  - [Telegram Streams](#-telegram-streams)
+  - [Native Torrent Streams](#-native-torrent-streams)
+  - [Downloaded VPS Streams](#-downloaded-vps-streams)
 - [🤖 Bot Commands](#-bot-commands)
-  - [Command List](#command-list)
-  - [`/set` Command Usage](#set-command-usage)
+- [🎬 Stremio Addon Integration](#-stremio-addon-integration)
+- [🧠 Admin Panel](#-admin-panel)
+- [📚 Custom Catalogs And Metadata Tools](#-custom-catalogs-and-metadata-tools)
+- [💳 Subscription And Access Management](#-subscription-and-access-management)
 - [🔧 Configuration Guide](#-configuration-guide)
-  - [🧩 Startup Config](#-startup-config)
-  - [🗄️ Storage](#️-storage)
-  - [🎬 API](#-api)
-  - [🌐 Server](#-server)
-  - [🔄 Update Settings](#-update-settings)
-  - [🔐 Admin Panel](#-admin-panel)
+  - [Startup And Telegram](#-startup-and-telegram)
+  - [Streaming And Routing](#-streaming-and-routing)
+  - [Torrents And Downloads](#-torrents-and-downloads)
+  - [Admin, Subscription, And Proxy](#-admin-subscription-and-proxy)
+- [🚀 Deployment Guide](#-deployment-guide)
+  - [Recommended Prerequisites](#-recommended-prerequisites)
+  - [Docker Compose VPS Setup](#-docker-compose-vps-setup)
+  - [qBittorrent Notes](#-qbittorrent-notes)
+  - [Domain And HTTPS](#-domain-and-https)
+- [🩺 Operations And Health Checks](#-operations-and-health-checks)
+- [🛠️ Troubleshooting](#️-troubleshooting)
+- [🔐 Security Notes](#-security-notes)
+- [🏅 Credits / License](#-credits--license)
 
-  - [🧰 Additional CDN Bots (Multi-Token System)](#-additional-cdn-bots-multi-token-system)
-
-- [�🚀 Deployment Guide](#-deployment-guide)
-  - [✅ Recommended Prerequisites](#-recommended-prerequisites)
-  - [🐙 Heroku Guide](#-heroku-guide)
-  - [🐳 VPS Guide (Recommended)](#-vps-guide)
-- [📺 Setting up Stremio](#-setting-up-stremio)
-  - [🌐 Add the Addon](#-step-3-add-the-addon)
-  - [⚙️ Optional: Remove Cinemeta](#️-optional-remove-cinemeta)
-- [🏅 Contributor](#-contributor)
-
+---
 
 # 🚀 Introduction
 
-This project is a **next-generation Telegram Stremio Media Server** that allows you to **stream your Telegram files directly through Stremio**, without any third-party dependencies or file expiration issues. It’s designed for **speed, scalability, and reliability**, making it ideal for both personal and community-based media hosting.
+**Telegram Stremio** turns authorized Telegram channels into a private Stremio media addon. You post video files, magnet links, or `.torrent` files in Telegram, and the bot indexes them into MongoDB with metadata from TMDb/IMDb. Stremio then reads the addon manifest, catalogs, metadata, and streams from the FastAPI server.
 
+This project is designed for personal or private-community use where you control the Telegram channels, the bot, the database, and the VPS.
+
+> Use this project only with media you are allowed to store and stream.
 
 ## ✨ Key Features
 
-- ⚙️ **Multiple MongoDB Support** 
-- 📡 **Multiple Channel Support** 
-- ⚡ **Fast Streaming Experience**
-- 🔑 **Multi Token Load Balancer** 
-- 🎬 **IMDB and TMDB Metadata Integration** 
-- ♾️ **No File Expiration** 
-- 🧠 **Admin Panel Support** 
-- 💳 **Subscription Management** — Plans, payment approval, auto token generation, and expiry enforcement
-- 🔐 **Access Management** — View, extend, reduce, revoke, and reassign subscriptions from the admin UI
+- 📡 **Telegram file indexing** for movies, TV episodes, and season packs.
+- 🎬 **Private Stremio addon** with tokenized manifest, catalog, meta, and stream routes.
+- ⚡ **Direct Telegram streaming** through authenticated `/dl/...` HTTP streams.
+- 🌊 **Correct media-player support** with `HEAD`, `Range`, `206 Partial Content`, MIME normalization, and seek-friendly chunk sizes.
+- 🧲 **Native magnet and torrent support** using Stremio `infoHash`, `fileIdx`, and tracker sources.
+- ⬇️ **Download to VPS** option for torrents using qBittorrent and stable `/downloaded/...` playback.
+- 🧠 **Smart Telegram routing** with multi-client support, DC awareness, probing, timeout scoring, cooldowns, and fallback retry.
+- 🛡️ **Adaptive prefetch** that protects small VPS machines by lowering load when RAM is low or multiple streams are active.
+- 🗂️ **Custom catalogs and auto catalogs** for curated and generated Stremio sections.
+- 🛠️ **Metadata repair tools** including unmatched media, metadata rescan, and manual IMDb/TMDb correction flows.
+- 🧹 **Manual duplicate controls** to hide, show, recommend, and annotate stream qualities without deleting them.
+- 💳 **Subscription management** with plans, payment review, token generation, expiry handling, and access controls.
+- 📊 **Admin dashboards** for active streams, failed streams, egress, token usage, Telegram routing, and watch-request tracking.
 
+## 🆕 Current Features
 
-## 🆕 New Features
-
-- ⚡ **Speed Test** – Speed testing added for all bots on each file to optimize streaming performance.
-- 🔄 **Improved Load Balancer** – Enhanced load balancing algorithm for better traffic distribution across multiple tokens.
-- 🚫 **Failed Bot Management** – Max failed bots will be marked as shadow or idle for buffer optimization. This is due to some data center bots having rate-limiting constraints.
-- 📊 **Bot-wise Analysis** – Detailed bot performance analytics available in the admin dashboard for monitoring and optimization.
-- 🧹 **Deleted File Detection** – Automatic detection of deleted files on every restart, with admin capability to manually remove them from the database.
-- 🛠️ **Additional Admin Features** – Various small enhancements and improvements for administrators.
-- 🆓 **Free Mode Toggle** – Administrators can turn off the `SUBSCRIPTION` requirement in `config.env` to allow all users immediate access via an automatically generated API token.
-- 🔄 **Automatic Stream Cleanup** – Deleting a source message in the Telegram channel instantly deletes all corresponding streams and qualities from the Stremio Addon Database and Admin Panel, preventing dead links.
-- 🏷️ **Manual IMDb/TMDb Override** – Users can instantly update or fix incorrect metadata for a file by simply editing the Telegram channel message caption and pasting the correct IMDb/TMDB URL.
-- 🛡️ **Stream Stability & Recovery** – Intelligent `b""` empty-chunk fallback that securely pads video streams with zero bytes, and reduced chunk retry lockups (from 6 to 3) to instantaneously recover from stalled parts without breaking the video player.
-- 🎯 **DC-Aware Bot Selection** – The underlying streaming load-balancer now ensures that a bot located in the exact same Data Center as the media file is prioritized. This substantially minimizes cross-DC round-trips and timeouts.
-- 🌐 **Addon Proxy Integration** – Built-in functionality targeting `config.env` configurations (`Proxy`, `ProxyType`, `HTTP_Proxy_URL`, `SHOW_ProxyAndNonProxyBoth`) allows instant proxying or caching of video streams (such as routing through Cloudflare Workers) natively on Stremio.
-
-
-
-
-## ⚙️ How It Works
-
-This project acts as a **bridge between Telegram storage and Stremio streaming**, connecting **Telegram**, **FastAPI**, and **Stremio** to enable seamless movie and TV show streaming directly from Telegram files.
-
-### Overview
-
-When you **forward Telegram files** (movies or TV episodes) to your **AUTH CHANNEL**, the bot automatically:
-
-1.  🗃️ **Stores** the `message_id` and `chat_id` in the database.
-2.  🧠 **Processes** file captions to extract key metadata (title, year, quality, etc.).
-3.  🌐 **Generates a streaming URL** through the **PyroFork** module — routed by **FastAPI**.
-4.  🎞️ **Provides Stremio Addon APIs**:
-    -   `/catalog` → Lists available media
-    -   `/meta` → Shows detailed information for each item
-    -   `/stream` → Streams the file directly via Telegram
-
-### Upload Guidelines
-
-To ensure proper metadata extraction and seamless integration with **Stremio**, all uploaded Telegram media files **must include specific details** in their captions.
-
-#### 🎥 For Movies
-
-**Example Caption:**
-
-```
-Ghosted 2023 720p 10bit WEBRip [Org APTV Hindi AAC 2.0CH + English 6CH] x265 HEVC Msub ~ PSA.mkv
-```
-
-**Required Fields:**
-
--   🎞️ **Name** – Movie title (e.g., _Ghosted_)
--   📅 **Year** – Release year (e.g., _2023_)
--   📺 **Quality** – Resolution or quality (e.g., _720p_, _1080p_, _2160p_)
-
-✅ **Optional:** Include codec, audio format, or source (e.g., `WEBRip`, `x265`, `Dual Audio`).
-
-#### 📺 For TV Shows
-
-**Example Caption:**
-
-```
-Harikatha.Sambhavami.Yuge.Yuge.S01E04.Dark.Hours.1080p.WEB-DL.DUAL.DDP5.1.Atmos.H.264-Spidey.mkv
-````
-
-**Required Fields:**
-
--   🎞️ **Name** – TV show title (e.g., _Harikatha Sambhavami Yuge Yuge_)
--   📆 **Season Number** – Use `S` followed by two digits (e.g., `S01`)
--   🎬 **Episode Number** – Use `E` followed by two digits (e.g., `E04`)
--   📺 **Quality** – Resolution or quality (e.g., _1080p_, _720p_)
-
-✅ **Optional:** Include episode title, codec, or audio details (e.g., `WEB-DL`, `DDP5.1`, `Dual Audio`).
-
-### 🔁 Quality Replacement Logic
-
-When you upload multiple files with the **same quality label** (like `720p` or `1080p`),
-the **latest file automatically replaces the old one**.
-
-> Example:
-> If you already uploaded `Ghosted 2023 720p` and then upload another `720p` version,
-> the bot **replaces the old file** to keep your catalog clean and organized.
-
-This helps avoid duplicate entries in Stremio and ensures only the most recent file is used.
+- ✅ **Callback-based Watch in Stremio tracking** - channel buttons record who requested a watch link.
+- ✅ **Watch Requests page** - a dedicated admin view for recent Telegram watch-link clicks.
+- ✅ **Unmatched media page** - repair files or torrents that failed metadata detection.
+- ✅ **Metadata rescan UI** - replace incorrect metadata while preserving all stream qualities.
+- ✅ **Custom catalog manager** - create, edit, hide, delete, and fill custom catalogs.
+- ✅ **Auto catalog generation** - opt-in background/manual generation for language, OTT, and smart categories.
+- ✅ **Native torrent streams** - Stremio can play torrents directly without the VPS proxying the video.
+- ✅ **qBittorrent download jobs** - download selected torrents to VPS storage for stable HTTP playback.
+- ✅ **Stream analytics** - active sessions, TTFB, ranges, chunk size, fallbacks, cooldowns, and recent errors.
+- ✅ **VPS protection defaults** - adaptive prefetch, memory guardrails, and watchdog-friendly health routes.
 
 ---
 
-### 🆙 Updating CAMRip or Low-Quality Files
+# ⚙️ How It Works
 
-If you initially uploaded a **CAMRip or low-quality version**, you can easily replace it with a better one:
+## Overview
 
-1. Forward the **new, higher-quality file** (e.g., `1080p`, `WEB-DL`) to your **AUTH CHANNEL**.
-2. The bot will **automatically detect and replace** the old CAMRip file in the database.
-3. The Stremio addon will then **update automatically**, showing the new stream source.
+When you post media in an authorized Telegram channel, the bot queues the item, reads its filename or caption, detects metadata, and stores a stream quality in MongoDB. The FastAPI server exposes that information to Stremio.
 
-✅ No manual deletion or command is needed — forwarding the updated file is enough!
+```text
+Telegram channel
+  -> Bot ingestion queue
+  -> Metadata detection
+  -> MongoDB
+  -> FastAPI Stremio addon
+  -> Stremio client
+```
 
----
+For Telegram files, the VPS does not need to pre-download the whole video. It fetches Telegram byte ranges on demand and serves them as HTTP video responses.
 
-### 🏷️ Fixing Incorrect Metadata (Manual Override)
+```text
+Stremio player
+  -> /dl/... Range request
+  -> FastAPI stream route
+  -> PyroFork Telegram media session
+  -> Telegram byte chunks
+  -> Stremio playback
+```
 
-If the addon incorrectly identifies a movie or TV show, or if the metadata is entirely missing, you can fix it effortlessly by editing the message in your Telegram channel:
+For magnet links and `.torrent` files, the addon can return native Stremio torrent streams. In that mode, Stremio handles torrent playback directly.
 
-1. Copy the correct **IMDb URL** or **TMDB URL** for the movie/show.
-2. Edit the message caption in your Telegram **AUTH CHANNEL** and paste the URL.
-3. The bot will automatically wipe the old, incorrect database entry for that file and instantly re-fetch the metadata using your provided link.
+```text
+Magnet or .torrent
+  -> infoHash + fileIdx
+  -> Stremio native torrent stream
+  -> Stremio client handles peers
+```
 
-✅ The Stremio addon catalog will update dynamically to reflect the correctly identified media.
-
----
-
-
-### Behind The Scenes
-
-Here's how each component interacts:
+## Behind The Scenes
 
 | Component | Role |
 | :--- | :--- |
-| **Telegram Bot** | Handles uploads, forwards, and file tracking. |
-| **MongoDB** | Stores message IDs, chat IDs, and metadata. |
-| **PyroFork** | Generates Telegram-based streaming URLs. |
-| **FastAPI** | Hosts REST endpoints for streaming, catalog, and metadata. |
-| **Stremio Addon** | Consumes FastAPI endpoints for catalog display and playback. |
-
-📦 **Flow Summary:**
-
-```
-Telegram ➜ MongoDB ➜ FastAPI ➜ Stremio ➜ User Stream
-```
-
-
-
-# 🤖 Bot Commands
-
-Below is the list of available bot commands and their usage within the Telegram bot.
-
-### Command List
-
-| Command | Description |
-| :--- | :--- |
-| **`/start`** | Returns your **Addon URL** for direct installation in **Stremio**. |
-| **`/log`** | Sends the latest **log file** for debugging or monitoring. |
-| **`/set`** | Used for **manual uploads** by linking IMDB URLs. |
-| **`/restart`** | Restarts the bot and pulls any **latest updates** from the upstream repository. |
-
-### `/set` Command Usage
-
-The `/set` command is used to manually upload a specific Movie or TV show to your channel, linking it to its IMDB metadata.
-
-**Command:**
-
-```
-/set <imdb-url>
-```
-
-**Example:**
-
-```
-/set https://m.imdb.com/title/tt665723
-```
-
-**Steps:**
-
-1.  Send the `/set` command followed by the **IMDB URL** of the movie or show you want to upload.
-2.  **Forward the related movie or TV show files** to your channel.
-3.  Once all files are uploaded, **clear the default IMDB link** by simply sending the `/set` command without any URL.
-
-💡 **Tip:** Use `/log` if you encounter any upload or parsing issues.
-
-
-# 🔧 Configuration Guide
-
-All environment variables for this project are defined in the `config.env` file. A detailed explanation of each parameter is provided below.
-
-### 🧩 Startup Config
-
-| Variable | Description |
-| :--- | :--- |
-| **`API_ID`** | Your Telegram **API ID** from [my.telegram.org](https://my.telegram.org). Used for authenticating your Telegram session. |
-| **`API_HASH`** | Your Telegram **API Hash** from [my.telegram.org](https://my.telegram.org). |
-| **`BOT_TOKEN`** | The main bot’s **access token** from [@BotFather](https://t.me/BotFather). Handles user requests and media fetching. |
-| **`HELPER_BOT_TOKEN`** | **Secondary bot token** used to assist the main bot with tasks like deleting, editing, or managing. |
-| **`OWNER_ID`** | Your **Telegram user ID**. This ID has full administrative access. |
-| **`REPLACE_MODE`** | When `true`, new files replace existing files of the same quality. When `false`, multiple files of the same quality are allowed. |
-| **`HIDE_CATALOG`** | When `true`, the default Telegram Stremio Catalog is hidden, and streams only show in the Cinemata catalog (i.e., Cinemata addon is mandatory). Default is `false`. |
-| **`PARALLEL`** | Controls the queue size for chunks buffered ahead. Keeps the player buffer full without overloading Telegram. Example: `PARALLEL = 4` means 4 chunks are buffered ahead. Default is `1`. |
-| **`PRE_FETCH`** | Controls the number of workers downloading chunks simultaneously. Example: `PRE_FETCH = 3` means 3 workers download concurrently. Higher values can improve speed but increase API load. Default is `1`. |
-
-### 🗄️ Storage
-
-| Variable | Description |
-| :--- | :--- |
-| **`AUTH_CHANNEL`** | One or more **Telegram channel IDs** (comma-separated) where the bot is authorized to fetch or stream content. *Example: `-1001234567890, -1009876543210`*. |
-| **`DATABASE`** | MongoDB Atlas connection URI(s). You **must provide at least two databases**, separated by commas (`,`) for load balancing and redundancy. <br>Example: <br>`mongodb+srv://user:pass@cluster0.mongodb.net/db1, mongodb+srv://user:pass@cluster1.mongodb.net/db2` |
-
-> 💡 **Tip:** Create your MongoDB Atlas cluster [here](https://www.mongodb.com/cloud/atlas).
-
-### 🎬 API
-
-| Variable | Description |
-| :--- | :--- |
-| **`TMDB_API`** | Your **TMDB API key** from [themoviedb.org](https://www.themoviedb.org/settings/api). Used to fetch movie and TV metadata. |
-
-### 🌐 Server
-
-| Variable | Description |
-| :--- | :--- |
-| **`BASE_URL`** | The Domain or Heroku app URL (e.g. `https://your-domain.com`). Crucial for Stremio addon setup. |
-| **`PORT`** | The port number on which your FastAPI server will run. *Default: `8000`*. |
-
-### 🔄 Update Settings
-
-| Variable | Description |
-| :--- | :--- |
-| **`UPSTREAM_REPO`** | GitHub repository URL for automatic updates. |
-| **`UPSTREAM_BRANCH`** | The branch name to track in your upstream repo. *Default: `master`*. |
-
-### 🔐 Admin Panel
-
-| Variable | Description |
-| :--- | :--- |
-| **`ADMIN_USERNAME`** | Username for logging into the Admin Panel. |
-| **`ADMIN_PASSWORD`** | Password for Admin Panel access.|
- **⚠️ Change from default values for security.** 
-
-### 💳 Subscription Management Config
-
-Enable the subscription feature to gate access to streams behind a paid plan. When `SUBSCRIPTION=True`, every user must have an active subscription to stream content.
-
-| Variable | Description |
-| :--- | :--- |
-| **`SUBSCRIPTION`** | Enable (`True`) or disable (`False`) the subscription gate. When enabled, users without an active subscription see an expired message in Stremio instead of streams. *Default: `False`*. |
-| **`SUBSCRIPTION_GROUP_ID`** | Telegram **group/channel ID** where approved subscribers are invited. Users receive an invite link upon payment approval. |
-| **`APPROVER_IDS`** | Comma-separated Telegram user IDs of admins who can **approve or reject** subscription payment requests. |
-| **`SUBSCRIPTION_URL`** | Telegram bot URL (e.g. `https://t.me/your_bot`) shown to expired users in Stremio so they can renew. |
-
-> 💡 `SUBSCRIPTION_GROUP_ID` and `APPROVER_IDS` must be set **without quotes** in `config.env`.
-
-### 🧰 Additional CDN Bots (Multi-Token System)
-
-| Variable | Description |
-| :--- | :--- |
-| **`MULTI_TOKEN1`**, **`MULTI_TOKEN2`**, ... | Extra bot tokens used to distribute traffic and prevent Telegram rate-limiting. Add each bot as an **Admin** in your `AUTH_CHANNEL`(s). |
-
-#### About `MULTI_TOKEN`
-
-If your bot handles a high number of downloads/requests at a time, Telegram may limit your main bot.  
-To avoid this, you can use **MULTI_TOKEN** system:
-
-- Create multiple bots using [@BotFather](https://t.me/BotFather).
-- Add each bot as **Admin** in your `AUTH_CHANNEL`(s).
-- Add the tokens in your `config.env` as `MULTI_TOKEN1`, `MULTI_TOKEN2`, `MULTI_TOKEN3`, and so on.
-- The system will automatically distribute the load among all these bots!
-
-> ⚠️ **Real Limitation:** 
-> Even if you configure 10 bots in your system, **a single stream will typically only use 1 bot**. Extra bots do not make a single stream download 10x faster. Their primary purpose is to help handle **multiple users streaming simultaneously** without hitting rate limits:
-> - User 1 → assigned to Bot 1
-> - User 2 → assigned to Bot 2
-> - User 3 → assigned to Bot 3
-
+| **Telegram Bot** | Watches authorized channels, indexes uploads, handles callbacks, and sends admin replies. |
+| **PyroFork** | Opens Telegram media sessions and fetches file byte ranges. |
+| **FastAPI** | Hosts admin UI, Stremio addon routes, `/dl/...`, `/downloaded/...`, and analytics routes. |
+| **MongoDB** | Stores metadata, stream qualities, subscriptions, tokens, catalogs, jobs, watch requests, and analytics. |
+| **Stremio** | Reads manifest, catalog, meta, and stream responses from the addon. |
+| **qBittorrent** | Optional internal downloader for torrent download-to-VPS jobs. |
+| **Nginx** | Optional HTTPS reverse proxy and optional internal file offload for cached/downloaded files. |
 
 ---
 
-# 💳 Subscription Management
+# 📤 Upload Guidelines
 
-The Subscription Management system allows you to **monetise access** to your Telegram Stremio server. When enabled, users must have an active subscription to stream content.
+Post media only in channels or groups listed in `AUTH_CHANNEL`. The bot should be an admin in those channels.
 
-## 📋 Subscription Plans
+## 🎥 Movies
 
-Admins can create and manage subscription plans from the **Admin Panel → Subscription Management** page.
+Use a filename or caption with the movie title, year, and quality.
 
-Each plan has:
-- **Name** (e.g. `Monthly`, `Quarterly`)
-- **Duration** in days
-- **Price** (for display)
-- **Description**
+```text
+Example Movie 2025 1080p WEB-DL x265.mkv
+```
 
-Plans are stored in MongoDB and can be added, edited, or deleted at any time without restarting.
+Recommended signals:
+
+- 🎞️ Title
+- 📅 Year
+- 📺 Resolution such as `720p`, `1080p`, or `2160p`
+- 🎧 Audio/source/codec tags such as `WEB-DL`, `BluRay`, `x265`, `10bit`, `DDP5.1`
+
+## 📺 TV Episodes
+
+Use standard season and episode patterns.
+
+```text
+Example.Show.S01E04.1080p.WEB-DL.x265.mkv
+```
+
+Recommended signals:
+
+- 🎞️ Show title
+- 📆 Season number such as `S01`
+- 🎬 Episode number such as `E04`
+- 📺 Resolution and source tags
+
+## 📦 Season Packs
+
+Full-season packs should include a clear season signal.
+
+```text
+Example Show S01 COMBINED 1080p WEB-DL.mkv
+```
+
+For multi-file torrents, uploaded `.torrent` files are better than plain magnets because they expose the internal file list. That lets the addon map each episode to the correct Stremio `fileIdx`.
+
+## 🧲 Magnet Links And Torrent Files
+
+Supported inputs:
+
+- Magnet links in channel text.
+- Magnet links in captions.
+- Uploaded `.torrent` documents.
+
+Behavior:
+
+- Magnets are indexed as native torrent streams.
+- `.torrent` files are parsed for info hash, trackers, file names, file sizes, and file indexes.
+- Multi-file torrents can map TV episodes to exact files.
+- If metadata cannot be inferred, the item appears in the unmatched media repair flow.
+
+## 🏷️ Metadata Repair
+
+If the title is matched incorrectly or metadata detection fails:
+
+1. Open the admin UI.
+2. Go to **Unmatched** for failed items, or **Media** for already indexed items.
+3. Search for the correct TMDb/IMDb match.
+4. Apply the match.
+
+The repair flow preserves existing stream qualities, including Telegram file IDs, torrent hashes, file indexes, downloaded torrent linkage, notes, hidden flags, and recommended flags.
 
 ---
 
-## 🤖 Bot Payment Flow
+# 🌊 Stream Types
 
-Users interact with the bot to subscribe:
+The same movie or episode can expose multiple stream types. You can keep all of them and manually hide or recommend specific qualities from the admin UI.
 
-```
-User → /start → selects plan → sends payment screenshot
-      → Approver gets notification → Approve / Reject
-      → On Approve:
-          ✅ Subscription saved to DB
-          🔑 Stremio addon token auto-generated
-          📨 User receives Stremio install link + group invite
-```
-
-**Approver actions** (available to `APPROVER_IDS`):
-
-| Button | Action |
-| :--- | :--- |
-| ✅ Approve | Activates subscription, generates addon token, invites user to group |
-| ❌ Reject | Notifies user with rejection message |
-
----
-
-## 🗃️ Access Management
-
-The **Admin Panel → Access Management** page gives admins full control over all users and their addon tokens.
-
-### Columns Shown
-
-| Column | Description |
-| :--- | :--- |
-| Status | 🟢 Active / 🔴 Expired |
-| User | Display name or `User {id}` |
-| Addon Link | Stremio install URL + copy button |
-| Created | Token creation date |
-| Expires | Subscription expiry date |
-| Actions | Buttons for managing the user |
-
-### Action Buttons
-
-| Button | Description |
-| :--- | :--- |
-| 📅 **Assign** | Assign or extend a subscription plan (adds days) |
-| ➕ **Extend** | Add extra days to an active subscription |
-| ➖ **Reduce** | Subtract days from an active subscription |
-| 🚫 **Revoke** | Wipe subscription entirely (marks expired) |
-| 🗑️ **Del Token** | Delete the addon token only (user still subscribed) |
-| 🔗 **Link User ID** | Link an old/orphan token to a Telegram user ID to enable management |
-
-> 💡 Manually created (old) tokens that have no linked user ID show a **🔗 Link User ID** button. Once linked, all action buttons become available.
-
-### Search & Filtering
-
-- 🔍 Search by user name or ID
-- Filter by status: All / Active / Expired
-- Pagination with configurable page size
-
----
-
-## 🎬 Stremio Addon Integration
-
-### Per-User Addon Token
-
-Each user gets a **unique addon token** automatically generated on payment approval. Their Stremio addon URL is:
-
-```
-https://your-domain.com/stremio/{token}/manifest.json
-```
-
-### Dynamic Manifest
-
-The addon manifest updates dynamically per user:
-
-| Scenario | Addon Name | Description |
+| Stream Type | Best For | How It Plays |
 | :--- | :--- | :--- |
-| Active, has expiry | `Telegram — Expires 28 Mar 2026` | 📅 Subscription active until 28 Mar 2026 |
-| Active, no expiry | `Telegram — Active` | ✅ Subscription active |
-| Default (no subscription mode) | `Telegram` | Standard description |
+| **Telegram Stream** | Fast indexing without local storage. | VPS fetches Telegram byte ranges and serves `/dl/...`. |
+| **Native Torrent Stream** | Letting Stremio handle peers directly. | Addon returns `infoHash`, optional `fileIdx`, and trackers. |
+| **Downloaded VPS Stream** | Stable playback after a torrent is downloaded. | qBittorrent downloads the file; VPS serves `/downloaded/...`. |
+| **VLC / External Player** | Difficult MKV or device-specific seek issues. | Use the external player from Stremio or Telegram link workflows. |
 
-The manifest `version` encodes the expiry date — when an admin extends or revokes a subscription, the version changes and Stremio detects an update.
+## 📡 Telegram Streams
 
-### Expired Stream
+Telegram streams are served by the VPS through authenticated `/dl/...` URLs.
 
-When a user's subscription expires, instead of streams they see:
+Current streaming behavior:
+
+- `HEAD` responses include stable `Content-Length`.
+- `Range` requests return `206 Partial Content`.
+- `Accept-Ranges: bytes` is returned for media players.
+- Known video extensions get stable video MIME types.
+- Range/seek requests use `512 KB` Telegram chunks for faster seek start.
+- Normal full-file streams use `1 MB` Telegram chunks for better throughput.
+- Failed Telegram chunks retry through another healthy client before failing cleanly.
+- The streamer does **not** zero-pad failed chunks.
+
+### ⚙️ `PARALLEL` And `PRE_FETCH`
+
+These two settings control Telegram chunk fetching:
+
+| Variable | Meaning |
+| :--- | :--- |
+| `PARALLEL` | Maximum concurrent Telegram chunk fetches per stream. |
+| `PRE_FETCH` | Number of chunks queued ahead of playback. |
+
+Example:
+
+```env
+PARALLEL="3"
+PRE_FETCH="3"
+ADAPTIVE_PREFETCH_ENABLED="true"
+```
+
+Higher `PARALLEL` can improve burst speed, but it increases Telegram API pressure, memory usage, and risk on small VPS machines. Higher `PRE_FETCH` can improve buffering, but it also holds more data in memory.
+
+Adaptive prefetch never raises these values. It only lowers them when the VPS is busy, RAM is low, the file/request is small, or multiple streams are active.
+
+## 🧲 Native Torrent Streams
+
+For magnets and `.torrent` files, the addon can return native Stremio streams:
 
 ```json
 {
-  "name": "🚫 Subscription Expired",
-  "title": "Your subscription has expired.\nRenew via the bot to continue watching.",
-  "url": "https://t.me/your_bot"   ← SUBSCRIPTION_URL from config
+  "infoHash": "example_info_hash",
+  "fileIdx": 0,
+  "sources": ["tracker:udp://tracker.example.org:80/announce"]
 }
 ```
 
-Clicking the stream name opens the bot directly for renewal.
+In native torrent mode:
 
-### Configure & Reinstall Page
+- The VPS does not download or proxy video bytes.
+- Stremio handles peers and playback.
+- Stremio Desktop or Stremio Service may be required for some clients.
+- Playback speed depends on seeders, peers, trackers, and the Stremio device.
 
-Every addon has a **Configure page** at:
+## ⬇️ Downloaded VPS Streams
 
+If torrent playback is weak or you want stable HTTP playback, use **Download to VPS**.
+
+Flow:
+
+1. Post a magnet or `.torrent`.
+2. The bot indexes the torrent.
+3. Click **Download to VPS**.
+4. qBittorrent downloads to persistent storage.
+5. The addon exposes a `/downloaded/...` stream.
+
+qBittorrent WebUI should stay internal. Do not expose it publicly.
+
+---
+
+# 🤖 Bot Commands
+
+| Command | Description |
+| :--- | :--- |
+| `/start` | Sends the user addon link or subscription/access information. |
+| `/log` | Sends recent logs to the owner/admin when enabled by the bot. |
+| `/set` | Helps manually attach metadata or configure a file flow depending on current bot behavior. |
+
+Telegram channel replies can include:
+
+- ▶️ **Watch in Stremio** callback button.
+- 🎬 A follow-up Stremio watch link in the channel after a user taps the callback.
+- 📥 **Download to VPS** for eligible torrent streams.
+- Streaming notes for WARP, issue reporting, and device-specific seek behavior.
+
+---
+
+# 🎬 Stremio Addon Integration
+
+Each user or mode gets an addon URL like:
+
+```text
+https://your-domain.example/stremio/YOUR_TOKEN/manifest.json
 ```
-https://your-domain.com/stremio/{token}/configure
+
+Install flow:
+
+1. Start the Telegram bot with `/start`.
+2. Copy the Stremio addon URL.
+3. Open Stremio.
+4. Install the addon using the manifest URL.
+5. Browse catalogs or search media.
+
+Important addon routes:
+
+| Route | Purpose |
+| :--- | :--- |
+| `/stremio/{token}/manifest.json` | Tokenized addon manifest. |
+| `/stremio/{token}/catalog/{type}/{id}.json` | Catalog responses. |
+| `/stremio/{token}/meta/{type}/{id}.json` | Metadata responses. |
+| `/stremio/{token}/stream/{type}/{id}.json` | Stream responses. |
+| `/dl/...` | Telegram-backed HTTP stream. |
+| `/downloaded/...` | Downloaded torrent HTTP stream. |
+
+If subscriptions are enabled, token access and expiry are enforced by the addon.
+
+---
+
+# 🧠 Admin Panel
+
+Protected admin pages:
+
+| Page | Purpose |
+| :--- | :--- |
+| `/dashboard` | Main system overview, active streams, failures, egress, and token usage. |
+| `/admin/dashboard` | Admin system stats and operational tools. |
+| `/media/manage` | Browse movies and series. |
+| `/media/edit` | Edit metadata and manage stream qualities. |
+| `/catalogs` | Create custom catalogs and manage auto catalogs. |
+| `/unmatched` | Repair failed metadata matches. |
+| `/watch-requests` | See Telegram users who clicked Watch in Stremio callbacks. |
+| `/admin/subscriptions` | Manage subscription plans. |
+| `/admin/access` | View, extend, revoke, and reassign access. |
+| `/status` | Public status page. |
+
+The stream dashboard can show:
+
+- Active stream ID and source type.
+- File name and request range.
+- Client IP and user-agent.
+- Telegram client/DC routing details.
+- Chunk size, TTFB, fallback count, timeout count, and cooldown state.
+- Recent failed streams and error reasons.
+- Recent watch-link requesters from Telegram callback clicks.
+
+---
+
+# 📚 Custom Catalogs And Metadata Tools
+
+## 🗂️ Custom Catalogs
+
+Custom catalogs let admins curate Stremio sections manually.
+
+You can:
+
+- Create movie or series collections.
+- Add and remove media.
+- Hide or show catalogs.
+- Search existing indexed media.
+- Keep visible catalogs in the Stremio manifest.
+
+## 🤖 Auto Catalogs
+
+Auto catalogs are opt-in from the admin UI. They can classify indexed media into language, OTT, and smart categories such as recently added or top rated.
+
+No heavy full rebuild is required on first boot. Admins choose enabled auto-catalog options from `/catalogs`.
+
+## 🛠️ Unmatched Media
+
+The unmatched media page stores failed ingestion references, not video bytes.
+
+Use it when:
+
+- A filename is unclear.
+- A torrent has no obvious title.
+- A season pack cannot map correctly.
+- Metadata search returned the wrong result.
+
+## 🔁 Metadata Rescan
+
+Metadata rescan updates title, year, poster, backdrop, overview, genres, cast, rating, runtime, IDs, and season/episode metadata. It preserves all stream quality entries.
+
+## 🧹 Duplicate And Quality Controls
+
+Admins can manually:
+
+- Hide a stream from Stremio.
+- Show a hidden stream again.
+- Mark a stream as recommended.
+- Add a quality note such as `bad seek`, `slow`, `duplicate`, or `TV risky`.
+
+The app detects duplicates but does not auto-delete or auto-hide them.
+
+---
+
+# 💳 Subscription And Access Management
+
+Subscription mode can restrict addon access to approved users.
+
+Supported admin flows:
+
+- Create and edit subscription plans.
+- Review payment requests.
+- Generate user access tokens.
+- Extend, reduce, revoke, or reassign access.
+- Show expired users a clear expired stream response.
+
+When `SUBSCRIPTION` is disabled, the addon can use `DEFAULT_ADDON_TOKEN` for shared/default access.
+
+---
+
+# 🔧 Configuration Guide
+
+Copy the sample file and edit it:
+
+```bash
+cp sample_config.env config.env
+nano config.env
 ```
 
-This page shows:
-- User name, subscription status, expiry date
-- **⚡ Install / Update in Stremio** button (Stremio Web install flow)
-- Manual install steps + **📋 Copy URL** button
+Never commit real secrets.
 
-The ⚙️ gear icon in Stremio opens this page so users can reinstall after an admin updates their subscription.
+## 🧩 Startup And Telegram
+
+| Variable | Description |
+| :--- | :--- |
+| `API_ID` | Telegram API ID from `my.telegram.org`. |
+| `API_HASH` | Telegram API hash from `my.telegram.org`. |
+| `BOT_TOKEN` | Main bot token from BotFather. |
+| `HELPER_BOT_TOKEN` | Optional helper bot token. |
+| `OWNER_ID` | Telegram owner/admin user ID. |
+| `AUTH_CHANNEL` | Comma-separated authorized Telegram channel/group IDs. |
+| `DATABASE` | MongoDB connection URI or comma-separated URIs. |
+| `TMDB_API` | TMDb API key/token for metadata lookup. |
+| `BASE_URL` | Public HTTPS base URL, without trailing slash. |
+| `PORT` | FastAPI port inside the container. |
+| `DEFAULT_ADDON_TOKEN` | Shared addon token used for default/free access flows. |
+| `MULTI_TOKEN1`, `MULTI_TOKEN2`, ... | Additional Telegram bot tokens for multi-client fetching. |
+
+## 🌊 Streaming And Routing
+
+| Variable | Description |
+| :--- | :--- |
+| `PARALLEL` | Maximum concurrent Telegram chunk fetches per stream. |
+| `PRE_FETCH` | Number of chunks queued ahead of playback. |
+| `SMART_ROUTING_ENABLED` | Enable smart client/DC route selection. |
+| `SMART_ROUTING_PROBE_ENABLED` | Probe candidate clients before selecting a route. |
+| `SMART_ROUTING_PROBE_CLIENTS` | Number of candidate clients to probe. |
+| `SMART_ROUTING_PROBE_BYTES` | Bytes to fetch during a probe. |
+| `SMART_ROUTING_PROBE_TIMEOUT_SEC` | Timeout for probe requests. |
+| `SMART_ROUTING_FIRST_CHUNK_TIMEOUT_SEC` | Timeout for the first stream chunk. |
+| `SMART_ROUTING_CHUNK_TIMEOUT_SEC` | Timeout for normal chunks. |
+| `SMART_ROUTING_COOLDOWN_FAILURES` | Failures before a client/DC is put on cooldown. |
+| `SMART_ROUTING_COOLDOWN_SEC` | Cooldown duration in seconds. |
+| `ADAPTIVE_PREFETCH_ENABLED` | Let the app lower prefetch/parallelism for safety. |
+| `ADAPTIVE_PREFETCH_LOW_MEM_MB` | Force safer `1/1` behavior below this free-memory threshold. |
+| `ADAPTIVE_PREFETCH_MULTI_STREAM_THRESHOLD` | Reduce values when active streams reach this count. |
+| `ADAPTIVE_PREFETCH_SMALL_REQUEST_BYTES` | Reduce for small range requests. |
+| `ADAPTIVE_PREFETCH_SMALL_FILE_BYTES` | Reduce for small files. |
+| `STREAM_SLO_TTFB_WARN_SEC` | Log slow time-to-first-byte warnings. |
+| `STREAM_SLO_TIMEOUT_WARN_COUNT` | Log warning after repeated chunk timeouts. |
+| `STREAM_SLO_BUFFERING_WARN_RATE` | Log possible buffering warnings by stream ratio. |
+
+Recommended small-VPS baseline:
+
+```env
+PARALLEL="3"
+PRE_FETCH="3"
+ADAPTIVE_PREFETCH_ENABLED="true"
+```
+
+## 💾 Disk Cache And Nginx Offload
+
+| Variable | Description |
+| :--- | :--- |
+| `DISK_CACHE_ENABLED` | Enable optional Telegram file disk caching. |
+| `DISK_CACHE_PRECACHE_ON_INGEST` | Pre-cache Telegram files during ingestion. |
+| `DISK_CACHE_DIR` | Cache directory inside the app container. |
+| `DISK_CACHE_MAX_GB` | Cache size limit in GB. |
+| `DISK_CACHE_MAX_BYTES` | Cache size limit in bytes. |
+| `DISK_CACHE_CONCURRENCY` | Cache worker concurrency. |
+| `NGINX_ACCEL_REDIRECT_ENABLED` | Use Nginx internal redirect for cached Telegram files. |
+| `NGINX_ACCEL_REDIRECT_LOCATION` | Internal Nginx cache location. |
+
+## 🧲 Torrents And Downloads
+
+| Variable | Description |
+| :--- | :--- |
+| `TORRENT_STATS_ENABLED` | Scrape tracker seed/peer estimates for torrent streams. |
+| `TORRENT_STATS_TTL_SEC` | Successful torrent stats cache TTL. |
+| `TORRENT_STATS_FAILURE_TTL_SEC` | Failed torrent stats cache TTL. |
+| `TORRENT_STATS_MAX_TRACKERS` | Maximum trackers to scrape per torrent. |
+| `TORRENT_STATS_TIMEOUT_SEC` | Tracker scrape timeout. |
+| `TORRENT_STATS_CONCURRENCY` | Tracker scrape concurrency. |
+| `TORRENT_DOWNLOADS_ENABLED` | Enable Download to VPS buttons/jobs. |
+| `TORRENT_DOWNLOAD_ROOT` | Completed torrent path visible to the app. |
+| `TORRENT_DOWNLOAD_MIN_FREE_GB` | Minimum free disk required before accepting downloads. |
+| `TORRENT_DOWNLOAD_CONCURRENCY` | Number of active download workers. |
+| `TORRENT_DOWNLOAD_POLL_SEC` | qBittorrent polling interval. |
+| `TORRENT_DOWNLOAD_PROGRESS_EDIT_SEC` | Minimum seconds between progress edits. |
+| `TORRENT_DOWNLOAD_STALL_TIMEOUT_SEC` | Mark stalled downloads failed after this duration. |
+| `TORRENT_DOWNLOAD_MAX_RUNTIME_SEC` | Maximum runtime per download job. |
+| `QBITTORRENT_BASE_URL` | Internal qBittorrent WebUI URL, usually `http://qbittorrent:8080`. |
+| `QBITTORRENT_USERNAME` | Internal qBittorrent username. |
+| `QBITTORRENT_PASSWORD` | Internal qBittorrent password. |
+| `QBITTORRENT_SAVE_PATH` | Completed path from qBittorrent's view. |
+| `QBITTORRENT_TEMP_PATH` | Incomplete path from qBittorrent's view. |
+| `NGINX_DOWNLOAD_ACCEL_REDIRECT_ENABLED` | Use Nginx internal redirect for downloaded torrent files. |
+| `NGINX_DOWNLOAD_ACCEL_REDIRECT_LOCATION` | Internal Nginx location for downloaded files. |
+
+## 📊 Dashboard Egress And VPS Outbound
+
+| Variable | Description |
+| :--- | :--- |
+| `NGINX_EGRESS_ENABLED` | Parse Nginx logs for bytes served to clients. |
+| `NGINX_EGRESS_LOG_PATHS` | Comma-separated mounted Nginx access log paths. |
+| `NGINX_EGRESS_STREAM_PREFIXES` | Path prefixes counted as stream egress. |
+| `NGINX_EGRESS_CACHE_SEC` | Egress summary cache TTL. |
+| `VPS_OUTBOUND_ENABLED` | Track host network transmit bytes. |
+| `VPS_OUTBOUND_INTERFACE` | Host network interface name. |
+| `VPS_OUTBOUND_TX_BYTES_PATH` | Mounted sysfs TX bytes path. |
+| `VPS_OUTBOUND_NET_DEV_PATH` | Mounted `/proc/net/dev` path. |
+| `VPS_OUTBOUND_MONTHLY_LIMIT_BYTES` | Dashboard monthly quota reference. |
+
+## 🔐 Admin, Subscription, And Proxy
+
+| Variable | Description |
+| :--- | :--- |
+| `ADMIN_USERNAME` | Admin web login username. |
+| `ADMIN_PASSWORD` | Admin web login password. |
+| `REPLACE_MODE` | Replace same-quality Telegram entries when enabled. |
+| `HIDE_CATALOG` | Hide catalog entries globally when enabled. |
+| `SUBSCRIPTION` | Enable subscription-gated addon access. |
+| `SUBSCRIPTION_GROUP_ID` | Private group/channel ID for subscriber access. |
+| `APPROVER_IDS` | Comma-separated Telegram admin IDs for payment approval. |
+| `SUBSCRIPTION_URL` | Bot, payment, or contact URL shown to users. |
+| `Proxy` | Enable proxy stream entries. |
+| `ProxyType` | Proxy type label. |
+| `HTTP_Proxy_URL` | Proxy prefix such as a worker URL. |
+| `SHOW_ProxyAndNonProxyBoth` | Show both proxied and direct stream links. |
+| `UPSTREAM_REPO` | Optional repository URL for update workflows. |
+| `UPSTREAM_BRANCH` | Optional branch name for update workflows. |
 
 ---
 
 # 🚀 Deployment Guide
 
-This guide will help you deploy your **Telegram Stremio Media Server** using either Heroku or a VPS with Docker.
+Docker Compose on a VPS is the recommended deployment path.
+
+Heroku-style deployments are not recommended for the current feature set because Telegram streaming, qBittorrent downloads, persistent storage, dashboards, and background jobs need a stable long-running host.
 
 ## ✅ Recommended Prerequisites
 
-**Supported Servers:**
+- Linux VPS with Docker Engine and Docker Compose v2.
+- Public HTTPS domain for `BASE_URL`.
+- Telegram bot token from BotFather.
+- Telegram API ID/hash from `my.telegram.org`.
+- MongoDB database.
+- TMDb API key/token.
+- Authorized Telegram channel/group where the bot is admin.
+- Optional persistent disk for qBittorrent downloads.
 
-  - 🟣 **Heroku**
-  - 🟢 **VPS** 
+Oracle Always Free A1 Flex is a good free-tier target when capacity is available. E2 Micro can work for light usage, but RAM is tight, so adaptive prefetch should stay enabled.
 
-Before you begin, ensure you have:
-
-1.  ✅ A **VPS** with a public IP (e.g., Ubuntu on DigitalOcean, AWS, Vultr, etc.)
-2.  ✅ A **Domain name**
-
-
-## 🐙 Heroku Guide
-
-Follow the instructions provided in the Google Colab Tool to deploy on Heroku.
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/weebzone/Colab-Tools/blob/main/telegram%20stremio.ipynb)
-
-
-## 🐳 VPS Guide
-
-This section explains how to deploy your **Telegram Stremio Media Server** on a VPS using **Docker Compose (recommended)** or **Docker**.
-
-
-### 1️⃣ Step 1: Clone & Configure the Project
+## 🐳 Docker Compose VPS Setup
 
 ```bash
-git clone https://github.com/weebzone/Telegram-Stremio
+git clone https://github.com/rohan-js/Telegram-Stremio.git
 cd Telegram-Stremio
-mv sample_config.env config.env
+cp sample_config.env config.env
 nano config.env
+docker compose up -d --build
 ```
 
-* Fill in all required variables in `config.env`.
-* Press `Ctrl + O`, then `Enter`, then `Ctrl + X` to save and exit.
-
-## ⚙️ Step 2: Choose Your Deployment Method
-
-You can deploy the server using either **Docker Compose (recommended)** or **plain Docker**.
-
-
-
-### 🟢 **Option 1: Deploy with Docker Compose (Recommended)**
-
-Docker Compose provides an easier and more maintainable setup, environment mounting, and restart policies.
-
-#### 🚀 Start the Container
+Useful commands:
 
 ```bash
-docker compose up -d
+docker compose ps
+docker logs --tail=100 tg_stremio
+docker compose restart telegram-stremio
 ```
 
-Your server will now be running at:
-➡️ `http://<your-vps-ip>:8000`
+If your host still has legacy Compose, prefer installing the modern Docker Compose plugin. Use `docker-compose` only as a fallback.
+
+## 🧲 qBittorrent Notes
+
+The included Compose setup runs:
+
+| Service | Container | Purpose |
+| :--- | :--- | :--- |
+| `telegram-stremio` | `tg_stremio` | Main bot, FastAPI app, addon, and stream server. |
+| `qbittorrent` | `qbittorrent` | Internal torrent download worker. |
+
+Only expose the torrent peer port when needed:
+
+```text
+6881/tcp
+6881/udp
+```
+
+Do **not** expose qBittorrent WebUI publicly. Keep it internal at:
+
+```text
+http://qbittorrent:8080
+```
+
+## 🌐 Domain And HTTPS
+
+Set `BASE_URL` to your public HTTPS domain:
+
+```env
+BASE_URL="https://your-domain.example"
+```
+
+Recommended reverse proxy behavior:
+
+- Terminate HTTPS at Nginx, Caddy, or another reverse proxy.
+- Proxy app traffic to the internal FastAPI port.
+- Disable buffering for streaming routes.
+- Use long read/send timeouts for media streams.
+- Optionally use internal redirect locations for cached or downloaded files.
 
 ---
 
-#### 🛠️ Update `config.env` While Running
+# 🩺 Operations And Health Checks
 
-If you need to modify environment values (like `BASE_URL`, `AUTH_CHANNEL`, etc.):
+## ✅ Health Checks
 
-1. **Edit the file:**
-
-   ```bash
-   nano config.env
-   ```
-2. **Save your changes:** (`Ctrl + O`, `Enter`, `Ctrl + X`)
-3. **Restart the container to apply updates:**
-
-   ```bash
-   docker compose restart
-   ```
-
-⚡ Since the config file is mounted, you **don’t need to rebuild** the image — changes apply automatically on restart.
-
-
-
-### 🔵 **Option 2: Deploy with Docker (Manual Method)**
-
-If you prefer not to use Docker Compose, you can manually build and run the container.
-
-#### 🧩 Build the Image
-
-```bash
-docker build -t telegram-stremio .
-```
-
-#### 🚀 Run the Container
-
-```bash
-docker run -d -p 8000:8000 telegram-stremio
-```
-
-Your server should now be running at:
-➡️ `http://<your-vps-ip>:8000`
-
-
-
-### 🌐 Step 3: Add Domain (Required)
-
-#### 🅰️ Set Up DNS Records
-
-Go to your domain registrar and add an **A record** pointing to your VPS IP:
-
-| Type | Name | Value             |
-| ---- | ---- | ----------------- |
-| A    | @    | `195.xxx.xxx.xxx` |
-
-
-#### 🧱 Install Caddy (for HTTPS + Reverse Proxy)
-
-```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-chmod o+r /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update
-sudo apt install caddy
-```
-
-#### ⚙️ Configure Caddy
-
-1. **Edit the Caddyfile:**
-
-   ```bash
-   sudo nano /etc/caddy/Caddyfile
-   ```
-
-2. **Replace contents with:**
-
-   ```caddy
-   your-domain.com {
-       reverse_proxy localhost:8000
-   }
-   ```
-
-   * Replace `your-domain.com` with your actual domain name.
-   * Adjust the port if you changed it in `config.env`.
-
-3. **Save and reload Caddy:**
-
-   ```bash
-   sudo systemctl reload caddy
-   ```
-
-
-✅ Your API will now be available securely at:
-➡️ `https://your-domain.com`
-
-
-# 📺 Setting up Stremio
-
-Follow these steps to connect your deployed addon to the **Stremio** app.
-
-### 📥 Step 1: Download Stremio
-
-Download Stremio for your device:
-👉 [https://www.stremio.com/downloads](https://www.stremio.com/downloads)
-
-### 👤 Step 2: Sign In
-
-  - Create or log in to your **Stremio account**.
-
-### 🌐 Step 3: Add the Addon
-
-1.  Open the **Stremio App**.
-2.  Go to the **Addon Section** (usually represented by a puzzle piece icon 🧩).
-3.  In the search bar, paste the appropriate addon URL:
-
-| Deployment Method | Addon URL |
+| Check | Expected |
 | :--- | :--- |
-| **Heroku** | `https://<your-heroku-app>.herokuapp.com/stremio/manifest.json` |
-| **Custom Domain** | `https://<your-domain>/stremio/manifest.json` |
+| `/login` | Returns admin login page. |
+| `/stream/stats` | Returns stream/session analytics. |
+| `/stremio/{token}/manifest.json` | Returns tokenized addon manifest. |
+| `docker compose ps` | `telegram-stremio` and `qbittorrent` are running. |
 
+Example:
 
-## ⚙️ Optional: Remove Cinemeta
-
-If you want to use **only** your **Telegram Stremio Media Server addon** for metadata and streaming, follow this guide to remove the default `Cinemeta` addon.
-
-### 1️⃣ Step 1: Uninstall Other Addons
-
-1.  Go to the **Addon Section** in the Stremio App.
-2.  **Uninstall all addons** except your Telegram Stremio Media Server.
-3.  Attempt to remove **Cinemeta**. If Stremio prevents it, proceed to Step 2.
-
-### 2️⃣ Step 2: Remove “Cinemeta” Protection
-
-1.  Log in to your **Stremio account** using **Chrome or Chromium-based browser** :
-    👉 [https://web.stremio.com/](https://web.stremio.com/)
-2.  Once logged in, open your **browser console** (`Ctrl + Shift + J` on Windows/Linux or `Cmd + Option + J` on macOS).
-3.  Copy and paste the code below into the console and press **Enter**:
-
-<!-- end list -->
-
-```js
-(function() {
-
-	const token = JSON.parse(localStorage.getItem("profile")).auth.key;
-
-    const requestData = {
-        type: "AddonCollectionGet",
-        authKey: token,
-        update: true
-    };
-
-    fetch('https://api.strem.io/api/addonCollectionGet', {
-        method: 'POST',
-        body: JSON.stringify(requestData)
-    })
-    .then(response => response.json())
-    .then(data => {
-
-    if (data && data.result) {
-
-        let result = JSON.stringify(data.result).substring(1).replace(/"protected":true/g, '"protected":false').replace('"idPrefixes":["tmdb:"]', '"idPrefixes":["tmdb:","tt"]');
-            
-        const index = result.indexOf("}}],");
-            
-        if (index !== -1) {
-            result = result.substring(0, index + 3) + "}";
-        }
-
-		let addons = '{"type":"AddonCollectionSet","authKey":"' + token + '",' + result;
-
-		fetch('https://api.strem.io/api/addonCollectionSet', {
-    		method: 'POST',
-			body: addons 
-		})
-      	.then(response => response.text())
-      	.then(data => {
-      		console.log('Success:', data);
-      	})
-      	.catch((error) => {
-      		console.error('Error:', error);
-      	});
-
-        } else {
-            console.error('Error:', error);
-        }
-    })
-    .catch((error) => {
-        console.error('Erro:', error);
-    });
-})();
+```bash
+curl -I https://your-domain.example/login
+curl https://your-domain.example/stream/stats
 ```
 
-### 3️⃣ Step 3: Confirm Success
+## 🔄 Safe Redeploy
 
-  - Wait until you see this message in the console:
-    ```
-    Success: {"result":{"success":true}}
-    ```
-  - Refresh the page (**F5**). You will now be able to **remove Cinemeta** from your addons list.
+For production, use a restart window when active streams are zero.
 
+```bash
+git pull
+docker compose build telegram-stremio
+curl https://your-domain.example/stream/stats
+docker compose up -d telegram-stremio
+```
 
-## 🏅 **Contributor**
+This should restart only the main app container. qBittorrent does not need to restart for normal app updates.
 
-|<img width="80" src="https://avatars.githubusercontent.com/u/113664541">|<img width="80" src="https://avatars.githubusercontent.com/u/13152917">|<img width="80" src="https://avatars.githubusercontent.com/u/14957082">|<img width="80" src="https://raw.githubusercontent.com/vflixa1prime/Readme/main/VFlixPRime.png">|
-|:---:|:---:|:---:|:---:|
-|[`Karan`](https://github.com/Weebzone)|[`Stremio`](https://github.com/Stremio)|[`ChatGPT`](https://github.com/OPENAI)|[`VFlix Prime`](https://t.me/vflixprime2)|
-|Author|Stremio SDK|Refactor|Community Support
+## 📊 Stream Debugging
+
+Use the dashboard and `/stream/stats` to inspect:
+
+- Active stream count.
+- Source type.
+- File name.
+- Request range.
+- Telegram client/DC.
+- Chunk size.
+- TTFB.
+- Timeout and fallback counts.
+- Cooldown state.
+- Error reason.
+
+---
+
+# 🛠️ Troubleshooting
+
+## Metadata Failed
+
+Use clearer filenames with title/year/quality for movies and `SxxEyy` for episodes. For failed items, open `/unmatched`, search the correct metadata, and apply it manually.
+
+## Batch Uploads
+
+Batch uploads are queued and processed one by one. If a file does not index, check `/unmatched` and the bot reply in the Telegram channel.
+
+## Slow Telegram Stream
+
+Try:
+
+- Cloudflare WARP on the viewing device.
+- A different Telegram file/release.
+- A native torrent stream if the torrent has seeders.
+- Download to VPS for stable HTTP playback.
+- Lower `PARALLEL`/`PRE_FETCH` if the VPS is under memory pressure.
+
+## Seeking Goes Back To The Beginning On TV/Mobile
+
+Some MKV files or client/player combinations do not seek well, even when Windows Stremio works. Try another release, VLC/external player, a native torrent stream, or a remuxed copy with proper seek cues.
+
+## Native Torrent Does Not Play
+
+Check seeders, trackers, and client support. Stremio Web may require Stremio Desktop or Stremio Service for torrent playback.
+
+## Download To VPS Fails
+
+Check:
+
+- `TORRENT_DOWNLOADS_ENABLED`.
+- qBittorrent credentials.
+- Free disk space.
+- Download paths and container mounts.
+- qBittorrent logs.
+- Whether the torrent has metadata/seeders.
+
+## Subscription Expired
+
+Check `/admin/access` and `/admin/subscriptions`. Extend the user, approve payment, or disable subscription mode if you want shared/free access.
+
+---
+
+# 🔐 Security Notes
+
+- Never commit `config.env`.
+- Never publish real bot tokens, Telegram API hash, MongoDB URI, admin password, private channel IDs, or SSH keys.
+- Keep qBittorrent WebUI private.
+- Use HTTPS for `BASE_URL`.
+- Keep admin pages protected.
+- Use this project only with media you are allowed to store and stream.
+
+---
+
+# 🏅 Credits / License
+
+This project is a self-hosted Telegram-to-Stremio media server built around FastAPI, MongoDB, PyroFork, Stremio, Docker, and qBittorrent.
+
+See [LICENSE](LICENSE) before redistribution or public hosting.
