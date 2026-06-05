@@ -291,18 +291,8 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
         catalogs = [
             {
                 "type": "movie",
-                "id": "latest_movies",
-                "name": "TG - Latest Movies",
-                "extra": [
-                    {"name": "genre", "isRequired": False, "options": GENRES},
-                    {"name": "skip"}
-                ],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "movie",
                 "id": "top_movies",
-                "name": "TG - Popular Movies",
+                "name": "Popular Movies",
                 "extra": [
                     {"name": "genre", "isRequired": False, "options": GENRES},
                     {"name": "skip"},
@@ -311,9 +301,19 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
                 "extraSupported": ["genre", "skip", "search"]
             },
             {
+                "type": "movie",
+                "id": "latest_movies",
+                "name": "Latest Movies",
+                "extra": [
+                    {"name": "genre", "isRequired": False, "options": GENRES},
+                    {"name": "skip"}
+                ],
+                "extraSupported": ["genre", "skip"]
+            },
+            {
                 "type": "series",
                 "id": "latest_series",
-                "name": "TG - Latest Series",
+                "name": "Latest Series",
                 "extra": [
                     {"name": "genre", "isRequired": False, "options": GENRES},
                     {"name": "skip"}
@@ -323,7 +323,7 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
             {
                 "type": "series",
                 "id": "top_series",
-                "name": "TG - Popular Series",
+                "name": "Popular Series",
                 "extra": [
                     {"name": "genre", "isRequired": False, "options": GENRES},
                     {"name": "skip"},
