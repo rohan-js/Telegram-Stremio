@@ -292,7 +292,7 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
             {
                 "type": "movie",
                 "id": "latest_movies",
-                "name": "Latest",
+                "name": "TG - Latest Movies",
                 "extra": [
                     {"name": "genre", "isRequired": False, "options": GENRES},
                     {"name": "skip"}
@@ -302,7 +302,7 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
             {
                 "type": "movie",
                 "id": "top_movies",
-                "name": "Popular",
+                "name": "TG - Popular Movies",
                 "extra": [
                     {"name": "genre", "isRequired": False, "options": GENRES},
                     {"name": "skip"},
@@ -313,7 +313,7 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
             {
                 "type": "series",
                 "id": "latest_series",
-                "name": "Latest",
+                "name": "TG - Latest Series",
                 "extra": [
                     {"name": "genre", "isRequired": False, "options": GENRES},
                     {"name": "skip"}
@@ -323,7 +323,7 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
             {
                 "type": "series",
                 "id": "top_series",
-                "name": "Popular",
+                "name": "TG - Popular Series",
                 "extra": [
                     {"name": "genre", "isRequired": False, "options": GENRES},
                     {"name": "skip"},
