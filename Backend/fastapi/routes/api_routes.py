@@ -525,7 +525,7 @@ async def search_unmatched_media_api(unmatched_id: str, payload: dict) -> dict:
 
     query = (payload.get("query") or item.get("title") or item.get("file_name") or "").strip()
     media_type = payload.get("media_type") or "movie"
-    year = payload.get("year")
+    year = payload.get("year") or item.get("parsed_year")
 
     if media_type == "tv":
         suggestions = await search_tv_candidates(query)

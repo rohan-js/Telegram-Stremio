@@ -2345,6 +2345,7 @@ class Database:
         """Store a metadata-failed Telegram/torrent item for manual repair."""
         now = datetime.utcnow()
         source_key = job.get("source_key") or f"{job.get('source_type', 'telegram')}:{job.get('chat_id')}:{job.get('msg_id')}:{job.get('item_key', '')}"
+        match_details = job.get("match_details") or {}
         doc = {
             "source_key": source_key,
             "source_type": job.get("source_type", "telegram"),
@@ -2358,7 +2359,13 @@ class Database:
             "override_id": job.get("override_id"),
             "torrent": job.get("torrent"),
             "failure_reason": str(reason or "metadata_failed")[:500],
-            "suggestions": suggestions or [],
+            "suggestions": suggestions or match_details.get("match_candidates") or [],
+            "parsed_title": match_details.get("parsed_title"),
+            "parsed_year": match_details.get("parsed_year"),
+            "parsed_media_type": match_details.get("parsed_media_type"),
+            "match_confidence": match_details.get("match_confidence"),
+            "match_rejection_reason": match_details.get("match_rejection_reason"),
+            "rejected_candidates": match_details.get("match_candidates") or [],
             "status": "open",
             "updated_at": now,
         }

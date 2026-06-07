@@ -10,7 +10,7 @@ from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMa
 from Backend import db
 from Backend.config import Telegram
 from Backend.helper.encrypt import encode_string
-from Backend.helper.metadata import metadata, extract_default_id
+from Backend.helper.metadata import metadata, extract_default_id, pop_match_failure
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
 from Backend.helper.task_manager import edit_message
 from Backend.helper.torrent_source import (
@@ -124,8 +124,15 @@ async def _process_ingest_job(job: dict) -> None:
 
     metadata_info = await _metadata_for_job(job)
     if metadata_info is None:
-        reason = "metadata_failed"
-        await db.upsert_unmatched_media(job, reason)
+        match_details = pop_match_failure(job.get("channel"), job.get("msg_id"))
+        reason = match_details.get("match_rejection_reason") or "metadata_failed"
+        if match_details:
+            job["match_details"] = match_details
+        await db.upsert_unmatched_media(
+            job,
+            reason,
+            suggestions=match_details.get("match_candidates") if match_details else None,
+        )
         await _edit_status(
             job.get("status_chat_id"),
             job.get("status_msg_id"),
@@ -610,6 +617,7 @@ async def file_receive_handler(client: Client, message: Message):
                     "display_name": title,
                     "size": size,
                     "file_size": int(getattr(file, "file_size", 0) or 0),
+                    "override_id": extract_default_id(message.caption) if message.caption else None,
                     "message": message,
                 })
             else:
