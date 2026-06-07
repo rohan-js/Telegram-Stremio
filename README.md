@@ -682,12 +682,12 @@ For production, use a restart window when active streams are zero.
 
 ```bash
 git pull
-docker compose build telegram-stremio
-curl https://your-domain.example/stream/stats
-docker compose up -d telegram-stremio
+chmod +x deploy/safe_deploy.sh
+MANIFEST_URL=https://your-domain.example/stremio/YOUR_TOKEN/manifest.json \
+  ./deploy/safe_deploy.sh
 ```
 
-This should restart only the main app container. qBittorrent does not need to restart for normal app updates.
+The deployment script requires Docker Compose v2, refuses to restart while streams are active, verifies the built and running image IDs, and restarts only the main app container. qBittorrent does not restart for normal app updates.
 
 ## 📊 Stream Debugging
 

@@ -16,7 +16,12 @@ fi
 
 if ! docker compose version >/dev/null 2>&1; then
   sudo apt-get update
-  sudo apt-get install -y docker-compose-plugin || true
+  sudo apt-get install -y docker-compose-plugin
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+  echo "Docker Compose v2 is required." >&2
+  exit 1
 fi
 
 if ! swapon --show | grep -q "^${SWAPFILE}[[:space:]]"; then
@@ -48,7 +53,7 @@ crontab "${tmp_cron}"
 rm -f "${tmp_cron}"
 
 echo "Hardening applied."
-docker compose version 2>/dev/null || docker-compose version 2>/dev/null || true
+docker compose version
 free -h
 swapon --show || true
 cat /proc/sys/vm/swappiness

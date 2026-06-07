@@ -1,6 +1,7 @@
 services:
   telegram-stremio:
     build: .
+    image: telegram-stremio:local
     container_name: tg_stremio  
     depends_on:
       - qbittorrent

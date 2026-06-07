@@ -45,11 +45,8 @@ metric_root_used_pct() {
 }
 
 compose_cmd() {
-  if docker compose version >/dev/null 2>&1; then
-    echo "docker compose"
-  else
-    echo "docker-compose"
-  fi
+  docker compose version >/dev/null 2>&1 || return 1
+  echo "docker compose"
 }
 
 container_state() {
@@ -193,9 +190,12 @@ if [ -n "${RESTART_REASON}" ]; then
     log_line "restarting" "reason=${RESTART_REASON}"
     docker restart "${CONTAINER}" >/dev/null || true
   else
-    COMPOSE_CMD=$(compose_cmd)
-    log_line "recreating" "reason=${RESTART_REASON} compose=${COMPOSE_CMD// /_}"
-    (cd "${APP_DIR}" && ${COMPOSE_CMD} up -d --no-build --remove-orphans) || true
+    if COMPOSE_CMD=$(compose_cmd); then
+      log_line "recreating" "reason=${RESTART_REASON} compose=${COMPOSE_CMD// /_}"
+      (cd "${APP_DIR}" && ${COMPOSE_CMD} up -d --no-build --remove-orphans) || true
+    else
+      log_line "recreate_failed" "reason=${RESTART_REASON} docker_compose_v2=missing"
+    fi
   fi
 fi
 
