@@ -2,6 +2,7 @@ import httpx
 import re
 import asyncio
 from typing import Optional, Dict, Any
+from urllib.parse import quote
 
 BASE_URL = "https://v3-cinemeta.strem.io"
 
@@ -27,25 +28,35 @@ def extract_first_year(year_string) -> int:
         return int(year_match.group(1))
     return 0
 
-async def search_title(query: str, type: str) -> Optional[Dict[str, Any]]:
+async def search_titles(query: str, type: str, limit: int = 8) -> list[Dict[str, Any]]:
     client = await _get_client()
     cinemeta_type = "series" if type == "tvSeries" else type
-    url = f"{BASE_URL}/catalog/{cinemeta_type}/imdb/search={query}.json"
+    url = f"{BASE_URL}/catalog/{cinemeta_type}/imdb/search={quote(str(query or '').strip())}.json"
     try:
         resp = await client.get(url)
         if resp.status_code != 200:
-            return None
+            return []
         data = resp.json()
         if data and 'metas' in data and data['metas']:
-            meta = data['metas'][0]
-            return {
-                'id': meta.get('imdb_id', meta.get('id', '')),
-                'type': type,
-                'title': meta.get('name', ''),
-                'year': meta.get('releaseInfo', ''),
-                'poster': meta.get('poster', '')
-            }
-        return None
+            out = []
+            for meta in data['metas'][:limit]:
+                out.append({
+                    'id': meta.get('imdb_id', meta.get('id', '')),
+                    'type': type,
+                    'title': meta.get('name', ''),
+                    'year': meta.get('releaseInfo', ''),
+                    'poster': meta.get('poster', ''),
+                    'moviedb_id': meta.get('moviedb_id'),
+                })
+            return out
+        return []
+    except Exception:
+        return []
+
+async def search_title(query: str, type: str) -> Optional[Dict[str, Any]]:
+    try:
+        results = await search_titles(query=query, type=type, limit=1)
+        return results[0] if results else None
     except Exception:
         return None
 

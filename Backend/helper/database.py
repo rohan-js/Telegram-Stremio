@@ -1044,6 +1044,52 @@ class Database:
             and self._source_type(existing_quality) == self._source_type(new_quality)
         )
 
+    def _source_identity_key(self, quality: dict) -> Optional[str]:
+        source_type = self._source_type(quality)
+
+        if source_type == "torrent":
+            info_hash = str(quality.get("info_hash") or "").lower()
+            if info_hash:
+                return f"torrent:{info_hash}:{quality.get('file_idx')}"
+
+        if source_type == "telegram":
+            encoded_id = quality.get("id")
+            if encoded_id:
+                return f"telegram:{encoded_id}"
+
+        if quality.get("origin_chat_id") and quality.get("origin_msg_id"):
+            return f"{source_type}:origin:{quality.get('origin_chat_id')}:{quality.get('origin_msg_id')}"
+
+        return None
+
+    def _same_source_identity(self, existing_quality: dict, new_quality: dict) -> bool:
+        existing_key = self._source_identity_key(existing_quality)
+        new_key = self._source_identity_key(new_quality)
+        return bool(existing_key and new_key and existing_key == new_key)
+
+    def _merge_exact_source_quality(self, existing_quality: dict, new_quality: dict) -> dict:
+        merged = dict(new_quality)
+        for key in ("hidden_from_stremio", "recommended", "flagged_duplicate"):
+            if existing_quality.get(key) and not merged.get(key):
+                merged[key] = existing_quality.get(key)
+        if existing_quality.get("quality_note") and not merged.get("quality_note"):
+            merged["quality_note"] = existing_quality.get("quality_note")
+        return merged
+
+    def _replace_exact_source_quality(self, qualities: list, new_quality: dict) -> Tuple[list, bool]:
+        replaced = False
+        updated = []
+
+        for quality in qualities:
+            if self._same_source_identity(quality, new_quality):
+                if not replaced:
+                    updated.append(self._merge_exact_source_quality(quality, new_quality))
+                    replaced = True
+                continue
+            updated.append(quality)
+
+        return updated, replaced
+
     def _should_delete_telegram_source(self, quality: dict) -> bool:
         return self._source_type(quality) == "telegram" and bool(quality.get("id"))
 
@@ -1119,7 +1165,14 @@ class Database:
         movie_id = existing_movie["_id"]
         existing_qualities = existing_movie.get("telegram", [])
 
-        if Telegram.REPLACE_MODE:
+        existing_qualities, exact_source_replaced = self._replace_exact_source_quality(
+            existing_qualities,
+            quality_to_update,
+        )
+
+        if exact_source_replaced:
+            pass
+        elif Telegram.REPLACE_MODE:
             to_delete = [q for q in existing_qualities if self._same_replace_group(q, quality_to_update)]
 
             for q in to_delete:
@@ -1234,7 +1287,13 @@ class Database:
 
                 for quality in episode["telegram"]:
                     target_quality = quality.get("quality")
+                    existing_episode["telegram"], exact_source_replaced = self._replace_exact_source_quality(
+                        existing_episode["telegram"],
+                        quality,
+                    )
 
+                    if exact_source_replaced:
+                        continue
                     if Telegram.REPLACE_MODE:
                         to_delete = [
                             q for q in existing_episode["telegram"]
@@ -2363,6 +2422,7 @@ class Database:
             "parsed_title": match_details.get("parsed_title"),
             "parsed_year": match_details.get("parsed_year"),
             "parsed_media_type": match_details.get("parsed_media_type"),
+            "search_variants": match_details.get("search_variants") or [],
             "match_confidence": match_details.get("match_confidence"),
             "match_rejection_reason": match_details.get("match_rejection_reason"),
             "rejected_candidates": match_details.get("match_candidates") or [],

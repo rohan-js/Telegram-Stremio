@@ -20,6 +20,12 @@ NOISE_WORDS = {
     "mkv", "mp4", "avi", "webm", "mov", "flv", "wmv", "m4v",
 }
 
+RELEASE_SITE_WORDS = {
+    "www", "com", "org", "net", "in", "cc", "cards", "card", "site",
+    "1tamilmv", "tamilmv", "tamilmvbiz", "1tamilblasters", "tamilblasters",
+    "moviesda", "isaimini", "tamilrockers", "movierulz", "telegram",
+}
+
 GENERIC_TITLES = {
     "patriot", "war", "master", "hero", "leo", "animal", "jawan", "king",
     "queen", "love", "life", "ghost", "beast", "vikram", "don", "boss",
@@ -32,6 +38,7 @@ class MatchIntent:
     clean_title: str
     year: int | None
     media_type: str
+    title_variants: list[str] | None = None
     season: int | None = None
     episode: int | None = None
     season_pack: bool = False
@@ -80,6 +87,62 @@ def normalize_title(value: str | None) -> str:
     return " ".join(words).strip()
 
 
+def _tokenize_title(value: str | None) -> list[str]:
+    text = (value or "").lower()
+    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"[\._\-+\[\]\(\)\{\}:;,/\\|]+", " ", text)
+    return re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)?", text)
+
+
+def _drop_release_site_prefix(tokens: list[str]) -> list[str]:
+    out = list(tokens)
+    while out and (out[0] in RELEASE_SITE_WORDS or re.fullmatch(r"\d*tamilmv\d*", out[0] or "")):
+        out.pop(0)
+    return out
+
+
+def _variant_from_tokens(tokens: list[str]) -> str:
+    return normalize_title(" ".join(_drop_release_site_prefix(tokens)))
+
+
+def build_title_variants(raw_title: str | None, parsed_title: str | None = None, year: int | None = None, site: str | None = None) -> list[str]:
+    variants: list[str] = []
+
+    def add(value: str | None) -> None:
+        normalized = normalize_title(value)
+        if normalized and normalized not in variants:
+            variants.append(normalized)
+
+    def add_tokens(tokens: list[str]) -> None:
+        normalized = _variant_from_tokens(tokens)
+        if normalized and normalized not in variants:
+            variants.append(normalized)
+
+    if parsed_title:
+        add_tokens(_tokenize_title(parsed_title))
+        add(parsed_title)
+
+    raw_tokens = _tokenize_title(raw_title)
+    if raw_tokens:
+        year_index = None
+        for idx, token in enumerate(raw_tokens):
+            if token == str(year) or re.fullmatch(r"(?:19|20)\d{2}", token):
+                year_index = idx
+                break
+        if year_index is not None:
+            before_year = raw_tokens[:year_index]
+            add_tokens(before_year)
+            for start in range(len(before_year)):
+                add_tokens(before_year[start:])
+
+        add_tokens(raw_tokens)
+        if site:
+            site_tokens = set(_tokenize_title(site))
+            add_tokens([token for token in raw_tokens if token not in site_tokens])
+
+    return variants
+
+
 def title_similarity(left: str | None, right: str | None) -> float:
     left_norm = normalize_title(left)
     right_norm = normalize_title(right)
@@ -88,6 +151,11 @@ def title_similarity(left: str | None, right: str | None) -> float:
     if left_norm == right_norm:
         return 100.0
     if fuzz:
+        if len(left_norm.split()) <= 1 or len(right_norm.split()) <= 1:
+            return float(max(
+                fuzz.ratio(left_norm, right_norm),
+                fuzz.token_sort_ratio(left_norm, right_norm),
+            ))
         return float(max(
             fuzz.ratio(left_norm, right_norm),
             fuzz.token_sort_ratio(left_norm, right_norm),
@@ -148,7 +216,8 @@ def choose_best_candidate(intent: MatchIntent, candidates: list[MatchCandidate])
         reason = None
         if candidate.media_type != intent.media_type:
             reason = "metadata_media_type_mismatch"
-        title_score = title_similarity(intent.clean_title or intent.raw_title, candidate.title)
+        variants = intent.title_variants or [intent.clean_title or intent.raw_title]
+        title_score = max(title_similarity(variant, candidate.title) for variant in variants)
         year_bonus, year_reason = _year_score(intent.year, candidate.year)
         if year_reason:
             reason = year_reason
@@ -202,6 +271,7 @@ def decision_metadata(decision: MatchDecision, intent: MatchIntent) -> dict:
         "parsed_title": intent.clean_title,
         "parsed_year": intent.year,
         "parsed_media_type": intent.media_type,
+        "search_variants": intent.title_variants or [intent.clean_title],
         "match_confidence": round(decision.confidence, 2),
         "match_rejection_reason": None if decision.accepted else decision.reason,
         "match_candidates": decision.candidates,

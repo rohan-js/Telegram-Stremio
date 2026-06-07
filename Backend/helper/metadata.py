@@ -3,7 +3,7 @@ import traceback
 import PTN
 import re
 from re import compile, IGNORECASE
-from Backend.helper.imdb import get_detail, get_season, search_title
+from Backend.helper.imdb import get_detail, get_season, search_title, search_titles
 from themoviedb import aioTMDb
 from Backend.config import Telegram
 import Backend
@@ -12,6 +12,7 @@ from Backend.helper.encrypt import encode_string
 from Backend.helper.metadata_matcher import (
     MatchCandidate,
     MatchIntent,
+    build_title_variants,
     choose_best_candidate,
     decision_metadata,
     normalize_title,
@@ -190,92 +191,168 @@ def _imdb_candidate(result: dict | None, media_type: str) -> MatchCandidate | No
     )
 
 
-async def _movie_candidates(title: str, year=None, limit: int = 8) -> list[MatchCandidate]:
+def _dedupe_candidates(candidates: list[MatchCandidate]) -> list[MatchCandidate]:
+    out: list[MatchCandidate] = []
+    seen: set[tuple[str, str]] = set()
+    for candidate in candidates:
+        if candidate.imdb_id:
+            key = ("imdb", str(candidate.imdb_id))
+        elif candidate.tmdb_id:
+            key = ("tmdb", str(candidate.tmdb_id))
+        else:
+            key = (candidate.media_type, f"{normalize_title(candidate.title)}::{candidate.year}")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(candidate)
+    return out
+
+
+async def _database_candidates(variants: list[str], media_type: str, year=None, limit: int = 8) -> list[MatchCandidate]:
     candidates: list[MatchCandidate] = []
     try:
-        async with API_SEMAPHORE:
-            imdb_result = await search_title(query=f"{title} {year}" if year else title, type="movie")
-        imdb_candidate = _imdb_candidate(imdb_result, "movie")
-        if imdb_candidate:
-            candidates.append(imdb_candidate)
+        if not getattr(Backend.db, "dbs", None):
+            return []
+        collection = "movie" if media_type == "movie" else "tv"
+        for db_key in sorted(k for k in Backend.db.dbs if k.startswith("storage_")):
+            db = Backend.db.dbs[db_key]
+            for variant in variants:
+                if not variant:
+                    continue
+                query = {"title": {"$regex": f"^{re.escape(variant)}$", "$options": "i"}}
+                if year:
+                    query["release_year"] = int(year)
+                async for doc in db[collection].find(query).limit(limit):
+                    candidates.append(MatchCandidate(
+                        source="database",
+                        title=doc.get("title") or "",
+                        year=_safe_year(doc.get("release_year")),
+                        media_type=media_type,
+                        imdb_id=doc.get("imdb_id"),
+                        tmdb_id=doc.get("tmdb_id"),
+                        popularity=20.0,
+                        raw={"db_key": db_key, "db_index": doc.get("db_index")},
+                    ))
+                if len(candidates) >= limit:
+                    return candidates[:limit]
     except Exception as e:
-        LOGGER.warning(f"IMDb movie candidate lookup failed for '{title}': {e}")
-
-    try:
-        async with API_SEMAPHORE:
-            tmdb_results = await tmdb.search().movies(query=title, year=year) if year else await tmdb.search().movies(query=title)
-        for item in (tmdb_results or [])[:limit]:
-            tmdb_id = getattr(item, "id", None)
-            if not tmdb_id:
-                continue
-            candidates.append(MatchCandidate(
-                source="tmdb",
-                title=getattr(item, "title", "") or "",
-                year=_tmdb_year(item, "release_date"),
-                media_type="movie",
-                tmdb_id=tmdb_id,
-                popularity=float(getattr(item, "popularity", 0.0) or 0.0),
-                raw=item,
-            ))
-    except Exception as e:
-        LOGGER.warning(f"TMDb movie candidate lookup failed for '{title}': {e}")
-    return candidates
+        LOGGER.debug(f"Database metadata candidate lookup failed: {e}")
+    return candidates[:limit]
 
 
-async def _tv_candidates(title: str, year=None, limit: int = 8) -> list[MatchCandidate]:
+async def _movie_candidates(variants: list[str], year=None, limit: int = 8) -> list[MatchCandidate]:
     candidates: list[MatchCandidate] = []
-    try:
-        async with API_SEMAPHORE:
-            imdb_result = await search_title(query=f"{title} {year}" if year else title, type="tvSeries")
-        imdb_candidate = _imdb_candidate(imdb_result, "tv")
-        if imdb_candidate:
-            candidates.append(imdb_candidate)
-    except Exception as e:
-        LOGGER.warning(f"IMDb TV candidate lookup failed for '{title}': {e}")
+    candidates.extend(await _database_candidates(variants, "movie", year, limit=limit))
 
-    try:
-        async with API_SEMAPHORE:
-            tmdb_results = await tmdb.search().tv(query=title)
-        for item in (tmdb_results or [])[:limit]:
-            tmdb_id = getattr(item, "id", None)
-            if not tmdb_id:
-                continue
-            candidates.append(MatchCandidate(
-                source="tmdb",
-                title=getattr(item, "name", "") or "",
-                year=_tmdb_year(item, "first_air_date"),
-                media_type="tv",
-                tmdb_id=tmdb_id,
-                popularity=float(getattr(item, "popularity", 0.0) or 0.0),
-                raw=item,
-            ))
-    except Exception as e:
-        LOGGER.warning(f"TMDb TV candidate lookup failed for '{title}': {e}")
-    return candidates
+    for title in variants:
+        try:
+            async with API_SEMAPHORE:
+                imdb_results = await search_titles(query=title, type="movie", limit=limit)
+            for result in imdb_results:
+                imdb_candidate = _imdb_candidate(result, "movie")
+                if imdb_candidate:
+                    candidates.append(imdb_candidate)
+        except Exception as e:
+            LOGGER.warning(f"IMDb movie candidate lookup failed for '{title}': {e}")
+
+        try:
+            async with API_SEMAPHORE:
+                tmdb_results = await tmdb.search().movies(query=title, year=year) if year else await tmdb.search().movies(query=title)
+            if not tmdb_results and year:
+                async with API_SEMAPHORE:
+                    tmdb_results = await tmdb.search().movies(query=title)
+            for item in (tmdb_results or [])[:limit]:
+                tmdb_id = getattr(item, "id", None)
+                if not tmdb_id:
+                    continue
+                candidates.append(MatchCandidate(
+                    source="tmdb",
+                    title=getattr(item, "title", "") or "",
+                    year=_tmdb_year(item, "release_date"),
+                    media_type="movie",
+                    tmdb_id=tmdb_id,
+                    popularity=float(getattr(item, "popularity", 0.0) or 0.0),
+                    raw=item,
+                ))
+        except Exception as e:
+            LOGGER.warning(f"TMDb movie candidate lookup failed for '{title}': {e}")
+    return _dedupe_candidates(candidates)
 
 
-async def resolve_movie_match(title: str, year=None) -> tuple[MatchCandidate | None, dict]:
+async def _tv_candidates(variants: list[str], year=None, limit: int = 8) -> list[MatchCandidate]:
+    candidates: list[MatchCandidate] = []
+    candidates.extend(await _database_candidates(variants, "tv", year, limit=limit))
+
+    for title in variants:
+        try:
+            async with API_SEMAPHORE:
+                imdb_results = await search_titles(query=title, type="tvSeries", limit=limit)
+            for result in imdb_results:
+                imdb_candidate = _imdb_candidate(result, "tv")
+                if imdb_candidate:
+                    candidates.append(imdb_candidate)
+        except Exception as e:
+            LOGGER.warning(f"IMDb TV candidate lookup failed for '{title}': {e}")
+
+        try:
+            async with API_SEMAPHORE:
+                tmdb_results = await tmdb.search().tv(query=title)
+            for item in (tmdb_results or [])[:limit]:
+                tmdb_id = getattr(item, "id", None)
+                if not tmdb_id:
+                    continue
+                candidates.append(MatchCandidate(
+                    source="tmdb",
+                    title=getattr(item, "name", "") or "",
+                    year=_tmdb_year(item, "first_air_date"),
+                    media_type="tv",
+                    tmdb_id=tmdb_id,
+                    popularity=float(getattr(item, "popularity", 0.0) or 0.0),
+                    raw=item,
+                ))
+        except Exception as e:
+            LOGGER.warning(f"TMDb TV candidate lookup failed for '{title}': {e}")
+    return _dedupe_candidates(candidates)
+
+
+async def resolve_movie_match(title: str, year=None, raw_title: str | None = None, parsed: dict | None = None) -> tuple[MatchCandidate | None, dict]:
+    variants = build_title_variants(
+        raw_title=raw_title or title,
+        parsed_title=title,
+        year=_safe_year(year),
+        site=(parsed or {}).get("site"),
+    )
+    variants = variants or [normalize_title(title)]
     intent = MatchIntent(
         raw_title=title,
-        clean_title=normalize_title(title),
+        clean_title=variants[0],
         year=_safe_year(year),
         media_type="movie",
+        title_variants=variants,
     )
-    decision = choose_best_candidate(intent, await _movie_candidates(title, year))
+    decision = choose_best_candidate(intent, await _movie_candidates(variants, year))
     return decision.candidate if decision.accepted else None, decision_metadata(decision, intent)
 
 
-async def resolve_tv_match(title: str, season=None, episode=None, year=None, season_pack: bool = False) -> tuple[MatchCandidate | None, dict]:
+async def resolve_tv_match(title: str, season=None, episode=None, year=None, season_pack: bool = False, raw_title: str | None = None, parsed: dict | None = None) -> tuple[MatchCandidate | None, dict]:
+    variants = build_title_variants(
+        raw_title=raw_title or title,
+        parsed_title=title,
+        year=_safe_year(year),
+        site=(parsed or {}).get("site"),
+    )
+    variants = variants or [normalize_title(title)]
     intent = MatchIntent(
         raw_title=title,
-        clean_title=normalize_title(title),
+        clean_title=variants[0],
         year=_safe_year(year),
         media_type="tv",
+        title_variants=variants,
         season=season,
         episode=episode,
         season_pack=season_pack,
     )
-    decision = choose_best_candidate(intent, await _tv_candidates(title, year))
+    decision = choose_best_candidate(intent, await _tv_candidates(variants, year))
     return decision.candidate if decision.accepted else None, decision_metadata(decision, intent)
 
 
@@ -475,7 +552,7 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         if season and episode:
             LOGGER.info(f"Fetching TV metadata: {title} S{season}E{episode}")
             if not explicit_default_id and not default_id:
-                candidate, match_details = await resolve_tv_match(title, season, episode, year)
+                candidate, match_details = await resolve_tv_match(title, season, episode, year, raw_title=filename, parsed=parsed)
                 if not candidate:
                     set_match_failure(channel, msg_id, match_details)
                     LOGGER.warning(f"Strict TV metadata match rejected for {filename}: {match_details.get('match_rejection_reason')}")
@@ -485,7 +562,7 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         elif season:
             LOGGER.info(f"Fetching TV season-pack metadata: {title} S{season}")
             if not explicit_default_id and not default_id:
-                candidate, match_details = await resolve_tv_match(title, season, None, year, season_pack=True)
+                candidate, match_details = await resolve_tv_match(title, season, None, year, season_pack=True, raw_title=filename, parsed=parsed)
                 if not candidate:
                     set_match_failure(channel, msg_id, match_details)
                     LOGGER.warning(f"Strict TV season-pack metadata match rejected for {filename}: {match_details.get('match_rejection_reason')}")
@@ -495,7 +572,7 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         else:
             LOGGER.info(f"Fetching Movie metadata: {title} ({year})")
             if not explicit_default_id and not default_id:
-                candidate, match_details = await resolve_movie_match(title, year)
+                candidate, match_details = await resolve_movie_match(title, year, raw_title=filename, parsed=parsed)
                 if not candidate:
                     set_match_failure(channel, msg_id, match_details)
                     LOGGER.warning(f"Strict movie metadata match rejected for {filename}: {match_details.get('match_rejection_reason')}")

@@ -133,15 +133,10 @@ async def _process_ingest_job(job: dict) -> None:
             reason,
             suggestions=match_details.get("match_candidates") if match_details else None,
         )
-        await _edit_status(
+        await _delete_status(
             job.get("status_chat_id"),
             job.get("status_msg_id"),
-            _format_queue_status("failed", title, reason=reason),
         )
-        if job.get("source_type") == "torrent":
-            await job["message"].reply_text(TORRENT_METADATA_FAILED_TEXT)
-        else:
-            await job["message"].reply_text(METADATA_FAILED_TEXT)
         LOGGER.warning(f"Metadata failed for queued {job.get('source_type')} item: {title} (ID: {job.get('msg_id')})")
         return
 
@@ -551,7 +546,7 @@ async def _handle_torrent_message(client: Client, message: Message) -> bool:
             queued += 1
 
     if queued == 0:
-        await message.reply_text(TORRENT_METADATA_FAILED_TEXT)
+        LOGGER.warning(f"No supported torrent video items found in message {message.id}.")
         return True
 
     LOGGER.info(f"Queued {queued} torrent stream(s) from message {message.id}.")
