@@ -253,6 +253,11 @@ async def send_reply_messages():
                 vlc_page = None
 
             rating_str = f"⭐ {rating}" if rating else ""
+            detail_line = " | ".join(
+                str(part)
+                for part in (rating_str, quality, size)
+                if part
+            )
             if source_type == "torrent":
                 help_note = "🧲 Torrent stream. Playback speed depends on seeders/peers.\n\n"
                 stream_note = ""
@@ -275,9 +280,7 @@ async def send_reply_messages():
                         f"{f' ({year})' if year else ''}\n"
                         f"📺 Season {season:02d} Pack"
                         f"{f' | {episode_count} episodes' if episode_count else ''}\n"
-                        f"{rating_str}"
-                        f"{f' | {quality}' if quality else ''}"
-                        f" | {size}\n\n"
+                        f"{detail_line}\n\n"
                         f"{help_note}"
                         f"{stream_note}"
                     )
@@ -287,9 +290,7 @@ async def send_reply_messages():
                         f"{f' ({year})' if year else ''}\n"
                         f"📺 S{season:02d}E{episode:02d}"
                         f"{f' - {ep_title}' if ep_title else ''}\n"
-                        f"{rating_str}"
-                        f"{f' | {quality}' if quality else ''}"
-                        f" | {size}\n\n"
+                        f"{detail_line}\n\n"
                         f"{help_note}"
                         f"{stream_note}"
                     )
@@ -297,9 +298,7 @@ async def send_reply_messages():
                 reply_text = (
                     f"🎬 <b>{movie_title}</b>"
                     f"{f' ({year})' if year else ''}\n"
-                    f"{rating_str}"
-                    f"{f' | {quality}' if quality else ''}"
-                    f" | {size}\n\n"
+                    f"{detail_line}\n\n"
                     f"{help_note}"
                     f"{stream_note}"
                 )
