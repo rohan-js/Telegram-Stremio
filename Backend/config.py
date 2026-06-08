@@ -78,10 +78,6 @@ class Telegram:
         if code.strip()
     ] or ["IN"]
     try:
-        IPTV_CHANNEL_LIMIT = max(0, int(getenv("IPTV_CHANNEL_LIMIT", "100") or 100))
-    except Exception:
-        IPTV_CHANNEL_LIMIT = 100
-    try:
         IPTV_PAGE_SIZE = max(1, min(100, int(getenv("IPTV_PAGE_SIZE", "50") or 50)))
     except Exception:
         IPTV_PAGE_SIZE = 50

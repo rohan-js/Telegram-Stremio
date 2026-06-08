@@ -8,8 +8,11 @@ from Backend.helper.iptv import (
     IPTV_CATALOG_ID,
     build_iptv_streams,
     channel_is_eligible,
+    get_iptv_settings,
     iptv_meta,
     sign_proxy_target,
+    sync_iptv_data,
+    update_iptv_settings,
     verify_proxy_target,
 )
 
@@ -118,6 +121,173 @@ class IptvHelperTests(unittest.TestCase):
         self.assertEqual(meta["id"], "iptv:News.in")
         self.assertEqual(meta["type"], "tv")
         self.assertEqual(meta["genres"], ["News"])
+
+
+class _AsyncCursor:
+    def __init__(self, items):
+        self.items = list(items)
+
+    def __aiter__(self):
+        self.index = 0
+        return self
+
+    async def __anext__(self):
+        if self.index >= len(self.items):
+            raise StopAsyncIteration
+        item = self.items[self.index]
+        self.index += 1
+        return item
+
+
+class _StateCollection:
+    def __init__(self, initial=None):
+        self.docs = dict(initial or {})
+        self.last_update = None
+
+    async def find_one(self, query):
+        return self.docs.get(query.get("_id"))
+
+    async def update_one(self, query, update, upsert=False):
+        self.last_update = update
+        doc = dict(self.docs.get(query.get("_id")) or {"_id": query.get("_id")})
+        doc.update(update.get("$set") or {})
+        for key in update.get("$unset") or {}:
+            doc.pop(key, None)
+        self.docs[query.get("_id")] = doc
+
+
+class _IptvCollection:
+    def __init__(self):
+        self.docs = {}
+        self.bulk_count = 0
+
+    def find(self, query=None, projection=None):
+        hidden_docs = [doc for doc in self.docs.values() if doc.get("hidden")]
+        return _AsyncCursor(hidden_docs)
+
+    async def bulk_write(self, operations, ordered=False):
+        self.bulk_count = len(operations)
+        for operation in operations:
+            self.docs[operation._filter["_id"]] = operation._doc
+
+    async def delete_many(self, query):
+        sync_id = (query.get("sync_id") or {}).get("$ne")
+        if sync_id:
+            self.docs = {
+                key: value
+                for key, value in self.docs.items()
+                if value.get("sync_id") == sync_id
+            }
+
+    async def create_index(self, *args, **kwargs):
+        return None
+
+    async def count_documents(self, query):
+        if query.get("hidden", {}).get("$ne") is True:
+            return len([doc for doc in self.docs.values() if not doc.get("hidden")])
+        return len(self.docs)
+
+
+class _IptvDb:
+    def __init__(self, state_initial=None):
+        self.state = _StateCollection(state_initial)
+        self.iptv_channels = _IptvCollection()
+        self.dbs = {
+            "tracking": {
+                "state": self.state,
+                "iptv_channels": self.iptv_channels,
+            }
+        }
+
+
+class _StreamsResponse:
+    status_code = 200
+    headers = {"etag": "test-etag", "last-modified": "today"}
+
+    def __init__(self, streams):
+        self.streams = streams
+
+    def json(self):
+        return self.streams
+
+    def raise_for_status(self):
+        return None
+
+
+class _HttpClient:
+    def __init__(self, streams):
+        self.streams = streams
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url, headers=None):
+        return _StreamsResponse(self.streams)
+
+
+class IptvUnlimitedTests(unittest.IsolatedAsyncioTestCase):
+    async def test_settings_ignore_and_unset_legacy_channel_limit(self):
+        db = _IptvDb({"iptv_settings": {"_id": "iptv_settings", "enabled": True, "channel_limit": 100}})
+
+        settings = await get_iptv_settings(db)
+        self.assertEqual(settings["channel_limit"], 0)
+        self.assertTrue(settings["unlimited"])
+
+        updated = await update_iptv_settings(db, {"enabled": True, "channel_limit": 100})
+        self.assertEqual(updated["channel_limit"], 0)
+        self.assertIn("channel_limit", db.state.last_update.get("$unset", {}))
+        self.assertNotIn("channel_limit", db.state.docs["iptv_settings"])
+
+    async def test_sync_keeps_all_playable_indian_channels_above_old_pilot_cap(self):
+        channel_count = 125
+        channels = [
+            {
+                "id": f"Channel{i}.in",
+                "name": f"Channel {i}",
+                "country": "IN",
+                "categories": ["news"],
+                "is_nsfw": False,
+                "closed": None,
+                "replaced_by": None,
+            }
+            for i in range(channel_count)
+        ]
+        streams = [
+            {
+                "channel": f"Channel{i}.in",
+                "feed": None,
+                "title": "",
+                "url": f"https://example.test/{i}.m3u8",
+                "quality": "720p",
+            }
+            for i in range(channel_count)
+        ]
+
+        async def fake_fetch_json(client, dataset):
+            return {
+                "channels": channels,
+                "blocklist": [],
+                "feeds": [],
+                "logos": [],
+                "categories": [{"id": "news", "name": "News"}],
+                "languages": [],
+                "countries": [{"code": "IN", "name": "India", "flag": "IN"}],
+            }[dataset]
+
+        db = _IptvDb({"iptv_settings": {"_id": "iptv_settings", "enabled": True, "channel_limit": 100}})
+        with (
+            patch("Backend.helper.iptv._fetch_json", fake_fetch_json),
+            patch("Backend.helper.iptv.httpx.AsyncClient", lambda *args, **kwargs: _HttpClient(streams)),
+        ):
+            result = await sync_iptv_data(db, force=True)
+
+        self.assertEqual(result["counts"]["selected_channels"], channel_count)
+        self.assertEqual(result["counts"]["source_country_channels"], channel_count)
+        self.assertEqual(result["counts"]["playable_country_channels"], channel_count)
+        self.assertEqual(db.iptv_channels.bulk_count, channel_count)
 
 
 class _DistinctCollection:

@@ -136,15 +136,11 @@ def _channel_description(channel: dict, feeds: List[dict], country_name: str) ->
 async def get_iptv_settings(db) -> dict:
     state = await db.dbs["tracking"]["state"].find_one({"_id": IPTV_SETTINGS_ID}) or {}
     enabled = state.get("enabled")
-    channel_limit = state.get("channel_limit")
     return {
         "enabled": Telegram.IPTV_ENABLED if enabled is None else bool(enabled),
         "country_codes": list(Telegram.IPTV_COUNTRY_CODES),
-        "channel_limit": (
-            int(Telegram.IPTV_CHANNEL_LIMIT)
-            if channel_limit is None
-            else max(0, int(channel_limit))
-        ),
+        "channel_limit": 0,
+        "unlimited": True,
         "auto_sync": bool(Telegram.IPTV_AUTO_SYNC),
         "sync_interval_minutes": int(Telegram.IPTV_SYNC_INTERVAL_MINUTES),
         "proxy_fallback_enabled": bool(Telegram.IPTV_PROXY_FALLBACK_ENABLED),
@@ -156,14 +152,9 @@ async def update_iptv_settings(db, payload: dict) -> dict:
     update = {"updated_at": _utcnow()}
     if "enabled" in payload:
         update["enabled"] = bool(payload.get("enabled"))
-    if "channel_limit" in payload:
-        try:
-            update["channel_limit"] = max(0, min(5000, int(payload.get("channel_limit") or 0)))
-        except (TypeError, ValueError):
-            raise ValueError("channel_limit must be a non-negative integer")
     await db.dbs["tracking"]["state"].update_one(
         {"_id": IPTV_SETTINGS_ID},
-        {"$set": update},
+        {"$set": update, "$unset": {"channel_limit": ""}},
         upsert=True,
     )
     return await get_iptv_settings(db)
@@ -272,11 +263,12 @@ async def sync_iptv_data(db, force: bool = False) -> dict:
                     if item.get("channel")
                 }
 
-                channels = {
+                eligible_channels = {
                     str(item["id"]): item
                     for item in channels_raw
                     if channel_is_eligible(item, country_codes, blocked_ids)
                 }
+                channels = dict(eligible_channels)
                 channel_ids = set(channels)
 
                 streams = [
@@ -444,9 +436,6 @@ async def sync_iptv_data(db, force: bool = False) -> dict:
                 ),
                 reverse=True,
             )
-            channel_limit = int(settings["channel_limit"])
-            if channel_limit > 0:
-                documents = documents[:channel_limit]
             documents.sort(key=lambda item: item.get("name", "").lower())
 
             collection = db.dbs["tracking"]["iptv_channels"]
@@ -474,13 +463,17 @@ async def sync_iptv_data(db, force: bool = False) -> dict:
             )
             completed = _utcnow()
             counts = {
-                "source_channels": len(channels),
+                "source_country_channels": len(eligible_channels),
+                "playable_country_channels": len(channels),
+                "source_channels": len(eligible_channels),
                 "source_streams": len(streams),
                 "selected_channels": len(documents),
                 "selected_streams": direct_streams + header_streams,
                 "direct_streams": direct_streams,
                 "header_streams": header_streams,
                 "blocked_channels": len(blocked_ids),
+                "channel_limit": 0,
+                "unlimited": True,
             }
             await state_collection.update_one(
                 {"_id": IPTV_STATE_ID},

@@ -75,13 +75,10 @@
                     </span>
                     <input id="setting-enabled" type="checkbox" class="w-5 h-5 accent-[var(--primary)]">
                 </label>
-                <label class="block">
-                    <span class="block text-sm font-bold text-text mb-2">Pilot channel limit</span>
-                    <input id="setting-limit" type="number" min="0" max="5000"
-                        class="w-full rounded-2xl border border-white/10 bg-black/10 px-4 py-3 text-text outline-none focus:border-primary"
-                        placeholder="100">
-                    <span class="block text-xs text-text-secondary mt-2">Use 0 for every available Indian channel. A resync applies changes.</span>
-                </label>
+                <div class="rounded-2xl border border-primary/15 bg-primary/5 p-4 text-xs text-text-secondary space-y-2">
+                    <p class="font-bold text-text">Unlimited India catalog</p>
+                    <p>All playable Indian channels are indexed. Hidden, blocklisted, closed, NSFW, replaced, and unplayable channels are excluded.</p>
+                </div>
                 <div class="rounded-2xl border border-white/5 bg-white/[0.03] p-4 text-xs text-text-secondary space-y-2">
                     <p><span class="font-bold text-text">Country:</span> India (IN)</p>
                     <p><span class="font-bold text-text">Refresh:</span> Every 6 hours</p>
@@ -106,6 +103,14 @@
                 <div class="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
                     <p class="text-[10px] uppercase tracking-widest text-text-secondary font-bold">Hidden Channels</p>
                     <p id="hidden-count" class="mt-2 font-bold text-text">0</p>
+                </div>
+                <div class="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                    <p class="text-[10px] uppercase tracking-widest text-text-secondary font-bold">Eligible India Channels</p>
+                    <p id="source-channel-count" class="mt-2 font-bold text-text">0</p>
+                </div>
+                <div class="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                    <p class="text-[10px] uppercase tracking-widest text-text-secondary font-bold">Playable India Channels</p>
+                    <p id="playable-channel-count" class="mt-2 font-bold text-text">0</p>
                 </div>
             </div>
             <div id="sync-error" class="hidden mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200"></div>
@@ -252,10 +257,11 @@ async function loadStatus() {
         document.getElementById('direct-count').textContent = Number(counts?.direct_streams || 0).toLocaleString();
         document.getElementById('header-count').textContent = Number(counts?.header_streams || 0).toLocaleString();
         document.getElementById('hidden-count').textContent = Number(counts?.hidden_channels || 0).toLocaleString();
+        document.getElementById('source-channel-count').textContent = Number(counts?.source_country_channels || counts?.source_channels || 0).toLocaleString();
+        document.getElementById('playable-channel-count').textContent = Number(counts?.playable_country_channels || counts?.selected_channels || 0).toLocaleString();
         document.getElementById('last-sync').textContent = fmtDate(data?.last_completed_at);
         document.getElementById('source-modified').textContent = data?.source_last_modified || 'Unknown';
         document.getElementById('setting-enabled').checked = Boolean(settings?.enabled);
-        document.getElementById('setting-limit').value = Number(settings?.channel_limit ?? 100);
 
         const badge = document.getElementById('sync-badge');
         badge.textContent = running ? 'Syncing' : String(data?.status || 'Unknown');
@@ -343,7 +349,6 @@ async function startSync() {
 async function saveSettings() {
     const payload = {
         enabled: document.getElementById('setting-enabled').checked,
-        channel_limit: Number(document.getElementById('setting-limit').value || 0),
     };
     try {
         const response = await fetch('/api/iptv/settings', {
@@ -353,7 +358,7 @@ async function saveSettings() {
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data?.detail || 'Unable to save settings');
-        showToast('Settings saved. Run Sync Now to apply the channel limit.', 'success', 'Live TV');
+        showToast('Settings saved.', 'success', 'Live TV');
         await loadStatus();
     } catch (error) {
         showToast(error.message, 'error', 'Live TV');
