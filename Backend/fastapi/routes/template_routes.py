@@ -220,6 +220,20 @@ async def watch_requests_page(request: Request, _: bool = Depends(require_auth))
     })
 
 
+async def live_tv_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "dark_professional")
+    theme = get_theme(theme_name)
+    current_user = get_current_user(request)
+
+    return templates.TemplateResponse("live_tv.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "current_user": current_user,
+    })
+
+
 async def edit_media_page(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
     theme_name = request.session.get("theme", "dark_professional")
     theme = get_theme(theme_name)

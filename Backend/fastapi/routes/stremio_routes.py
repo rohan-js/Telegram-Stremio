@@ -8,6 +8,15 @@ from datetime import datetime, timezone, timedelta
 from Backend.fastapi.security.tokens import verify_token
 from Backend.helper.encrypt import encode_string
 from Backend.helper.torrent_downloads import select_completed_torrent_file
+from Backend.helper.iptv import (
+    IPTV_CATALOG_ID,
+    IPTV_ID_PREFIX,
+    build_iptv_streams,
+    get_iptv_channel,
+    get_iptv_settings,
+    iptv_meta,
+    list_iptv_channels,
+)
 
 
 # --- Configuration ---
@@ -355,9 +364,34 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
         except Exception:
             pass
 
+        try:
+            iptv_settings = await get_iptv_settings(db)
+            if iptv_settings.get("enabled"):
+                iptv_genres = await db.dbs["tracking"]["iptv_channels"].distinct(
+                    "categories",
+                    {"hidden": {"$ne": True}},
+                )
+                catalogs.append({
+                    "type": "tv",
+                    "id": IPTV_CATALOG_ID,
+                    "name": "Live TV - India",
+                    "extra": [
+                        {
+                            "name": "genre",
+                            "isRequired": False,
+                            "options": sorted(str(item) for item in iptv_genres if item),
+                        },
+                        {"name": "skip"},
+                        {"name": "search", "isRequired": False},
+                    ],
+                    "extraSupported": ["genre", "skip", "search"],
+                })
+        except Exception:
+            pass
+
     # Build dynamic name/description/version with subscription info
     addon_name = ADDON_NAME
-    addon_desc = "Streams movies and series from your Telegram."
+    addon_desc = "Streams movies, series, torrents, and live TV."
     addon_version = ADDON_VERSION
     expiry_obj = None
 
@@ -374,7 +408,7 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
                         addon_name = f"{ADDON_NAME} — Expires {expiry_str}"
                         addon_desc = (
                             f"📅 Subscription active until {expiry_str}.\n"
-                            f"Streams movies and series from your Telegram."
+                            f"Streams movies, series, torrents, and live TV."
                         )
                         # Encode expiry epoch (low 16 bits, hex) into version so
                         # Stremio detects a change when subscription is updated.
@@ -382,7 +416,7 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
                         addon_version = f"{ADDON_VERSION}-{epoch_tag}"
                     else:
                         addon_name = f"{ADDON_NAME} — Active"
-                        addon_desc = "✅ Subscription active.\nStreams movies and series from your Telegram."
+                        addon_desc = "✅ Subscription active.\nStreams movies, series, torrents, and live TV."
             except Exception:
                 pass  # Fallback to defaults on error
 
@@ -395,10 +429,10 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
         "name": addon_name,
         "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
         "description": addon_desc,
-        "types": ["movie", "series"],
+        "types": ["movie", "series", "tv"],
         "resources": resources,
         "catalogs": catalogs,
-        "idPrefixes": ["tt"],
+        "idPrefixes": ["tt", IPTV_ID_PREFIX],
         "behaviorHints": {
             "configurable": True,
             "configurationRequired": False
@@ -587,7 +621,7 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
     if Telegram.HIDE_CATALOG:
         raise HTTPException(status_code=404, detail="Catalog disabled")
 
-    if media_type not in ["movie", "series"]:
+    if media_type not in ["movie", "series", "tv"]:
         raise HTTPException(status_code=404, detail="Invalid catalog type")
 
     genre_filter = None
@@ -608,6 +642,32 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
                     stremio_skip = 0
 
     page = (stremio_skip // PAGE_SIZE) + 1
+
+    if media_type == "tv":
+        if id != IPTV_CATALOG_ID:
+            raise HTTPException(status_code=404, detail="Unknown live TV catalog")
+        settings = await get_iptv_settings(db)
+        if not settings.get("enabled"):
+            return {
+                "metas": [],
+                "cacheMaxAge": 300,
+                "staleRevalidate": 300,
+                "staleError": 3600,
+            }
+        data = await list_iptv_channels(
+            db,
+            search=search_query or "",
+            category=genre_filter or "",
+            hidden=False,
+            page=(stremio_skip // int(Telegram.IPTV_PAGE_SIZE)) + 1,
+            page_size=int(Telegram.IPTV_PAGE_SIZE),
+        )
+        return {
+            "metas": [iptv_meta(item) for item in data.get("channels", [])],
+            "cacheMaxAge": 300,
+            "staleRevalidate": 300,
+            "staleError": 3600,
+        }
 
     try:
         if id.startswith("custom_"):
@@ -670,6 +730,17 @@ async def get_meta(token: str, media_type: str, id: str, response: Response, tok
     apply_stremio_no_cache(response)
     if Telegram.HIDE_CATALOG:
         raise HTTPException(status_code=404, detail="Catalog disabled")
+
+    if media_type == "tv" and id.startswith(IPTV_ID_PREFIX):
+        channel_id = id.removeprefix(IPTV_ID_PREFIX)
+        channel = await get_iptv_channel(db, channel_id)
+        return {
+            "meta": iptv_meta(channel) if channel else {},
+            "cacheMaxAge": 300,
+            "staleRevalidate": 300,
+            "staleError": 3600,
+        }
+
     try:
         imdb_id = id
     except (ValueError, IndexError):
@@ -783,6 +854,24 @@ async def get_streams(
             "cacheMaxAge": 0,
             "staleRevalidate": 0,
             "staleError": 0,
+        }
+
+    if media_type == "tv" and id.startswith(IPTV_ID_PREFIX):
+        settings = await get_iptv_settings(db)
+        if not settings.get("enabled"):
+            return {
+                "streams": [],
+                "cacheMaxAge": 300,
+                "staleRevalidate": 300,
+                "staleError": 3600,
+            }
+        channel_id = id.removeprefix(IPTV_ID_PREFIX)
+        channel = await get_iptv_channel(db, channel_id)
+        return {
+            "streams": build_iptv_streams(channel, token) if channel else [],
+            "cacheMaxAge": 120,
+            "staleRevalidate": 120,
+            "staleError": 600,
         }
 
 

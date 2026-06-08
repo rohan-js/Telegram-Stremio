@@ -7,11 +7,12 @@ from Backend import __version__
 from Backend.fastapi.security.credentials import require_auth
 from Backend.fastapi.routes.stream_routes import router as stream_router, decay_client_failures
 from Backend.fastapi.routes.stremio_routes import router as stremio_router
+from Backend.fastapi.routes.iptv_routes import router as iptv_router
 from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page, public_status_page, stremio_guide_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, vlc_redirect,
-    custom_catalogs_page, unmatched_media_page, watch_requests_page
+    custom_catalogs_page, unmatched_media_page, watch_requests_page, live_tv_page
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
@@ -34,7 +35,9 @@ from Backend.fastapi.routes.api_routes import (
     list_unmatched_media_api, search_unmatched_media_api,
     apply_unmatched_media_api, reprocess_unmatched_media_api,
     dismiss_unmatched_media_api, get_duplicate_media_api,
-    update_quality_flags_api, clear_quality_flags_api
+    update_quality_flags_api, clear_quality_flags_api,
+    get_iptv_status_api, sync_iptv_api, list_iptv_channels_api,
+    update_iptv_channel_api, get_iptv_settings_api, update_iptv_settings_api
 )
 
 app = FastAPI(
@@ -70,6 +73,7 @@ async def _startup():
 # --- Include existing API routers ---
 app.include_router(stream_router)
 app.include_router(stremio_router)
+app.include_router(iptv_router)
 
 # --- Public Routes (No Authentication Required) ---
 @app.get("/login", response_class=HTMLResponse)
@@ -128,6 +132,10 @@ async def unmatched_media(request: Request, _: bool = Depends(require_auth)):
 @app.get("/watch-requests", response_class=HTMLResponse)
 async def watch_requests(request: Request, _: bool = Depends(require_auth)):
     return await watch_requests_page(request, _)
+
+@app.get("/live-tv", response_class=HTMLResponse)
+async def live_tv(request: Request, _: bool = Depends(require_auth)):
+    return await live_tv_page(request, _)
 
 @app.get("/media/edit", response_class=HTMLResponse)
 async def edit_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
@@ -217,6 +225,40 @@ async def update_quality_flags(payload: dict, _: bool = Depends(require_auth)):
 @app.post("/api/media/quality-flags/clear")
 async def clear_quality_flags(payload: dict, _: bool = Depends(require_auth)):
     return await clear_quality_flags_api(payload)
+
+@app.get("/api/iptv/status")
+async def get_iptv_status(_: bool = Depends(require_auth)):
+    return await get_iptv_status_api()
+
+@app.post("/api/iptv/sync")
+async def sync_iptv(force: bool = True, _: bool = Depends(require_auth)):
+    return await sync_iptv_api(force)
+
+@app.get("/api/iptv/channels")
+async def get_iptv_channels(
+    search: str = "",
+    hidden: bool | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    _: bool = Depends(require_auth),
+):
+    return await list_iptv_channels_api(search, hidden, page, page_size)
+
+@app.patch("/api/iptv/channels/{channel_id}")
+async def update_iptv_channel(
+    channel_id: str,
+    payload: dict,
+    _: bool = Depends(require_auth),
+):
+    return await update_iptv_channel_api(channel_id, payload)
+
+@app.get("/api/iptv/settings")
+async def get_iptv_settings_route(_: bool = Depends(require_auth)):
+    return await get_iptv_settings_api()
+
+@app.put("/api/iptv/settings")
+async def update_iptv_settings_route(payload: dict, _: bool = Depends(require_auth)):
+    return await update_iptv_settings_api(payload)
 
 @app.get("/api/system/workloads")
 async def get_workloads(_: bool = Depends(require_auth)):

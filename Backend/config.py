@@ -68,6 +68,44 @@ class Telegram:
     except Exception:
         AUTO_CATALOG_SYNC_INTERVAL_MINUTES = 60
 
+    # -------------------------------
+    # IPTV live TV (iptv-org, India v1)
+    # -------------------------------
+    IPTV_ENABLED = getenv("IPTV_ENABLED", "true").lower() == "true"
+    IPTV_COUNTRY_CODES = [
+        code.strip().upper()
+        for code in getenv("IPTV_COUNTRY_CODES", "IN").split(",")
+        if code.strip()
+    ] or ["IN"]
+    try:
+        IPTV_CHANNEL_LIMIT = max(0, int(getenv("IPTV_CHANNEL_LIMIT", "100") or 100))
+    except Exception:
+        IPTV_CHANNEL_LIMIT = 100
+    try:
+        IPTV_PAGE_SIZE = max(1, min(100, int(getenv("IPTV_PAGE_SIZE", "50") or 50)))
+    except Exception:
+        IPTV_PAGE_SIZE = 50
+    IPTV_AUTO_SYNC = getenv("IPTV_AUTO_SYNC", "true").lower() == "true"
+    try:
+        IPTV_SYNC_INTERVAL_MINUTES = max(30, int(getenv("IPTV_SYNC_INTERVAL_MINUTES", "360") or 360))
+    except Exception:
+        IPTV_SYNC_INTERVAL_MINUTES = 360
+    try:
+        IPTV_SYNC_START_DELAY_SECONDS = max(0, int(getenv("IPTV_SYNC_START_DELAY_SECONDS", "30") or 30))
+    except Exception:
+        IPTV_SYNC_START_DELAY_SECONDS = 30
+    try:
+        IPTV_REQUEST_TIMEOUT_SEC = max(5.0, float(getenv("IPTV_REQUEST_TIMEOUT_SEC", "45") or 45))
+    except Exception:
+        IPTV_REQUEST_TIMEOUT_SEC = 45.0
+    try:
+        IPTV_PROXY_TIMEOUT_SEC = max(5.0, float(getenv("IPTV_PROXY_TIMEOUT_SEC", "30") or 30))
+    except Exception:
+        IPTV_PROXY_TIMEOUT_SEC = 30.0
+    IPTV_PROXY_FALLBACK_ENABLED = getenv("IPTV_PROXY_FALLBACK_ENABLED", "true").lower() == "true"
+    IPTV_PROXY_SECRET = getenv("IPTV_PROXY_SECRET", "").strip()
+    IPTV_API_BASE_URL = getenv("IPTV_API_BASE_URL", "https://iptv-org.github.io/api").rstrip("/")
+
     ADMIN_USERNAME = getenv("ADMIN_USERNAME", "fyvio")
     ADMIN_PASSWORD = getenv("ADMIN_PASSWORD", "fyvio")
     DEFAULT_ADDON_TOKEN = getenv("DEFAULT_ADDON_TOKEN", "").strip()
