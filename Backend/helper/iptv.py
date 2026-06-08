@@ -205,6 +205,11 @@ async def sync_iptv_data(db, force: bool = False) -> dict:
 
         now = _utcnow()
         state_collection = db.dbs["tracking"]["state"]
+        await state_collection.update_one(
+            {"_id": IPTV_SETTINGS_ID},
+            {"$unset": {"channel_limit": ""}},
+            upsert=True,
+        )
         previous = await state_collection.find_one({"_id": IPTV_STATE_ID}) or {}
         await state_collection.update_one(
             {"_id": IPTV_STATE_ID},

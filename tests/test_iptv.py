@@ -288,6 +288,7 @@ class IptvUnlimitedTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["counts"]["source_country_channels"], channel_count)
         self.assertEqual(result["counts"]["playable_country_channels"], channel_count)
         self.assertEqual(db.iptv_channels.bulk_count, channel_count)
+        self.assertNotIn("channel_limit", db.state.docs["iptv_settings"])
 
 
 class _DistinctCollection:
