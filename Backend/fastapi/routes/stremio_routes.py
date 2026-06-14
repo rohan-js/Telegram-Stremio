@@ -9,11 +9,16 @@ from Backend.fastapi.security.tokens import verify_token
 from Backend.helper.encrypt import encode_string
 from Backend.helper.torrent_downloads import select_completed_torrent_file
 from Backend.helper.iptv import (
+    IPTV_ALL_CATALOG_ID,
     IPTV_CATALOG_ID,
+    IPTV_CATEGORY_CATALOG_PREFIX,
     IPTV_ID_PREFIX,
     build_iptv_streams,
     get_iptv_channel,
     get_iptv_settings,
+    iptv_catalog_id_for_category,
+    iptv_catalog_name,
+    iptv_category_from_catalog_id,
     iptv_meta,
     list_iptv_channels,
 )
@@ -367,25 +372,31 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
         try:
             iptv_settings = await get_iptv_settings(db)
             if iptv_settings.get("enabled"):
-                iptv_genres = await db.dbs["tracking"]["iptv_channels"].distinct(
-                    "categories",
+                iptv_category_ids = await db.dbs["tracking"]["iptv_channels"].distinct(
+                    "category_ids",
                     {"hidden": {"$ne": True}},
                 )
                 catalogs.append({
                     "type": "tv",
-                    "id": IPTV_CATALOG_ID,
-                    "name": "Live TV - India",
+                    "id": IPTV_ALL_CATALOG_ID,
+                    "name": "Live TV - All",
                     "extra": [
-                        {
-                            "name": "genre",
-                            "isRequired": False,
-                            "options": sorted(str(item) for item in iptv_genres if item),
-                        },
                         {"name": "skip"},
                         {"name": "search", "isRequired": False},
                     ],
-                    "extraSupported": ["genre", "skip", "search"],
+                    "extraSupported": ["skip", "search"],
                 })
+                for category_id in sorted(str(item).lower() for item in iptv_category_ids if item and str(item).lower() != "xxx"):
+                    catalogs.append({
+                        "type": "tv",
+                        "id": iptv_catalog_id_for_category(category_id),
+                        "name": iptv_catalog_name(category_id),
+                        "extra": [
+                            {"name": "skip"},
+                            {"name": "search", "isRequired": False},
+                        ],
+                        "extraSupported": ["skip", "search"],
+                    })
         except Exception:
             pass
 
@@ -644,7 +655,11 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
     page = (stremio_skip // PAGE_SIZE) + 1
 
     if media_type == "tv":
-        if id != IPTV_CATALOG_ID:
+        if id in {IPTV_CATALOG_ID, IPTV_ALL_CATALOG_ID}:
+            iptv_category = ""
+        elif id.startswith(IPTV_CATEGORY_CATALOG_PREFIX):
+            iptv_category = iptv_category_from_catalog_id(id)
+        else:
             raise HTTPException(status_code=404, detail="Unknown live TV catalog")
         settings = await get_iptv_settings(db)
         if not settings.get("enabled"):
@@ -657,7 +672,7 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
         data = await list_iptv_channels(
             db,
             search=search_query or "",
-            category=genre_filter or "",
+            category=iptv_category or genre_filter or "",
             hidden=False,
             page=(stremio_skip // int(Telegram.IPTV_PAGE_SIZE)) + 1,
             page_size=int(Telegram.IPTV_PAGE_SIZE),

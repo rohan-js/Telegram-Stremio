@@ -90,6 +90,8 @@ async def sync_iptv_api(force: bool = True):
 
 async def list_iptv_channels_api(
     search: str = "",
+    category: str = "",
+    country: str = "",
     hidden: bool | None = None,
     page: int = 1,
     page_size: int = 50,
@@ -98,6 +100,8 @@ async def list_iptv_channels_api(
         return await list_iptv_channels(
             db,
             search=search,
+            category=category,
+            country=country,
             hidden=hidden,
             page=page,
             page_size=page_size,

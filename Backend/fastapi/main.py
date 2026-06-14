@@ -237,12 +237,14 @@ async def sync_iptv(force: bool = True, _: bool = Depends(require_auth)):
 @app.get("/api/iptv/channels")
 async def get_iptv_channels(
     search: str = "",
+    category: str = "",
+    country: str = "",
     hidden: bool | None = None,
     page: int = 1,
     page_size: int = 50,
     _: bool = Depends(require_auth),
 ):
-    return await list_iptv_channels_api(search, hidden, page, page_size)
+    return await list_iptv_channels_api(search, category, country, hidden, page, page_size)
 
 @app.patch("/api/iptv/channels/{channel_id}")
 async def update_iptv_channel(

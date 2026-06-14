@@ -5,7 +5,9 @@ from fastapi import Response
 
 from Backend.fastapi.routes import iptv_routes, stremio_routes
 from Backend.helper.iptv import (
+    IPTV_ALL_CATALOG_ID,
     IPTV_CATALOG_ID,
+    iptv_catalog_id_for_category,
     build_iptv_streams,
     channel_is_eligible,
     get_iptv_settings,
@@ -27,8 +29,10 @@ class IptvHelperTests(unittest.TestCase):
             "replaced_by": None,
         }
         self.assertTrue(channel_is_eligible(base, {"IN"}, set()))
+        self.assertTrue(channel_is_eligible({**base, "country": "US"}, set(), set()))
         self.assertFalse(channel_is_eligible({**base, "country": "US"}, {"IN"}, set()))
         self.assertFalse(channel_is_eligible({**base, "is_nsfw": True}, {"IN"}, set()))
+        self.assertFalse(channel_is_eligible({**base, "categories": ["xxx"]}, set(), set()))
         self.assertFalse(channel_is_eligible({**base, "closed": "2025-01-01"}, {"IN"}, set()))
         self.assertFalse(channel_is_eligible({**base, "replaced_by": "Other.in"}, {"IN"}, set()))
         self.assertFalse(channel_is_eligible(base, {"IN"}, {"Test.in"}))
@@ -182,6 +186,18 @@ class _IptvCollection:
     async def create_index(self, *args, **kwargs):
         return None
 
+    async def distinct(self, field, query):
+        values = set()
+        for doc in self.docs.values():
+            if query.get("hidden", {}).get("$ne") is True and doc.get("hidden"):
+                continue
+            value = doc.get(field)
+            if isinstance(value, list):
+                values.update(value)
+            elif value:
+                values.add(value)
+        return list(values)
+
     async def count_documents(self, query):
         if query.get("hidden", {}).get("$ne") is True:
             return len([doc for doc in self.docs.values() if not doc.get("hidden")])
@@ -241,13 +257,13 @@ class IptvUnlimitedTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("channel_limit", db.state.last_update.get("$unset", {}))
         self.assertNotIn("channel_limit", db.state.docs["iptv_settings"])
 
-    async def test_sync_keeps_all_playable_indian_channels_above_old_pilot_cap(self):
+    async def test_sync_keeps_all_playable_global_channels_above_old_pilot_cap(self):
         channel_count = 125
         channels = [
             {
-                "id": f"Channel{i}.in",
+                "id": f"Channel{i}.global",
                 "name": f"Channel {i}",
-                "country": "IN",
+                "country": "IN" if i % 2 else "US",
                 "categories": ["news"],
                 "is_nsfw": False,
                 "closed": None,
@@ -257,7 +273,7 @@ class IptvUnlimitedTests(unittest.IsolatedAsyncioTestCase):
         ]
         streams = [
             {
-                "channel": f"Channel{i}.in",
+                "channel": f"Channel{i}.global",
                 "feed": None,
                 "title": "",
                 "url": f"https://example.test/{i}.m3u8",
@@ -285,15 +301,82 @@ class IptvUnlimitedTests(unittest.IsolatedAsyncioTestCase):
             result = await sync_iptv_data(db, force=True)
 
         self.assertEqual(result["counts"]["selected_channels"], channel_count)
-        self.assertEqual(result["counts"]["source_country_channels"], channel_count)
-        self.assertEqual(result["counts"]["playable_country_channels"], channel_count)
+        self.assertEqual(result["counts"]["eligible_channels"], channel_count)
+        self.assertEqual(result["counts"]["playable_channels"], channel_count)
         self.assertEqual(db.iptv_channels.bulk_count, channel_count)
         self.assertNotIn("channel_limit", db.state.docs["iptv_settings"])
+
+    async def test_sync_excludes_adult_and_keeps_all_streams_per_channel(self):
+        channels = [
+            {
+                "id": "Family.us",
+                "name": "Family",
+                "country": "US",
+                "categories": ["entertainment"],
+                "is_nsfw": False,
+                "closed": None,
+                "replaced_by": None,
+            },
+            {
+                "id": "Adult.us",
+                "name": "Adult",
+                "country": "US",
+                "categories": ["xxx"],
+                "is_nsfw": False,
+                "closed": None,
+                "replaced_by": None,
+            },
+        ]
+        streams = [
+            {
+                "channel": "Family.us",
+                "feed": None,
+                "title": "",
+                "url": f"https://example.test/{i}.m3u8",
+                "quality": "720p",
+            }
+            for i in range(8)
+        ] + [
+            {
+                "channel": "Adult.us",
+                "feed": None,
+                "title": "",
+                "url": "https://example.test/adult.m3u8",
+                "quality": "720p",
+            }
+        ]
+
+        async def fake_fetch_json(client, dataset):
+            return {
+                "channels": channels,
+                "blocklist": [],
+                "feeds": [],
+                "logos": [],
+                "categories": [
+                    {"id": "entertainment", "name": "Entertainment"},
+                    {"id": "xxx", "name": "XXX"},
+                ],
+                "languages": [],
+                "countries": [{"code": "US", "name": "United States", "flag": "US"}],
+            }[dataset]
+
+        db = _IptvDb({"iptv_settings": {"_id": "iptv_settings", "enabled": True}})
+        with (
+            patch("Backend.helper.iptv._fetch_json", fake_fetch_json),
+            patch("Backend.helper.iptv.httpx.AsyncClient", lambda *args, **kwargs: _HttpClient(streams)),
+        ):
+            result = await sync_iptv_data(db, force=True)
+
+        self.assertEqual(result["counts"]["selected_channels"], 1)
+        self.assertEqual(result["counts"]["selected_streams"], 8)
+        self.assertEqual(result["counts"]["excluded_nsfw_channels"], 1)
+        self.assertEqual(db.iptv_channels.docs["Family.us"]["stream_count"], 8)
+        self.assertNotIn("Adult.us", db.iptv_channels.docs)
 
 
 class _DistinctCollection:
     async def distinct(self, field, query):
-        return ["News", "Entertainment"]
+        return ["news", "entertainment"]
 
 
 class _TrackingDB:
@@ -330,10 +413,12 @@ class IptvStremioRouteTests(unittest.IsolatedAsyncioTestCase):
         live_catalog = [
             item
             for item in manifest["catalogs"]
-            if item["id"] == IPTV_CATALOG_ID
+            if item["id"] == IPTV_ALL_CATALOG_ID
         ]
         self.assertEqual(len(live_catalog), 1)
         self.assertEqual(live_catalog[0]["type"], "tv")
+        category_catalog_ids = {item["id"] for item in manifest["catalogs"] if item["type"] == "tv"}
+        self.assertIn(iptv_catalog_id_for_category("news"), category_catalog_ids)
 
     async def test_tv_catalog_returns_iptv_metas(self):
         channel = {
@@ -359,13 +444,45 @@ class IptvStremioRouteTests(unittest.IsolatedAsyncioTestCase):
             result = await stremio_routes.get_catalog(
                 "token123",
                 "tv",
-                IPTV_CATALOG_ID,
+                IPTV_ALL_CATALOG_ID,
                 Response(),
                 token_data={},
             )
 
         self.assertEqual(result["metas"][0]["id"], "iptv:News.in")
         self.assertEqual(result["metas"][0]["type"], "tv")
+
+    async def test_legacy_india_catalog_id_still_returns_iptv_metas(self):
+        channel = {
+            "_id": "News.in",
+            "stremio_id": "iptv:News.in",
+            "name": "News",
+            "categories": ["News"],
+            "languages": ["Hindi"],
+        }
+        with (
+            patch.object(stremio_routes.Telegram, "HIDE_CATALOG", False),
+            patch.object(
+                stremio_routes,
+                "get_iptv_settings",
+                AsyncMock(return_value={"enabled": True}),
+            ),
+            patch.object(
+                stremio_routes,
+                "list_iptv_channels",
+                AsyncMock(return_value={"channels": [channel]}),
+            ) as list_mock,
+        ):
+            result = await stremio_routes.get_catalog(
+                "token123",
+                "tv",
+                IPTV_CATALOG_ID,
+                Response(),
+                token_data={},
+            )
+
+        self.assertEqual(result["metas"][0]["id"], "iptv:News.in")
+        self.assertEqual(list_mock.await_args.kwargs["category"], "")
 
     async def test_tv_stream_route_returns_direct_url(self):
         channel = {

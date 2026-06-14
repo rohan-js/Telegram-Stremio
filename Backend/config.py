@@ -69,14 +69,14 @@ class Telegram:
         AUTO_CATALOG_SYNC_INTERVAL_MINUTES = 60
 
     # -------------------------------
-    # IPTV live TV (iptv-org, India v1)
+    # IPTV live TV (iptv-org, global by default)
     # -------------------------------
     IPTV_ENABLED = getenv("IPTV_ENABLED", "true").lower() == "true"
     IPTV_COUNTRY_CODES = [
         code.strip().upper()
-        for code in getenv("IPTV_COUNTRY_CODES", "IN").split(",")
+        for code in getenv("IPTV_COUNTRY_CODES", "").split(",")
         if code.strip()
-    ] or ["IN"]
+    ]
     try:
         IPTV_PAGE_SIZE = max(1, min(100, int(getenv("IPTV_PAGE_SIZE", "50") or 50)))
     except Exception:

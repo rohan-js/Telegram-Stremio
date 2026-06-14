@@ -18,7 +18,10 @@ from Backend.logger import LOGGER
 IPTV_STATE_ID = "iptv_sync_state"
 IPTV_SETTINGS_ID = "iptv_settings"
 IPTV_CATALOG_ID = "iptv_india"
+IPTV_ALL_CATALOG_ID = "iptv_all"
+IPTV_CATEGORY_CATALOG_PREFIX = "iptv_category_"
 IPTV_ID_PREFIX = "iptv:"
+IPTV_ADULT_CATEGORY_IDS = {"xxx"}
 IPTV_DATASETS = (
     "channels",
     "feeds",
@@ -61,16 +64,51 @@ def _supported_stream_url(url: str) -> bool:
         return False
 
 
+def _normalized_country_codes(country_codes) -> set:
+    return {
+        str(code).strip().upper()
+        for code in (country_codes or [])
+        if str(code).strip()
+    }
+
+
+def _channel_category_ids(channel: dict) -> List[str]:
+    return [str(item).strip().lower() for item in channel.get("categories") or [] if str(item).strip()]
+
+
+def _has_adult_category(channel: dict) -> bool:
+    return bool(IPTV_ADULT_CATEGORY_IDS.intersection(_channel_category_ids(channel)))
+
+
 def channel_is_eligible(channel: dict, country_codes: set, blocked_ids: set) -> bool:
     channel_id = str(channel.get("id") or "")
+    configured_countries = _normalized_country_codes(country_codes)
+    channel_country = str(channel.get("country") or "").upper()
     return bool(
         channel_id
-        and str(channel.get("country") or "").upper() in country_codes
+        and (not configured_countries or channel_country in configured_countries)
         and not channel.get("is_nsfw")
+        and not _has_adult_category(channel)
         and not channel.get("closed")
         and not channel.get("replaced_by")
         and channel_id not in blocked_ids
     )
+
+
+def iptv_catalog_id_for_category(category_id: str) -> str:
+    normalized = str(category_id or "").strip().lower()
+    return f"{IPTV_CATEGORY_CATALOG_PREFIX}{normalized}"
+
+
+def iptv_category_from_catalog_id(catalog_id: str) -> str:
+    if not str(catalog_id or "").startswith(IPTV_CATEGORY_CATALOG_PREFIX):
+        return ""
+    return str(catalog_id).removeprefix(IPTV_CATEGORY_CATALOG_PREFIX).strip().lower()
+
+
+def iptv_catalog_name(category_id: str, category_name: str = "") -> str:
+    name = str(category_name or category_id or "").replace("-", " ").replace("_", " ").strip()
+    return f"Live TV - {name.title()}" if name else "Live TV"
 
 
 def _quality_score(value: str) -> int:
@@ -139,12 +177,14 @@ async def get_iptv_settings(db) -> dict:
     return {
         "enabled": Telegram.IPTV_ENABLED if enabled is None else bool(enabled),
         "country_codes": list(Telegram.IPTV_COUNTRY_CODES),
+        "global": not bool(Telegram.IPTV_COUNTRY_CODES),
         "channel_limit": 0,
         "unlimited": True,
         "auto_sync": bool(Telegram.IPTV_AUTO_SYNC),
         "sync_interval_minutes": int(Telegram.IPTV_SYNC_INTERVAL_MINUTES),
         "proxy_fallback_enabled": bool(Telegram.IPTV_PROXY_FALLBACK_ENABLED),
-        "catalog_id": IPTV_CATALOG_ID,
+        "catalog_id": IPTV_ALL_CATALOG_ID,
+        "legacy_catalog_id": IPTV_CATALOG_ID,
     }
 
 
@@ -261,7 +301,7 @@ async def sync_iptv_data(db, force: bool = False) -> dict:
 
                 channels_raw = await _fetch_json(client, "channels")
                 blocklist_raw = await _fetch_json(client, "blocklist")
-                country_codes = set(settings["country_codes"])
+                country_codes = _normalized_country_codes(settings["country_codes"])
                 blocked_ids = {
                     str(item.get("channel"))
                     for item in blocklist_raw
@@ -384,7 +424,7 @@ async def sync_iptv_data(db, force: bool = False) -> dict:
                     streams_by_channel.get(channel_id, []),
                     key=lambda item: tuple(item.get("rank") or (0, 0, 0, 0)),
                     reverse=True,
-                )[:5]
+                )
                 if not channel_streams:
                     continue
 
@@ -452,6 +492,8 @@ async def sync_iptv_data(db, force: bool = False) -> dict:
             await collection.delete_many({"sync_id": {"$ne": sync_id}})
             await collection.create_index([("name", ASCENDING)])
             await collection.create_index([("hidden", ASCENDING), ("name", ASCENDING)])
+            await collection.create_index([("hidden", ASCENDING), ("category_ids", ASCENDING), ("name", ASCENDING)])
+            await collection.create_index([("hidden", ASCENDING), ("country", ASCENDING), ("name", ASCENDING)])
             await collection.create_index("streams.id")
 
             direct_streams = sum(
@@ -468,15 +510,27 @@ async def sync_iptv_data(db, force: bool = False) -> dict:
             )
             completed = _utcnow()
             counts = {
+                "source_channels": len(channels_raw),
+                "eligible_channels": len(eligible_channels),
                 "source_country_channels": len(eligible_channels),
+                "playable_channels": len(channels),
                 "playable_country_channels": len(channels),
-                "source_channels": len(eligible_channels),
                 "source_streams": len(streams),
                 "selected_channels": len(documents),
                 "selected_streams": direct_streams + header_streams,
                 "direct_streams": direct_streams,
                 "header_streams": header_streams,
                 "blocked_channels": len(blocked_ids),
+                "excluded_nsfw_channels": sum(1 for item in channels_raw if item.get("is_nsfw") or _has_adult_category(item)),
+                "excluded_closed_channels": sum(1 for item in channels_raw if item.get("closed")),
+                "excluded_replaced_channels": sum(1 for item in channels_raw if item.get("replaced_by")),
+                "countries_represented": len({item.get("country") for item in documents if item.get("country")}),
+                "categories_represented": len({
+                    category_id
+                    for item in documents
+                    for category_id in item.get("category_ids", [])
+                    if category_id and category_id not in IPTV_ADULT_CATEGORY_IDS
+                }),
                 "channel_limit": 0,
                 "unlimited": True,
             }
@@ -554,6 +608,7 @@ async def list_iptv_channels(
     *,
     search: str = "",
     category: str = "",
+    country: str = "",
     hidden: Optional[bool] = None,
     page: int = 1,
     page_size: int = 50,
@@ -563,14 +618,18 @@ async def list_iptv_channels(
         query["hidden"] = bool(hidden)
     search = (search or "").strip()
     category = (category or "").strip()
+    country = (country or "").strip().upper()
     if category:
-        query["categories"] = category
+        query["category_ids"] = category.lower()
+    if country:
+        query["country"] = country
     if search:
         query["$or"] = [
             {"name": {"$regex": re.escape(search), "$options": "i"}},
             {"alt_names": {"$regex": re.escape(search), "$options": "i"}},
             {"languages": {"$regex": re.escape(search), "$options": "i"}},
             {"categories": {"$regex": re.escape(search), "$options": "i"}},
+            {"country_name": {"$regex": re.escape(search), "$options": "i"}},
         ]
     page = max(1, int(page))
     page_size = max(1, min(100, int(page_size)))
@@ -585,11 +644,25 @@ async def list_iptv_channels(
     )
     for item in items:
         item["_id"] = str(item["_id"])
+    category_values = await db.dbs["tracking"]["iptv_channels"].distinct(
+        "category_ids",
+        {"hidden": {"$ne": True}},
+    )
+    country_values = await db.dbs["tracking"]["iptv_channels"].distinct(
+        "country",
+        {"hidden": {"$ne": True}},
+    )
     return {
         "channels": items,
         "total_count": total,
         "current_page": page,
         "total_pages": (total + page_size - 1) // page_size if total else 0,
+        "categories": sorted(
+            str(item)
+            for item in category_values
+            if item and str(item).lower() not in IPTV_ADULT_CATEGORY_IDS
+        ),
+        "countries": sorted(str(item) for item in country_values if item),
     }
 
 
