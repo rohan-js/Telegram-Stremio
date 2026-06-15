@@ -31,6 +31,16 @@ GENERIC_TITLES = {
     "queen", "love", "life", "ghost", "beast", "vikram", "don", "boss",
 }
 
+ROMAN_BY_NUMBER = {
+    1: "i", 2: "ii", 3: "iii", 4: "iv", 5: "v",
+    6: "vi", 7: "vii", 8: "viii", 9: "ix", 10: "x",
+    11: "xi", 12: "xii", 13: "xiii", 14: "xiv", 15: "xv",
+    16: "xvi", 17: "xvii", 18: "xviii", 19: "xix", 20: "xx",
+}
+NUMBER_BY_ROMAN = {roman: number for number, roman in ROMAN_BY_NUMBER.items()}
+PART_MARKERS = {"part", "pt", "chapter", "chap", "vol", "volume", "season"}
+AUDIO_WORDS = {"ddp", "dd", "aac", "atmos", "dts", "truehd"}
+
 
 @dataclass
 class MatchIntent:
@@ -67,21 +77,20 @@ class MatchDecision:
 
 
 def normalize_title(value: str | None) -> str:
-    value = (value or "").lower()
-    value = re.sub(r"https?://\S+", " ", value)
-    value = re.sub(r"\b(?:19|20)\d{2}\b", " ", value)
-    value = re.sub(r"\bs\d{1,2}e\d{1,2}\b", " ", value)
-    value = re.sub(r"\bs\d{1,2}\b", " ", value)
-    value = re.sub(r"[\._\-+\[\]\(\)\{\}:;,/\\|]+", " ", value)
+    tokens = _tokenize_title(value)
     words = []
-    for word in re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)?", value):
+    for index, word in enumerate(tokens):
         if word in NOISE_WORDS:
             continue
-        if len(word) == 1:
-            continue
-        if word.isdigit() and len(word) <= 2:
+        if _is_year_token(word) or _is_episode_token(word):
             continue
         if re.fullmatch(r"\d{3,4}p?", word):
+            continue
+        if word.isdigit():
+            number = int(word)
+            if not (1 <= number <= 20) or not _keep_title_number(tokens, index):
+                continue
+        elif len(word) == 1 and not _roman_to_int(word):
             continue
         words.append(word)
     return " ".join(words).strip()
@@ -94,11 +103,111 @@ def _tokenize_title(value: str | None) -> list[str]:
     return re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)?", text)
 
 
+def _is_year_token(token: str) -> bool:
+    return bool(re.fullmatch(r"(?:19|20)\d{2}", token or ""))
+
+
+def _is_episode_token(token: str) -> bool:
+    return bool(re.fullmatch(r"s\d{1,2}(?:e\d{1,2})?", token or ""))
+
+
+def _roman_to_int(token: str | None) -> int | None:
+    return NUMBER_BY_ROMAN.get((token or "").lower())
+
+
+def _title_number(token: str | None) -> int | None:
+    token = (token or "").lower()
+    if token.isdigit() and 1 <= int(token) <= 20:
+        return int(token)
+    return _roman_to_int(token)
+
+
+def _has_content_before(tokens: list[str], index: int) -> bool:
+    for token in tokens[:index]:
+        if (
+            token not in NOISE_WORDS
+            and token not in RELEASE_SITE_WORDS
+            and token not in PART_MARKERS
+            and not _is_year_token(token)
+            and not _is_episode_token(token)
+        ):
+            return True
+    return False
+
+
+def _keep_title_number(tokens: list[str], index: int) -> bool:
+    token = tokens[index]
+    previous = tokens[index - 1] if index > 0 else ""
+    next_token = tokens[index + 1] if index + 1 < len(tokens) else ""
+    if previous in AUDIO_WORDS or next_token in AUDIO_WORDS:
+        return False
+    if previous in PART_MARKERS:
+        return _has_content_before(tokens, index - 1)
+    if next_token and next_token.isdigit() and previous in AUDIO_WORDS:
+        return False
+    if _is_year_token(next_token):
+        return _has_content_before(tokens, index)
+    if index == len(tokens) - 1:
+        return _has_content_before(tokens, index)
+    return False
+
+
 def _drop_release_site_prefix(tokens: list[str]) -> list[str]:
     out = list(tokens)
     while out and (out[0] in RELEASE_SITE_WORDS or re.fullmatch(r"\d*tamilmv\d*", out[0] or "")):
         out.pop(0)
     return out
+
+
+def _append_unique(items: list[str], value: str | None) -> None:
+    value = (value or "").strip()
+    if value and value not in items:
+        items.append(value)
+
+
+def _add_number_equivalent_variants(variants: list[str], normalized: str | None) -> None:
+    tokens = (normalized or "").split()
+    for index, token in enumerate(tokens):
+        number = _title_number(token)
+        if not number:
+            continue
+        roman = ROMAN_BY_NUMBER[number]
+        forms = [str(number), roman]
+        previous = tokens[index - 1] if index > 0 else ""
+        for form in forms:
+            replaced = list(tokens)
+            replaced[index] = form
+            _append_unique(variants, " ".join(replaced))
+            if previous in PART_MARKERS and index >= 2:
+                without_marker = list(tokens)
+                without_marker[index] = form
+                del without_marker[index - 1]
+                _append_unique(variants, " ".join(without_marker))
+            elif previous not in PART_MARKERS and index > 0:
+                with_part = list(tokens)
+                with_part[index:index] = ["part"]
+                with_part[index + 1] = form
+                _append_unique(variants, " ".join(with_part))
+
+
+def _canonical_numbered_title(value: str | None) -> str:
+    tokens = normalize_title(value).split()
+    canonical = []
+    for token in tokens:
+        if token in PART_MARKERS:
+            continue
+        number = _title_number(token)
+        canonical.append(str(number) if number else token)
+    return " ".join(canonical)
+
+
+def _number_signature(value: str | None) -> tuple[int, ...]:
+    signature = []
+    for token in normalize_title(value).split():
+        number = _title_number(token)
+        if number:
+            signature.append(number)
+    return tuple(signature)
 
 
 def _variant_from_tokens(tokens: list[str]) -> str:
@@ -110,13 +219,13 @@ def build_title_variants(raw_title: str | None, parsed_title: str | None = None,
 
     def add(value: str | None) -> None:
         normalized = normalize_title(value)
-        if normalized and normalized not in variants:
-            variants.append(normalized)
+        _append_unique(variants, normalized)
+        _add_number_equivalent_variants(variants, normalized)
 
     def add_tokens(tokens: list[str]) -> None:
         normalized = _variant_from_tokens(tokens)
-        if normalized and normalized not in variants:
-            variants.append(normalized)
+        _append_unique(variants, normalized)
+        _add_number_equivalent_variants(variants, normalized)
 
     if parsed_title:
         add_tokens(_tokenize_title(parsed_title))
@@ -149,6 +258,8 @@ def title_similarity(left: str | None, right: str | None) -> float:
     if not left_norm or not right_norm:
         return 0.0
     if left_norm == right_norm:
+        return 100.0
+    if _canonical_numbered_title(left_norm) == _canonical_numbered_title(right_norm):
         return 100.0
     if fuzz:
         if len(left_norm.split()) <= 1 or len(right_norm.split()) <= 1:
@@ -217,12 +328,21 @@ def choose_best_candidate(intent: MatchIntent, candidates: list[MatchCandidate])
         if candidate.media_type != intent.media_type:
             reason = "metadata_media_type_mismatch"
         variants = intent.title_variants or [intent.clean_title or intent.raw_title]
-        title_score = max(title_similarity(variant, candidate.title) for variant in variants)
+        best_variant = max(variants, key=lambda variant: title_similarity(variant, candidate.title))
+        title_score = title_similarity(best_variant, candidate.title)
+        intent_numbers = _number_signature(best_variant)
+        candidate_numbers = _number_signature(candidate.title)
         year_bonus, year_reason = _year_score(intent.year, candidate.year)
         if year_reason:
             reason = year_reason
+        if intent_numbers and candidate_numbers and intent_numbers != candidate_numbers:
+            reason = "metadata_sequel_mismatch"
 
         score = title_score + year_bonus + min(float(candidate.popularity or 0.0), 20.0) / 20.0
+        if intent_numbers and candidate_numbers and intent_numbers == candidate_numbers:
+            score += 8.0
+        elif intent_numbers and not candidate_numbers:
+            score -= 8.0
         if reason:
             score -= 100.0
         scored.append((score, title_score, reason, candidate))
