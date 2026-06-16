@@ -1,9 +1,25 @@
 services:
+  warp_proxy:
+    build:
+      context: ./deploy/wireproxy
+    image: wireproxy:local
+    container_name: warp_proxy
+    volumes:
+      - ./warp_private/wireproxy/config:/etc/wireproxy/config:ro
+      - ./warp_private/wgcf/wgcf-profile.conf:/etc/wireproxy/wgcf-profile.conf:ro
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "3"
+
   telegram-stremio:
     build: .
     image: telegram-stremio:local
     container_name: tg_stremio  
     depends_on:
+      - warp_proxy
       - qbittorrent
     ports:
       - "8000:8000"

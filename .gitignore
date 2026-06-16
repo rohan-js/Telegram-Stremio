@@ -17,3 +17,7 @@ config.env.bak_ip_switch_
 *.bak.*
 *.before_*
 *.pyc
+warp_private/
+wgcf-account.toml
+wgcf-profile.conf
+wireproxy.conf
