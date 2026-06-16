@@ -12,7 +12,7 @@ from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page, public_status_page, stremio_guide_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, vlc_redirect,
-    custom_catalogs_page, unmatched_media_page, watch_requests_page, live_tv_page
+    custom_catalogs_page, watch_requests_page, live_tv_page
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
@@ -32,9 +32,7 @@ from Backend.fastapi.routes.api_routes import (
     add_custom_catalog_item_api, remove_custom_catalog_item_api,
     auto_sync_custom_catalogs_api, auto_catalog_sync_status_api,
     get_auto_catalog_settings_api, update_auto_catalog_settings_api,
-    list_unmatched_media_api, search_unmatched_media_api,
-    apply_unmatched_media_api, reprocess_unmatched_media_api,
-    dismiss_unmatched_media_api, get_duplicate_media_api,
+    get_duplicate_media_api,
     update_quality_flags_api, clear_quality_flags_api,
     get_iptv_status_api, sync_iptv_api, list_iptv_channels_api,
     update_iptv_channel_api, get_iptv_settings_api, update_iptv_settings_api
@@ -125,10 +123,6 @@ async def media_management(request: Request, media_type: str = "movie", _: bool 
 async def custom_catalogs(request: Request, _: bool = Depends(require_auth)):
     return await custom_catalogs_page(request, _)
 
-@app.get("/unmatched", response_class=HTMLResponse)
-async def unmatched_media(request: Request, _: bool = Depends(require_auth)):
-    return await unmatched_media_page(request, _)
-
 @app.get("/watch-requests", response_class=HTMLResponse)
 async def watch_requests(request: Request, _: bool = Depends(require_auth)):
     return await watch_requests_page(request, _)
@@ -193,26 +187,6 @@ async def delete_tv_episode(tmdb_id: int, db_index: int, season: int, episode: i
 @app.delete("/api/media/delete-tv-season")
 async def delete_tv_season(tmdb_id: int, db_index: int, season: int, _: bool = Depends(require_auth)):
     return await delete_tv_season_api(tmdb_id, db_index, season)
-
-@app.get("/api/unmatched-media")
-async def list_unmatched_media(status: str = "open", _: bool = Depends(require_auth)):
-    return await list_unmatched_media_api(status)
-
-@app.post("/api/unmatched-media/{unmatched_id}/search")
-async def search_unmatched_media(unmatched_id: str, payload: dict, _: bool = Depends(require_auth)):
-    return await search_unmatched_media_api(unmatched_id, payload)
-
-@app.post("/api/unmatched-media/{unmatched_id}/apply")
-async def apply_unmatched_media(unmatched_id: str, payload: dict, _: bool = Depends(require_auth)):
-    return await apply_unmatched_media_api(unmatched_id, payload)
-
-@app.post("/api/unmatched-media/{unmatched_id}/reprocess")
-async def reprocess_unmatched_media(unmatched_id: str, _: bool = Depends(require_auth)):
-    return await reprocess_unmatched_media_api(unmatched_id)
-
-@app.post("/api/unmatched-media/{unmatched_id}/dismiss")
-async def dismiss_unmatched_media(unmatched_id: str, _: bool = Depends(require_auth)):
-    return await dismiss_unmatched_media_api(unmatched_id)
 
 @app.get("/api/media/duplicates")
 async def get_media_duplicates(_: bool = Depends(require_auth)):

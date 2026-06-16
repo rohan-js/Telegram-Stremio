@@ -26,12 +26,9 @@ from Backend.helper.iptv import (
 from Backend.helper.metadata import (
     fetch_selected_movie_metadata,
     fetch_selected_tv_metadata,
-    metadata,
     search_movie_candidates,
     search_tv_candidates,
 )
-from Backend.helper.encrypt import encode_string
-from Backend.helper.pyro import clean_filename, remove_urls
 from time import time
 
 
@@ -583,119 +580,6 @@ async def clear_stream_analytics_api() -> dict:
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# Unmatched Media / Manual Repair API
-# ---------------------------------------------------------------------------
-
-async def list_unmatched_media_api(status: str = "open") -> dict:
-    items = await db.list_unmatched_media(status=status)
-    return {"status": "success", "data": items}
-
-
-async def search_unmatched_media_api(unmatched_id: str, payload: dict) -> dict:
-    item = await db.get_unmatched_media(unmatched_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Unmatched item not found")
-
-    query = (payload.get("query") or item.get("title") or item.get("file_name") or "").strip()
-    media_type = payload.get("media_type") or "movie"
-    year = payload.get("year") or item.get("parsed_year")
-
-    if media_type == "tv":
-        suggestions = await search_tv_candidates(query)
-    else:
-        suggestions = await search_movie_candidates(query, year=year)
-        media_type = "movie"
-
-    await db.update_unmatched_suggestions(unmatched_id, suggestions)
-    return {"status": "success", "data": suggestions, "media_type": media_type}
-
-
-def _torrent_metadata_fields(item: dict, metadata_info: dict) -> dict:
-    torrent = item.get("torrent") or {}
-    return {
-        "source_type": "torrent",
-        "info_hash": torrent.get("info_hash"),
-        "file_idx": torrent.get("file_idx"),
-        "sources": torrent.get("sources") or [],
-        "filename": torrent.get("file_name") or item.get("file_name") or item.get("title"),
-        "video_size": torrent.get("video_size"),
-        "origin_chat_id": item.get("origin_chat_id"),
-        "origin_msg_id": item.get("origin_msg_id"),
-        "torrent_private": bool(torrent.get("torrent_private", False)),
-        "torrent_source_uri": torrent.get("torrent_source_uri"),
-        "torrent_file_chat_id": torrent.get("torrent_file_chat_id"),
-        "torrent_file_msg_id": torrent.get("torrent_file_msg_id"),
-        "encoded_string": metadata_info.get("encoded_string"),
-    }
-
-
-async def _index_unmatched_item(item: dict, override_id: str | None = None) -> dict:
-    channel = int(item.get("channel") or str(item.get("origin_chat_id", "")).replace("-100", ""))
-    msg_id = int(item.get("origin_msg_id"))
-    title = item.get("title") or item.get("file_name") or "unknown"
-    size = item.get("size") or ""
-    clean_title = clean_filename(title)
-
-    metadata_info = await metadata(clean_title, channel, msg_id, override_id=override_id)
-    if metadata_info is None:
-        raise HTTPException(status_code=422, detail="Metadata still failed for this item")
-
-    if item.get("source_type") == "torrent":
-        torrent = item.get("torrent") or {}
-        encoded_string = await encode_string({
-            "source_type": "torrent",
-            "chat_id": channel,
-            "msg_id": msg_id,
-            "info_hash": torrent.get("info_hash"),
-            "file_idx": torrent.get("file_idx"),
-            "name": torrent.get("file_name") or title,
-        })
-        metadata_info["encoded_string"] = encoded_string
-        metadata_info.update(_torrent_metadata_fields(item, metadata_info))
-
-    display_name = remove_urls(item.get("file_name") or title)
-    updated_id = await db.insert_media(
-        metadata_info,
-        channel=channel,
-        msg_id=msg_id,
-        size=size,
-        name=display_name,
-    )
-    if not updated_id:
-        raise HTTPException(status_code=500, detail="Database insert failed")
-    return {"updated_id": str(updated_id), "metadata": metadata_info}
-
-
-async def apply_unmatched_media_api(unmatched_id: str, payload: dict) -> dict:
-    item = await db.get_unmatched_media(unmatched_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Unmatched item not found")
-    selected_id = str(payload.get("selected_id") or payload.get("imdb_id") or payload.get("tmdb_id") or "").strip()
-    if not selected_id:
-        raise HTTPException(status_code=400, detail="selected_id is required")
-
-    result = await _index_unmatched_item(item, override_id=selected_id)
-    await db.mark_unmatched_status(unmatched_id, "resolved", {"resolved_by": "manual_apply"})
-    return {"status": "success", **result}
-
-
-async def reprocess_unmatched_media_api(unmatched_id: str) -> dict:
-    item = await db.get_unmatched_media(unmatched_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Unmatched item not found")
-    result = await _index_unmatched_item(item, override_id=item.get("override_id"))
-    await db.mark_unmatched_status(unmatched_id, "resolved", {"resolved_by": "reprocess"})
-    return {"status": "success", **result}
-
-
-async def dismiss_unmatched_media_api(unmatched_id: str) -> dict:
-    ok = await db.mark_unmatched_status(unmatched_id, "dismissed")
-    if not ok:
-        raise HTTPException(status_code=404, detail="Unmatched item not found")
-    return {"status": "success", "message": "Unmatched item dismissed"}
 
 
 # ---------------------------------------------------------------------------

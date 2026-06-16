@@ -24,7 +24,7 @@ class MetadataMatcherTests(unittest.TestCase):
         self.assertTrue(decision.accepted)
         self.assertEqual(decision.candidate.imdb_id, "tt33412884")
 
-    def test_wrong_year_candidate_is_rejected(self):
+    def test_wrong_year_only_candidate_is_accepted_with_low_confidence(self):
         intent = MatchIntent(
             raw_title="Patriot",
             clean_title="patriot",
@@ -34,8 +34,9 @@ class MetadataMatcherTests(unittest.TestCase):
         decision = choose_best_candidate(intent, [
             MatchCandidate("imdb", "The Patriot", 2000, "movie", imdb_id="tt0187393"),
         ])
-        self.assertFalse(decision.accepted)
-        self.assertEqual(decision.reason, "metadata_year_mismatch")
+        self.assertTrue(decision.accepted)
+        self.assertEqual(decision.candidate.imdb_id, "tt0187393")
+        self.assertEqual(decision.reason, "accepted_low_confidence:metadata_year_mismatch")
 
     def test_duplicate_imdb_and_tmdb_same_title_is_not_ambiguous(self):
         intent = MatchIntent(
@@ -50,7 +51,7 @@ class MetadataMatcherTests(unittest.TestCase):
         ])
         self.assertTrue(decision.accepted)
 
-    def test_generic_title_without_year_goes_unmatched(self):
+    def test_generic_title_without_year_accepts_highest_score(self):
         intent = MatchIntent(
             raw_title="War",
             clean_title="war",
@@ -60,8 +61,9 @@ class MetadataMatcherTests(unittest.TestCase):
         decision = choose_best_candidate(intent, [
             MatchCandidate("imdb", "War", 2019, "movie", imdb_id="tt7430722"),
         ])
-        self.assertFalse(decision.accepted)
-        self.assertEqual(decision.reason, "metadata_generic_title_needs_year")
+        self.assertTrue(decision.accepted)
+        self.assertEqual(decision.candidate.imdb_id, "tt7430722")
+        self.assertEqual(decision.reason, "accepted_low_confidence:metadata_generic_title_needs_year")
 
     def test_normalize_title_removes_release_noise(self):
         self.assertEqual(
@@ -187,7 +189,7 @@ class MetadataMatcherTests(unittest.TestCase):
         self.assertIn("saga season ii", season_variants)
         self.assertIn("saga ii", season_variants)
 
-    def test_wrong_sequel_number_is_rejected(self):
+    def test_wrong_sequel_only_candidate_is_accepted_with_low_confidence(self):
         variants = build_title_variants("Rocky.3.1982.1080p.mkv", "Rocky 3", 1982)
         intent = MatchIntent(
             raw_title="Rocky 3",
@@ -199,10 +201,11 @@ class MetadataMatcherTests(unittest.TestCase):
         decision = choose_best_candidate(intent, [
             MatchCandidate("tmdb", "Rocky IV", 1982, "movie", tmdb_id=1374),
         ])
-        self.assertFalse(decision.accepted)
-        self.assertEqual(decision.reason, "metadata_sequel_mismatch")
+        self.assertTrue(decision.accepted)
+        self.assertEqual(decision.candidate.tmdb_id, 1374)
+        self.assertEqual(decision.reason, "accepted_low_confidence:metadata_sequel_mismatch")
 
-    def test_no_year_ambiguous_franchise_goes_unmatched(self):
+    def test_no_year_ambiguous_franchise_accepts_highest_score(self):
         variants = build_title_variants("Rocky.3.1080p.mkv", "Rocky 3", None)
         intent = MatchIntent(
             raw_title="Rocky 3",
@@ -215,8 +218,8 @@ class MetadataMatcherTests(unittest.TestCase):
             MatchCandidate("tmdb", "Rocky III", 1982, "movie", tmdb_id=1371),
             MatchCandidate("tmdb", "Rocky 3", 2024, "movie", tmdb_id=9999),
         ])
-        self.assertFalse(decision.accepted)
-        self.assertEqual(decision.reason, "metadata_ambiguous_match")
+        self.assertTrue(decision.accepted)
+        self.assertIsNotNone(decision.candidate)
 
 
 if __name__ == "__main__":

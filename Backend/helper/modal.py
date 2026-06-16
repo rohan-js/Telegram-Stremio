@@ -26,6 +26,10 @@ class QualityDetail(BaseModel):
     recommended: bool = False
     quality_note: Optional[str] = None
     flagged_duplicate: bool = False
+    auto_matched: bool = False
+    match_confidence: Optional[float] = None
+    match_reason: Optional[str] = None
+    match_candidates: Optional[List[dict]] = None
 
 
 # ---------------------------

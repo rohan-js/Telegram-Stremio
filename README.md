@@ -81,7 +81,7 @@ This project is designed for personal or private-community use where you control
 - 🧠 **Smart Telegram routing** with multi-client support, DC awareness, probing, timeout scoring, cooldowns, and fallback retry.
 - 🛡️ **Adaptive prefetch** that protects small VPS machines by lowering load when RAM is low or multiple streams are active.
 - 🗂️ **Custom catalogs and auto catalogs** for curated and generated Stremio sections.
-- 🛠️ **Metadata repair tools** including unmatched media, metadata rescan, and manual IMDb/TMDb correction flows.
+- 🛠️ **Metadata repair tools** including highest-score auto-matching, metadata rescan, and manual IMDb/TMDb correction flows.
 - 🧹 **Manual duplicate controls** to hide, show, recommend, and annotate stream qualities without deleting them.
 - 💳 **Subscription management** with plans, payment review, token generation, expiry handling, and access controls.
 - 📊 **Admin dashboards** for active streams, failed streams, egress, token usage, Telegram routing, and watch-request tracking.
@@ -90,7 +90,7 @@ This project is designed for personal or private-community use where you control
 
 - ✅ **Callback-based Watch in Stremio tracking** - channel buttons record who requested a watch link.
 - ✅ **Watch Requests page** - a dedicated admin view for recent Telegram watch-link clicks.
-- ✅ **Unmatched media page** - repair files or torrents that failed metadata detection.
+- ✅ **Highest-score metadata matching** - ambiguous files are indexed to the best-scored candidate instead of stopping ingestion.
 - ✅ **Metadata rescan UI** - replace incorrect metadata while preserving all stream qualities.
 - ✅ **Custom catalog manager** - create, edit, hide, delete, and fill custom catalogs.
 - ✅ **Auto catalog generation** - opt-in background/manual generation for language, OTT, and smart categories.
@@ -207,14 +207,14 @@ Behavior:
 - Magnets are indexed as native torrent streams.
 - `.torrent` files are parsed for info hash, trackers, file names, file sizes, and file indexes.
 - Multi-file torrents can map TV episodes to exact files.
-- If metadata cannot be inferred, the item appears in the unmatched media repair flow.
+- If metadata cannot be inferred at all, resend with an IMDb/TMDb link or a clearer filename.
 
 ## 🏷️ Metadata Repair
 
 If the title is matched incorrectly or metadata detection fails:
 
 1. Open the admin UI.
-2. Go to **Unmatched** for failed items, or **Media** for already indexed items.
+2. Go to **Media** and open the indexed item.
 3. Search for the correct TMDb/IMDb match.
 4. Apply the match.
 
@@ -363,7 +363,6 @@ Protected admin pages:
 | `/media/manage` | Browse movies and series. |
 | `/media/edit` | Edit metadata and manage stream qualities. |
 | `/catalogs` | Create custom catalogs and manage auto catalogs. |
-| `/unmatched` | Repair failed metadata matches. |
 | `/watch-requests` | See Telegram users who clicked Watch in Stremio callbacks. |
 | `/admin/subscriptions` | Manage subscription plans. |
 | `/admin/access` | View, extend, revoke, and reassign access. |
@@ -401,16 +400,9 @@ Auto catalogs are opt-in from the admin UI. They can classify indexed media into
 
 No heavy full rebuild is required on first boot. Admins choose enabled auto-catalog options from `/catalogs`.
 
-## 🛠️ Unmatched Media
+## 🎯 Highest-Score Matching
 
-The unmatched media page stores failed ingestion references, not video bytes.
-
-Use it when:
-
-- A filename is unclear.
-- A torrent has no obvious title.
-- A season pack cannot map correctly.
-- Metadata search returned the wrong result.
+Uploads are matched to the highest-scoring IMDb/TMDb candidate whenever a usable candidate exists. If the wrong title is selected, use Metadata Rescan from the Media edit page to apply the correct match while preserving streams.
 
 ## 🔁 Metadata Rescan
 
@@ -710,11 +702,11 @@ Use the dashboard and `/stream/stats` to inspect:
 
 ## Metadata Failed
 
-Use clearer filenames with title/year/quality for movies and `SxxEyy` for episodes. For failed items, open `/unmatched`, search the correct metadata, and apply it manually.
+Use clearer filenames with title/year/quality for movies and `SxxEyy` for episodes. If metadata fails completely, resend the file or torrent with an IMDb/TMDb link in the caption.
 
 ## Batch Uploads
 
-Batch uploads are queued and processed one by one. If a file does not index, check `/unmatched` and the bot reply in the Telegram channel.
+Batch uploads are queued and processed one by one. If a file does not index, check the bot reply in the Telegram channel and resend with a clearer title or IMDb/TMDb link.
 
 ## Slow Telegram Stream
 

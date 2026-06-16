@@ -221,25 +221,7 @@ async def _scan_channel(client: Client, chat_id: int):
                 metadata_info = None
 
             if metadata_info is None:
-                match_details = pop_match_failure(channel_int, msg_id)
-                if match_details:
-                    await db.upsert_unmatched_media(
-                        {
-                            "source_type": "telegram",
-                            "source_key": f"telegram:{chat_id}:{msg_id}",
-                            "channel": channel_int,
-                            "chat_id": int(chat_id),
-                            "msg_id": int(msg_id),
-                            "title": title,
-                            "file_name": getattr(file, "file_name", None) or title,
-                            "size": size,
-                            "file_size": int(getattr(file, "file_size", 0) or 0),
-                            "override_id": extract_default_id(message.caption) if message.caption else None,
-                            "match_details": match_details,
-                        },
-                        match_details.get("match_rejection_reason") or "metadata_failed",
-                        suggestions=match_details.get("match_candidates"),
-                    )
+                pop_match_failure(channel_int, msg_id)
                 s.skipped_meta += 1
                 s.processed += 1
                 await _update_progress()

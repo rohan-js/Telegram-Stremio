@@ -163,6 +163,31 @@ def pop_match_failure(channel, msg_id) -> dict:
     return MATCH_FAILURE_CACHE.pop(_cache_key(channel, msg_id), {})
 
 
+def _attach_match_details(metadata_info: dict | None, match_details: dict | None, filename: str) -> dict | None:
+    if not metadata_info or not match_details:
+        return metadata_info
+
+    reason = match_details.get("match_reason") or match_details.get("match_rejection_reason") or "accepted"
+    metadata_info.update({
+        "auto_matched": bool(match_details.get("auto_matched", True)),
+        "match_confidence": match_details.get("match_confidence"),
+        "match_reason": reason,
+        "match_candidates": match_details.get("match_candidates") or [],
+    })
+    if str(reason).startswith("accepted_low_confidence"):
+        top_candidates = metadata_info["match_candidates"][:3]
+        LOGGER.warning(
+            "Low-confidence metadata match accepted for %s -> %s (%s), confidence=%s, reason=%s, candidates=%s",
+            filename,
+            metadata_info.get("title"),
+            metadata_info.get("year") or metadata_info.get("release_year"),
+            metadata_info.get("match_confidence"),
+            reason,
+            top_candidates,
+        )
+    return metadata_info
+
+
 def _safe_year(value) -> int | None:
     try:
         value = int(value)
@@ -551,34 +576,37 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
     try:
         if season and episode:
             LOGGER.info(f"Fetching TV metadata: {title} S{season}E{episode}")
+            match_details = None
             if not explicit_default_id and not default_id:
                 candidate, match_details = await resolve_tv_match(title, season, episode, year, raw_title=filename, parsed=parsed)
                 if not candidate:
                     set_match_failure(channel, msg_id, match_details)
-                    LOGGER.warning(f"Strict TV metadata match rejected for {filename}: {match_details.get('match_rejection_reason')}")
+                    LOGGER.warning(f"TV metadata match failed for {filename}: {match_details.get('match_rejection_reason')}")
                     return None
                 default_id = candidate.imdb_id or candidate.tmdb_id
-            return await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id)
+            return _attach_match_details(await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id), match_details, filename)
         elif season:
             LOGGER.info(f"Fetching TV season-pack metadata: {title} S{season}")
+            match_details = None
             if not explicit_default_id and not default_id:
                 candidate, match_details = await resolve_tv_match(title, season, None, year, season_pack=True, raw_title=filename, parsed=parsed)
                 if not candidate:
                     set_match_failure(channel, msg_id, match_details)
-                    LOGGER.warning(f"Strict TV season-pack metadata match rejected for {filename}: {match_details.get('match_rejection_reason')}")
+                    LOGGER.warning(f"TV season-pack metadata match failed for {filename}: {match_details.get('match_rejection_reason')}")
                     return None
                 default_id = candidate.imdb_id or candidate.tmdb_id
-            return await fetch_tv_season_pack_metadata(title, season, encoded_string, year, quality, default_id)
+            return _attach_match_details(await fetch_tv_season_pack_metadata(title, season, encoded_string, year, quality, default_id), match_details, filename)
         else:
             LOGGER.info(f"Fetching Movie metadata: {title} ({year})")
+            match_details = None
             if not explicit_default_id and not default_id:
                 candidate, match_details = await resolve_movie_match(title, year, raw_title=filename, parsed=parsed)
                 if not candidate:
                     set_match_failure(channel, msg_id, match_details)
-                    LOGGER.warning(f"Strict movie metadata match rejected for {filename}: {match_details.get('match_rejection_reason')}")
+                    LOGGER.warning(f"Movie metadata match failed for {filename}: {match_details.get('match_rejection_reason')}")
                     return None
                 default_id = candidate.imdb_id or candidate.tmdb_id
-            return await fetch_movie_metadata(title, encoded_string, year, quality, default_id)
+            return _attach_match_details(await fetch_movie_metadata(title, encoded_string, year, quality, default_id), match_details, filename)
     except Exception as e:
         LOGGER.error(f"Error while fetching metadata for {filename}: {e}\n{traceback.format_exc()}")
         return None

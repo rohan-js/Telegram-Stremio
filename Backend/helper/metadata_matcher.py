@@ -362,26 +362,28 @@ def choose_best_candidate(intent: MatchIntent, candidates: list[MatchCandidate])
     margin = top_score - second_score
     generic = is_generic_title(intent.clean_title)
 
-    if top_reason:
-        return MatchDecision(False, top, top_score, top_reason, public)
     if top.media_type != intent.media_type:
         return MatchDecision(False, top, top_score, "metadata_media_type_mismatch", public)
-    if intent.year and top.year and abs(int(intent.year) - int(top.year)) > 1:
-        return MatchDecision(False, top, top_score, "metadata_year_mismatch", public)
-    if intent.year and not top.year:
-        return MatchDecision(False, top, top_score, "metadata_year_missing", public)
-    if generic and not intent.year:
-        return MatchDecision(False, top, top_score, "metadata_generic_title_needs_year", public)
 
     min_title = 92.0 if generic else 86.0
     min_margin = 8.0 if intent.year else 12.0
     if generic:
         min_margin = 12.0
 
-    if top_title_score < min_title:
-        return MatchDecision(False, top, top_score, "metadata_title_mismatch", public)
-    if second_score > -999.0 and margin < min_margin:
-        return MatchDecision(False, top, top_score, "metadata_ambiguous_match", public)
+    weak_reason = top_reason
+    if not weak_reason and intent.year and top.year and abs(int(intent.year) - int(top.year)) > 1:
+        weak_reason = "metadata_year_mismatch"
+    if not weak_reason and intent.year and not top.year:
+        weak_reason = "metadata_year_missing"
+    if not weak_reason and generic and not intent.year:
+        weak_reason = "metadata_generic_title_needs_year"
+    if not weak_reason and top_title_score < min_title:
+        weak_reason = "metadata_title_mismatch"
+    if not weak_reason and second_score > -999.0 and margin < min_margin:
+        weak_reason = "metadata_ambiguous_match"
+
+    if weak_reason:
+        return MatchDecision(True, top, top_score, f"accepted_low_confidence:{weak_reason}", public)
 
     return MatchDecision(True, top, top_score, "accepted", public)
 
@@ -394,5 +396,7 @@ def decision_metadata(decision: MatchDecision, intent: MatchIntent) -> dict:
         "search_variants": intent.title_variants or [intent.clean_title],
         "match_confidence": round(decision.confidence, 2),
         "match_rejection_reason": None if decision.accepted else decision.reason,
+        "match_reason": decision.reason,
         "match_candidates": decision.candidates,
+        "auto_matched": bool(decision.candidate),
     }

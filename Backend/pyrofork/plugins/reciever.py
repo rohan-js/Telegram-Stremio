@@ -37,21 +37,19 @@ db_lock = Lock()
 reply_queue = Queue()
 
 METADATA_FAILED_TEXT = (
-    "🛠️ <b>Needs manual match</b>\n"
+    "⚠️ <b>Metadata failed</b>\n"
     "<code>{title}</code>\n\n"
-    "I could not identify this with enough confidence, so I saved it to Unmatched Media instead "
-    "of assigning it to the wrong title.\n\n"
-    "Open the admin Unmatched page and apply the correct IMDb/TMDb match, or resend this with "
-    "an IMDb/TMDb link in the caption."
+    "I could not find any usable movie/series metadata for this file. "
+    "Please resend it with an IMDb/TMDb link in the caption, or use a clearer filename like "
+    "<code>Movie Name 2024 1080p</code> / <code>Show.Name.S01E01</code>."
 )
 
 TORRENT_METADATA_FAILED_TEXT = (
-    "🛠️ <b>Needs manual match</b>\n"
+    "⚠️ <b>Metadata failed</b>\n"
     "<code>{title}</code>\n\n"
-    "I could not identify this torrent with enough confidence, so I saved it to Unmatched Media "
-    "instead of assigning it to the wrong title.\n\n"
-    "Open the admin Unmatched page and apply the correct IMDb/TMDb match, or resend this with "
-    "an IMDb/TMDb link in the caption."
+    "I could not find any usable movie/series metadata for this torrent. "
+    "Please resend it with an IMDb/TMDb link in the caption, or use a clearer torrent/file name like "
+    "<code>Movie Name 2024 1080p</code> / <code>Show.Name.S01E01</code>."
 )
 
 VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".flv", ".wmv")
@@ -115,7 +113,7 @@ def _format_queue_status(state: str, title: str, position: int | None = None, re
     return "\n".join(parts)
 
 
-async def _send_unmatched_reply(job: dict, reason: str) -> None:
+async def _send_metadata_failed_reply(job: dict, reason: str) -> None:
     chat_id = job.get("chat_id")
     msg_id = job.get("original_msg_id") or job.get("msg_id")
     if not chat_id or not msg_id:
@@ -123,11 +121,7 @@ async def _send_unmatched_reply(job: dict, reason: str) -> None:
 
     title = job.get("display_name") or job.get("title") or job.get("file_name") or "unknown"
     template = TORRENT_METADATA_FAILED_TEXT if job.get("source_type") == "torrent" else METADATA_FAILED_TEXT
-    base_url = Telegram.BASE_URL.rstrip("/")
     text = f"{template.format(title=escape(title))}\n\nReason: <code>{escape(str(reason)[:120])}</code>"
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛠️ Open Unmatched", url=f"{base_url}/unmatched")]
-    ])
 
     try:
         from Backend.pyrofork.bot import StreamBot
@@ -137,14 +131,13 @@ async def _send_unmatched_reply(job: dict, reason: str) -> None:
             reply_to_message_id=int(msg_id),
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
-            reply_markup=buttons,
         )
     except FloodWait as e:
-        LOGGER.info(f"FloodWait in unmatched reply: sleeping for {e.value}s")
+        LOGGER.info(f"FloodWait in metadata failure reply: sleeping for {e.value}s")
         await asleep(e.value)
-        await _send_unmatched_reply(job, reason)
+        await _send_metadata_failed_reply(job, reason)
     except Exception as e:
-        LOGGER.error(f"Failed to send unmatched reply: {e}")
+        LOGGER.error(f"Failed to send metadata failure reply: {e}")
 
 
 async def _metadata_for_job(job: dict) -> dict | None:
@@ -166,16 +159,11 @@ async def _process_ingest_job(job: dict) -> None:
         reason = match_details.get("match_rejection_reason") or "metadata_failed"
         if match_details:
             job["match_details"] = match_details
-        await db.upsert_unmatched_media(
-            job,
-            reason,
-            suggestions=match_details.get("match_candidates") if match_details else None,
-        )
         await _delete_status(
             job.get("status_chat_id"),
             job.get("status_msg_id"),
         )
-        await _send_unmatched_reply(job, reason)
+        await _send_metadata_failed_reply(job, reason)
         LOGGER.warning(f"Metadata failed for queued {job.get('source_type')} item: {title} (ID: {job.get('msg_id')})")
         return
 
@@ -221,7 +209,6 @@ async def _process_ingest_job(job: dict) -> None:
         await reply_queue.put((job["chat_id"], job["original_msg_id"], metadata_info, job.get("display_name") or title, job.get("size") or ""))
     else:
         reason = "database_insert_failed"
-        await db.upsert_unmatched_media(job, reason)
         await _edit_status(
             job.get("status_chat_id"),
             job.get("status_msg_id"),
