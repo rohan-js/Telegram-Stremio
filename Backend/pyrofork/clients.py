@@ -27,6 +27,7 @@ async def start_client(client_id, token):
             api_id=Telegram.API_ID,
             api_hash=Telegram.API_HASH,
             bot_token=token,
+            proxy=Telegram.telegram_proxy(),
             sleep_threshold=100,
             no_updates=True,
             in_memory=True

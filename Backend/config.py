@@ -8,6 +8,34 @@ class Telegram:
     API_HASH = getenv("API_HASH", "")
     BOT_TOKEN = getenv("BOT_TOKEN", "")
     HELPER_BOT_TOKEN = getenv("HELPER_BOT_TOKEN", "")
+    TELEGRAM_PROXY_ENABLED = getenv("TELEGRAM_PROXY_ENABLED", "false").lower() == "true"
+    TELEGRAM_PROXY_SCHEME = getenv("TELEGRAM_PROXY_SCHEME", "socks5").strip().lower()
+    TELEGRAM_PROXY_HOST = getenv("TELEGRAM_PROXY_HOST", "").strip()
+    try:
+        TELEGRAM_PROXY_PORT = int(getenv("TELEGRAM_PROXY_PORT", "0") or 0)
+    except Exception:
+        TELEGRAM_PROXY_PORT = 0
+    TELEGRAM_PROXY_USERNAME = getenv("TELEGRAM_PROXY_USERNAME", "").strip()
+    TELEGRAM_PROXY_PASSWORD = getenv("TELEGRAM_PROXY_PASSWORD", "").strip()
+
+    @classmethod
+    def telegram_proxy(cls):
+        if not cls.TELEGRAM_PROXY_ENABLED:
+            return None
+        if cls.TELEGRAM_PROXY_SCHEME.upper() not in {"SOCKS4", "SOCKS5", "HTTP"}:
+            raise ValueError("TELEGRAM_PROXY_SCHEME must be one of: socks4, socks5, http")
+        if not cls.TELEGRAM_PROXY_HOST or not cls.TELEGRAM_PROXY_PORT:
+            raise ValueError("TELEGRAM_PROXY_HOST and TELEGRAM_PROXY_PORT are required when TELEGRAM_PROXY_ENABLED=true")
+        proxy = {
+            "scheme": cls.TELEGRAM_PROXY_SCHEME,
+            "hostname": cls.TELEGRAM_PROXY_HOST,
+            "port": cls.TELEGRAM_PROXY_PORT,
+        }
+        if cls.TELEGRAM_PROXY_USERNAME:
+            proxy["username"] = cls.TELEGRAM_PROXY_USERNAME
+        if cls.TELEGRAM_PROXY_PASSWORD:
+            proxy["password"] = cls.TELEGRAM_PROXY_PASSWORD
+        return proxy
 
     BASE_URL = getenv("BASE_URL", "").rstrip('/')
     PORT = int(getenv("PORT", "8000"))
