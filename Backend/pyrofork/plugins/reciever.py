@@ -37,15 +37,21 @@ db_lock = Lock()
 reply_queue = Queue()
 
 METADATA_FAILED_TEXT = (
-    "Metadata failed for this file. The filename may be valid, but the external metadata service "
-    "may be temporarily unavailable. Try again after a minute, or add an IMDb/TMDb link in the caption. "
-    "For TV files, use S01E01 for episodes or S01 COMBINED for a full-season pack."
+    "🛠️ <b>Needs manual match</b>\n"
+    "<code>{title}</code>\n\n"
+    "I could not identify this with enough confidence, so I saved it to Unmatched Media instead "
+    "of assigning it to the wrong title.\n\n"
+    "Open the admin Unmatched page and apply the correct IMDb/TMDb match, or resend this with "
+    "an IMDb/TMDb link in the caption."
 )
 
 TORRENT_METADATA_FAILED_TEXT = (
-    "Metadata failed for this torrent. Add an IMDb/TMDb link, or use a clearer title like "
-    "Movie Name 2024 1080p / Show.Name.S01E01. For full-season torrents, episode filenames "
-    "should include S01E01 style numbering."
+    "🛠️ <b>Needs manual match</b>\n"
+    "<code>{title}</code>\n\n"
+    "I could not identify this torrent with enough confidence, so I saved it to Unmatched Media "
+    "instead of assigning it to the wrong title.\n\n"
+    "Open the admin Unmatched page and apply the correct IMDb/TMDb match, or resend this with "
+    "an IMDb/TMDb link in the caption."
 )
 
 VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".flv", ".wmv")
@@ -109,6 +115,38 @@ def _format_queue_status(state: str, title: str, position: int | None = None, re
     return "\n".join(parts)
 
 
+async def _send_unmatched_reply(job: dict, reason: str) -> None:
+    chat_id = job.get("chat_id")
+    msg_id = job.get("original_msg_id") or job.get("msg_id")
+    if not chat_id or not msg_id:
+        return
+
+    title = job.get("display_name") or job.get("title") or job.get("file_name") or "unknown"
+    template = TORRENT_METADATA_FAILED_TEXT if job.get("source_type") == "torrent" else METADATA_FAILED_TEXT
+    base_url = Telegram.BASE_URL.rstrip("/")
+    text = f"{template.format(title=escape(title))}\n\nReason: <code>{escape(str(reason)[:120])}</code>"
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛠️ Open Unmatched", url=f"{base_url}/unmatched")]
+    ])
+
+    try:
+        from Backend.pyrofork.bot import StreamBot
+        await StreamBot.send_message(
+            chat_id=int(chat_id),
+            text=text,
+            reply_to_message_id=int(msg_id),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            reply_markup=buttons,
+        )
+    except FloodWait as e:
+        LOGGER.info(f"FloodWait in unmatched reply: sleeping for {e.value}s")
+        await asleep(e.value)
+        await _send_unmatched_reply(job, reason)
+    except Exception as e:
+        LOGGER.error(f"Failed to send unmatched reply: {e}")
+
+
 async def _metadata_for_job(job: dict) -> dict | None:
     title = job.get("title") or job.get("file_name") or "unknown"
     return await metadata(
@@ -137,6 +175,7 @@ async def _process_ingest_job(job: dict) -> None:
             job.get("status_chat_id"),
             job.get("status_msg_id"),
         )
+        await _send_unmatched_reply(job, reason)
         LOGGER.warning(f"Metadata failed for queued {job.get('source_type')} item: {title} (ID: {job.get('msg_id')})")
         return
 
