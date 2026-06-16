@@ -31,6 +31,51 @@ from Backend.fastapi.main import app
 
 loop = get_event_loop()
 
+async def start_telegram_services():
+    while True:
+        try:
+            await asyncio.wait_for(StreamBot.start(), timeout=Telegram.TELEGRAM_CLIENT_START_TIMEOUT_SEC)
+            StreamBot.username = StreamBot.me.username
+            LOGGER.info(f"Bot Client : [@{StreamBot.username}]")
+            await asleep(1.2)
+
+            await asyncio.wait_for(Helper.start(), timeout=Telegram.TELEGRAM_CLIENT_START_TIMEOUT_SEC)
+            Helper.username = Helper.me.username
+            LOGGER.info(f"Helper Bot Client : [@{Helper.username}]")
+            await asleep(1.2)
+
+            LOGGER.info("Initializing Multi Clients...")
+            await initialize_clients()
+            await asleep(2)
+
+            await _load_channels_from_db()
+            await asleep(2)
+
+            await setup_bot_commands(StreamBot)
+            await asleep(2)
+
+            if Telegram.TORRENT_DOWNLOADS_ENABLED:
+                await TORRENT_DOWNLOAD_MANAGER.start()
+
+            await restart_notification()
+
+            if Telegram.SUBSCRIPTION:
+                loop.create_task(subscription_checker_loop(StreamBot))
+                LOGGER.info("Subscription Checker Task Started.")
+
+            LOGGER.info("Telegram clients started successfully.")
+            return
+        except Exception:
+            LOGGER.error("Telegram client startup failed; retrying in 60 seconds:\n" + format_exc())
+            for client in (StreamBot, Helper):
+                try:
+                    if getattr(client, "is_connected", False):
+                        await client.stop()
+                except Exception:
+                    LOGGER.warning("Ignoring Telegram client cleanup error during retry.", exc_info=True)
+            await asleep(60)
+
+
 async def start_services():
     try:
         LOGGER.info(f"Initializing Telegram-Stremio v-{__version__}")
@@ -38,32 +83,8 @@ async def start_services():
         
         await db.connect()
         await asleep(1.2)
-        
-        await StreamBot.start()
-        StreamBot.username = StreamBot.me.username
-        LOGGER.info(f"Bot Client : [@{StreamBot.username}]")
-        await asleep(1.2)
 
-        await Helper.start()
-        Helper.username = Helper.me.username
-        LOGGER.info(f"Helper Bot Client : [@{Helper.username}]")
-        await asleep(1.2)
-
-        LOGGER.info("Initializing Multi Clients...")
-        await initialize_clients()
-        await asleep(2)
-
-        await _load_channels_from_db()
-        await asleep(2)
-        
-        await setup_bot_commands(StreamBot)
-        await asleep(2)
-
-        if Telegram.TORRENT_DOWNLOADS_ENABLED:
-            await TORRENT_DOWNLOAD_MANAGER.start()
-
-        LOGGER.info('Initializing Telegram-Stremio Web Server...')
-        await restart_notification()
+        LOGGER.info("Initializing Telegram-Stremio Web Server...")
         loop.create_task(server.serve())
         loop.create_task(ping())
         
@@ -86,10 +107,8 @@ async def start_services():
                 delay_seconds=Telegram.IPTV_SYNC_START_DELAY_SECONDS,
             ))
             loop.create_task(start_iptv_interval_loop(db))
-        
-        if Telegram.SUBSCRIPTION:
-            loop.create_task(subscription_checker_loop(StreamBot))
-            LOGGER.info("Subscription Checker Task Started.")
+
+        loop.create_task(start_telegram_services())
         
         LOGGER.info("Telegram-Stremio Started Successfully!")
         await idle()

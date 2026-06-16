@@ -17,6 +17,10 @@ class Telegram:
         TELEGRAM_PROXY_PORT = 0
     TELEGRAM_PROXY_USERNAME = getenv("TELEGRAM_PROXY_USERNAME", "").strip()
     TELEGRAM_PROXY_PASSWORD = getenv("TELEGRAM_PROXY_PASSWORD", "").strip()
+    try:
+        TELEGRAM_CLIENT_START_TIMEOUT_SEC = int(getenv("TELEGRAM_CLIENT_START_TIMEOUT_SEC", "45") or 45)
+    except Exception:
+        TELEGRAM_CLIENT_START_TIMEOUT_SEC = 45
 
     @classmethod
     def telegram_proxy(cls):
