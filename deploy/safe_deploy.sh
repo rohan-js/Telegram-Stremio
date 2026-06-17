@@ -9,6 +9,9 @@ STREAM_STATS_URL="${STREAM_STATS_URL:-http://127.0.0.1:8000/stream/stats}"
 LOGIN_URL="${LOGIN_URL:-http://127.0.0.1:8000/login}"
 MANIFEST_URL="${MANIFEST_URL:-}"
 STARTUP_TIMEOUT_SECONDS="${STARTUP_TIMEOUT_SECONDS:-180}"
+COMPOSE_FILE_PRIMARY="${COMPOSE_FILE_PRIMARY:-docker-compose.yaml}"
+COMPOSE_OVERRIDE="${COMPOSE_OVERRIDE:-docker-compose.wgkernel.yml}"
+USE_COMPOSE_OVERRIDE="${USE_COMPOSE_OVERRIDE:-auto}"
 
 cd "${APP_DIR}"
 
@@ -16,6 +19,15 @@ if ! docker compose version >/dev/null 2>&1; then
   echo "Docker Compose v2 is required; legacy docker-compose is not supported." >&2
   exit 1
 fi
+
+compose_args=(-f "${COMPOSE_FILE_PRIMARY}")
+if [ "${USE_COMPOSE_OVERRIDE}" != "false" ] && [ -f "${COMPOSE_OVERRIDE}" ]; then
+  compose_args+=(-f "${COMPOSE_OVERRIDE}")
+fi
+
+compose() {
+  docker compose "${compose_args[@]}" "$@"
+}
 
 active_streams="$(
   curl -fsS --max-time 10 "${STREAM_STATS_URL}" \
@@ -39,7 +51,7 @@ print(match.group(1))
 PY
 )"
 
-docker compose build "${SERVICE}"
+compose build "${SERVICE}"
 
 built_image_id="$(docker image inspect "${IMAGE}" --format '{{.Id}}')"
 built_version="$(
@@ -54,7 +66,7 @@ fi
 docker run --rm --entrypoint python "${IMAGE}" -c \
   'from Backend.helper.metadata_matcher import build_title_variants; assert build_title_variants("Patriot.2026", "Patriot", 2026)'
 
-docker compose up -d --no-deps --force-recreate "${SERVICE}"
+compose up -d --no-deps --force-recreate "${SERVICE}"
 
 deadline=$((SECONDS + STARTUP_TIMEOUT_SECONDS))
 until curl -fsS --max-time 10 -o /dev/null "${LOGIN_URL}"; do
