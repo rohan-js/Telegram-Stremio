@@ -750,6 +750,11 @@
         const ttfb = stream?.ttfb_sec !== null && stream?.ttfb_sec !== undefined ? Number(stream.ttfb_sec).toFixed(3) + 's' : '—';
         const timeouts = Number(stream?.chunk_timeouts || 0);
         const fallbacks = Number(stream?.fallback_chunks || 0);
+        const cdnChunks = Number(stream?.cdn_chunks || 0);
+        const cdnRedirects = Number(stream?.cdn_redirects || 0);
+        const cdnBytes = formatBytes(stream?.cdn_bytes || 0);
+        const cdnErrors = Number(stream?.cdn_errors || 0);
+        const cdnDc = stream?.cdn_dc !== null && stream?.cdn_dc !== undefined ? `CDN DC ${stream.cdn_dc}` : '—';
         const errorReason = escapeHtml(stream?.error_reason || '');
         const adaptive = stream?.adaptive_prefetch || stream?.meta?.adaptive_prefetch || {};
         const prefetch = adaptive?.effective_prefetch ? `${adaptive.effective_prefetch}/${adaptive.effective_parallelism}` : '—';
@@ -812,6 +817,14 @@
                     <div class="text-center">
                         <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Prefetch</p>
                         <p class="text-xs font-bold text-text" title="${prefetchReason}">${escapeHtml(prefetch)}</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">CDN</p>
+                        <p class="text-xs font-bold text-text" title="${escapeHtml(cdnBytes)} via ${escapeHtml(cdnDc)}">${cdnChunks}/${cdnRedirects}</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">CDN Errors</p>
+                        <p class="text-xs font-bold text-text">${cdnErrors}</p>
                     </div>
                 </div>
 

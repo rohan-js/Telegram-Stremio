@@ -1,11 +1,13 @@
 import asyncio
 import time
 import secrets
+from hashlib import sha256
 from collections import deque
-from typing import Dict, List, Union, Optional, Tuple
+from typing import Any, Callable, Dict, List, Union, Optional, Tuple
 import traceback
 from fastapi import Request
 from pyrogram import Client, raw, utils
+from pyrogram.crypto import aes
 from pyrogram.errors import AuthBytesInvalid
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from pyrogram.session import Session, Auth
@@ -29,6 +31,10 @@ ACTIVE_STREAMS: Dict[str, Dict] = {}
 RECENT_STREAMS = deque(maxlen=20)
 client_dc_avg_mbps: Dict[Tuple[int, int], float] = {}
 client_dc_ttfb_sec: Dict[Tuple[int, int], float] = {}
+
+
+class TelegramCdnFetchError(RuntimeError):
+    """Raised when a Telegram CDN redirect cannot be fetched safely."""
 
 
 def _ema(previous: float, current: float, weight: float = 0.3) -> float:
@@ -182,6 +188,9 @@ class ByteStreamer:
         self.client_index = client_index
         self._file_id_cache: Dict[Tuple[int, int], FileId] = {}
         self._session_lock = asyncio.Lock()
+        self._cdn_session_lock = asyncio.Lock()
+        self._cdn_sessions: Dict[int, Session] = {}
+        self._cdn_getfile_supported = True
         # Register this streamer so fallback logic can reuse it
         if client_index >= 0:
             ByteStreamer._instances[client_index] = self
@@ -250,6 +259,257 @@ class ByteStreamer:
             self._file_id_cache[cache_key] = file_id
         return self._file_id_cache[cache_key]
 
+    async def _send_upload_get_file(
+        self,
+        media_session: Session,
+        location: Union[
+            raw.types.InputPhotoFileLocation,
+            raw.types.InputDocumentFileLocation,
+            raw.types.InputPeerPhotoFileLocation,
+        ],
+        offset: int,
+        limit: int,
+    ) -> Any:
+        if bool(getattr(Telegram, "TELEGRAM_CDN_ENABLED", True)) and self._cdn_getfile_supported:
+            try:
+                request = raw.functions.upload.GetFile(
+                    location=location,
+                    offset=offset,
+                    limit=limit,
+                    cdn_supported=True,
+                )
+            except TypeError:
+                self._cdn_getfile_supported = False
+                LOGGER.warning("Telegram CDN disabled for this streamer: PyroFork GetFile has no cdn_supported flag")
+            else:
+                return await media_session.send(request)
+
+        return await media_session.send(
+            raw.functions.upload.GetFile(location=location, offset=offset, limit=limit)
+        )
+
+    async def _fetch_file_bytes(
+        self,
+        media_session: Session,
+        location: Union[
+            raw.types.InputPhotoFileLocation,
+            raw.types.InputDocumentFileLocation,
+            raw.types.InputPeerPhotoFileLocation,
+        ],
+        offset: int,
+        limit: int,
+        route_event: Optional[Callable[[dict], None]] = None,
+        stream_stats: Optional[dict] = None,
+    ) -> Optional[bytes]:
+        response = await self._send_upload_get_file(media_session, location, offset, limit)
+        if isinstance(response, raw.types.upload.FileCdnRedirect):
+            return await self._fetch_cdn_redirect(
+                origin_session=media_session,
+                redirect=response,
+                offset=offset,
+                limit=limit,
+                route_event=route_event,
+                stream_stats=stream_stats,
+            )
+        return getattr(response, "bytes", None) if response else None
+
+    async def _get_cdn_session(self, dc_id: int) -> Session:
+        dc_id = int(dc_id)
+        cdn_session = self._cdn_sessions.get(dc_id)
+        if cdn_session:
+            return cdn_session
+
+        async with self._cdn_session_lock:
+            cdn_session = self._cdn_sessions.get(dc_id)
+            if cdn_session:
+                return cdn_session
+
+            test_mode = await self.client.storage.test_mode()
+            auth_key = await Auth(self.client, dc_id, test_mode).create()
+            cdn_session = Session(self.client, dc_id, auth_key, test_mode, is_media=True, is_cdn=True)
+            cdn_session.no_updates = True
+            cdn_session.timeout = 30
+            cdn_session.sleep_threshold = 60
+            await cdn_session.start()
+            self._cdn_sessions[dc_id] = cdn_session
+            LOGGER.debug("Created Telegram CDN session for DC %s", dc_id)
+            return cdn_session
+
+    async def _fetch_cdn_redirect(
+        self,
+        origin_session: Session,
+        redirect: raw.types.upload.FileCdnRedirect,
+        offset: int,
+        limit: int,
+        route_event: Optional[Callable[[dict], None]] = None,
+        stream_stats: Optional[dict] = None,
+    ) -> bytes:
+        cdn_dc = int(getattr(redirect, "dc_id", 0) or 0)
+        self._record_cdn_stat(stream_stats, "cdn_redirects", 1)
+        self._record_cdn_stat(stream_stats, "cdn_dc", cdn_dc, replace=True)
+        self._emit_cdn_event(
+            route_event,
+            {
+                "event": "cdn_redirect",
+                "offset": offset,
+                "limit": limit,
+                "cdn_dc": cdn_dc,
+            },
+        )
+
+        cdn_session = await self._get_cdn_session(cdn_dc)
+        max_reuploads = max(0, int(getattr(Telegram, "TELEGRAM_CDN_MAX_REUPLOAD_ATTEMPTS", 2) or 2))
+        reuploads = 0
+
+        while True:
+            response = await cdn_session.send(
+                raw.functions.upload.GetCdnFile(
+                    file_token=redirect.file_token,
+                    offset=offset,
+                    limit=limit,
+                )
+            )
+
+            if isinstance(response, raw.types.upload.CdnFileReuploadNeeded):
+                self._emit_cdn_event(
+                    route_event,
+                    {
+                        "event": "cdn_reupload_needed",
+                        "offset": offset,
+                        "limit": limit,
+                        "cdn_dc": cdn_dc,
+                        "attempt": reuploads + 1,
+                    },
+                )
+                if reuploads >= max_reuploads:
+                    self._record_cdn_stat(stream_stats, "cdn_errors", 1)
+                    raise TelegramCdnFetchError(f"cdn_reupload_exhausted dc={cdn_dc} offset={offset}")
+                await origin_session.send(
+                    raw.functions.upload.ReuploadCdnFile(
+                        file_token=redirect.file_token,
+                        request_token=response.request_token,
+                    )
+                )
+                reuploads += 1
+                continue
+
+            encrypted = getattr(response, "bytes", None) if response else None
+            if encrypted is None:
+                self._record_cdn_stat(stream_stats, "cdn_errors", 1)
+                raise TelegramCdnFetchError(f"empty_cdn_response dc={cdn_dc} offset={offset}")
+
+            decrypted = self._decrypt_cdn_bytes(
+                encrypted=encrypted,
+                key=redirect.encryption_key,
+                iv=redirect.encryption_iv,
+                offset=offset,
+            )
+            if bool(getattr(Telegram, "TELEGRAM_CDN_VERIFY_HASHES", True)):
+                await self._verify_cdn_hashes(
+                    origin_session=origin_session,
+                    redirect=redirect,
+                    offset=offset,
+                    data=decrypted,
+                    route_event=route_event,
+                    stream_stats=stream_stats,
+                )
+
+            self._record_cdn_stat(stream_stats, "cdn_chunks", 1)
+            self._record_cdn_stat(stream_stats, "cdn_bytes", len(decrypted))
+            self._emit_cdn_event(
+                route_event,
+                {
+                    "event": "cdn_fetch",
+                    "offset": offset,
+                    "limit": limit,
+                    "bytes": len(decrypted),
+                    "cdn_dc": cdn_dc,
+                },
+            )
+            if bool(getattr(Telegram, "TELEGRAM_CDN_DEBUG_LOGS", False)):
+                LOGGER.debug("Telegram CDN fetch dc=%s offset=%s limit=%s bytes=%s", cdn_dc, offset, limit, len(decrypted))
+            return decrypted
+
+    @staticmethod
+    def _decrypt_cdn_bytes(encrypted: bytes, key: bytes, iv: bytes, offset: int) -> bytes:
+        iv_bytes = bytes(iv)
+        if len(iv_bytes) < 4:
+            raise TelegramCdnFetchError("invalid_cdn_iv")
+        ctr_iv = bytearray(iv_bytes[:-4] + (max(0, int(offset)) // 16).to_bytes(4, "big"))
+        return aes.ctr256_decrypt(encrypted, key, ctr_iv)
+
+    async def _verify_cdn_hashes(
+        self,
+        origin_session: Session,
+        redirect: raw.types.upload.FileCdnRedirect,
+        offset: int,
+        data: bytes,
+        route_event: Optional[Callable[[dict], None]] = None,
+        stream_stats: Optional[dict] = None,
+    ) -> None:
+        hashes = list(getattr(redirect, "file_hashes", None) or [])
+        if not self._has_applicable_cdn_hash(hashes, offset, len(data)):
+            hashes = await origin_session.send(
+                raw.functions.upload.GetCdnFileHashes(
+                    file_token=redirect.file_token,
+                    offset=offset,
+                )
+            )
+
+        for file_hash in list(hashes or []):
+            hash_offset = int(getattr(file_hash, "offset", -1))
+            hash_limit = int(getattr(file_hash, "limit", 0) or 0)
+            if hash_limit <= 0:
+                continue
+            start = hash_offset - offset
+            end = start + hash_limit
+            if start < 0 or end > len(data):
+                continue
+            if sha256(data[start:end]).digest() != getattr(file_hash, "hash", b""):
+                self._record_cdn_stat(stream_stats, "cdn_errors", 1)
+                self._emit_cdn_event(
+                    route_event,
+                    {
+                        "event": "cdn_hash_failed",
+                        "offset": offset,
+                        "hash_offset": hash_offset,
+                        "hash_limit": hash_limit,
+                        "cdn_dc": int(getattr(redirect, "dc_id", 0) or 0),
+                    },
+                )
+                raise TelegramCdnFetchError(f"cdn_hash_mismatch offset={offset} hash_offset={hash_offset}")
+
+    @staticmethod
+    def _has_applicable_cdn_hash(hashes: list, offset: int, data_len: int) -> bool:
+        for file_hash in hashes:
+            hash_offset = int(getattr(file_hash, "offset", -1))
+            hash_limit = int(getattr(file_hash, "limit", 0) or 0)
+            start = hash_offset - offset
+            if hash_limit > 0 and start >= 0 and start + hash_limit <= data_len:
+                return True
+        return False
+
+    @staticmethod
+    def _record_cdn_stat(stream_stats: Optional[dict], key: str, value: int, replace: bool = False) -> None:
+        if stream_stats is None:
+            return
+        try:
+            if replace:
+                stream_stats[key] = value
+            else:
+                stream_stats[key] = int(stream_stats.get(key, 0) or 0) + int(value or 0)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _emit_cdn_event(route_event: Optional[Callable[[dict], None]], event: dict) -> None:
+        if not route_event:
+            return
+        try:
+            route_event(event)
+        except Exception:
+            pass
+
     async def prefetch_stream(
         self,
         file_id: FileId,
@@ -293,6 +553,11 @@ class ByteStreamer:
             "chunk_errors": 0,
             "fallback_chunks": 0,
             "zero_pad_chunks": 0,
+            "cdn_redirects": 0,
+            "cdn_chunks": 0,
+            "cdn_bytes": 0,
+            "cdn_errors": 0,
+            "cdn_dc": None,
             "error_reason": None,
             "route_attempts": [],
         }
@@ -395,16 +660,18 @@ class ByteStreamer:
                         "client": use_client_idx,
                         "target_dc": target_dc,
                     })
-                    r = await asyncio.wait_for(
-                        use_session.send(
-                            raw.functions.upload.GetFile(
-                                location=use_location, offset=off, limit=chunk_size
-                            )
+                    chunk_bytes = await asyncio.wait_for(
+                        self._fetch_file_bytes(
+                            media_session=use_session,
+                            location=use_location,
+                            offset=off,
+                            limit=chunk_size,
+                            route_event=remember_route_attempt,
+                            stream_stats=registry_entry,
                         ),
                         timeout=timeout,
                     )
                     elapsed = max(time.perf_counter() - fetch_started, 1e-6)
-                    chunk_bytes = getattr(r, "bytes", None) if r else None
                     
                     if chunk_bytes == b"":
                         reason = f"empty_chunk client={use_client_idx} seq={seq_idx} offset={off}"
@@ -830,18 +1097,16 @@ class ByteStreamer:
             timeout = max(1.0, float(timeout or 4.0))
 
             started = time.perf_counter()
-            response = await asyncio.wait_for(
-                media_session.send(
-                    raw.functions.upload.GetFile(
-                        location=location,
-                        offset=offset,
-                        limit=limit,
-                    )
+            chunk = await asyncio.wait_for(
+                self._fetch_file_bytes(
+                    media_session=media_session,
+                    location=location,
+                    offset=offset,
+                    limit=limit,
                 ),
                 timeout=timeout,
             )
             elapsed = max(time.perf_counter() - started, 1e-6)
-            chunk = getattr(response, "bytes", None) if response else None
             size = len(chunk or b"")
             if size <= 0:
                 result["error"] = "empty probe"
@@ -993,14 +1258,12 @@ async def _speed_test_single_client(
 
         # --- Ping: time to first byte ---
         ping_start = time.perf_counter()
-        tiny = await media_session.send(
-            raw.functions.upload.GetFile(location=location, offset=0, limit=4096)
-        )
+        tiny = await streamer._fetch_file_bytes(media_session, location, offset=0, limit=4096)
         ping_end = time.perf_counter()
         ping_ms = (ping_end - ping_start) * 1000
         result["ping_ms"] = round(ping_ms, 2)
 
-        if not getattr(tiny, "bytes", None):
+        if not tiny:
             result["error"] = "No data on ping probe"
             return result
 
@@ -1027,15 +1290,15 @@ async def _speed_test_single_client(
                 fetch_size = min(chunk_size, TEST_CHUNK_SIZE - offset)
                 
                 try:
-                    r = await asyncio.wait_for(
-                        media_session.send(
-                            raw.functions.upload.GetFile(
-                                location=location, offset=offset, limit=fetch_size
-                            )
+                    chunk = await asyncio.wait_for(
+                        streamer._fetch_file_bytes(
+                            media_session,
+                            location,
+                            offset=offset,
+                            limit=fetch_size,
                         ),
                         timeout=15.0,
                     )
-                    chunk = getattr(r, "bytes", None)
                     if not chunk:
                         eof_reached = True
                         queue.task_done()
