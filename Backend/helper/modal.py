@@ -30,6 +30,14 @@ class QualityDetail(BaseModel):
     match_confidence: Optional[float] = None
     match_reason: Optional[str] = None
     match_candidates: Optional[List[dict]] = None
+    rerank_used: bool = False
+    rerank_timeout: bool = False
+    rerank_cached: bool = False
+    rerank_provider: Optional[str] = None
+    rerank_model: Optional[str] = None
+    rerank_confidence: Optional[int] = None
+    rerank_reason: Optional[str] = None
+    rerank_selected_candidate_index: Optional[int] = None
     gemini_used: bool = False
     gemini_timeout: bool = False
     gemini_cached: bool = False

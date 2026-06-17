@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import re
 import time
 from collections import OrderedDict
 from typing import Any
@@ -13,16 +14,57 @@ from Backend.logger import LOGGER
 
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+GROQ_API_BASE = "https://api.groq.com/openai/v1"
 _CACHE: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _CLIENT: httpx.AsyncClient | None = None
 
 
+def _has_gemini() -> bool:
+    return bool(Telegram.GEMINI_API_KEY and Telegram.GEMINI_MATCHER_MODEL)
+
+
+def _has_groq() -> bool:
+    return bool(Telegram.GROQ_API_KEY and Telegram.GROQ_MATCHER_MODEL)
+
+
+def _provider_order() -> list[str]:
+    provider = (Telegram.METADATA_RERANKER_PROVIDER or "gemini").strip().lower()
+    if provider not in {"auto", "groq", "gemini"}:
+        provider = "auto"
+
+    order: list[str] = []
+    if provider == "groq":
+        order = ["groq", "gemini"]
+    elif provider == "gemini":
+        order = ["gemini", "groq"]
+    else:
+        order = ["groq", "gemini"]
+
+    available = []
+    for item in order:
+        if item == "groq" and _has_groq():
+            available.append(item)
+        elif item == "gemini" and _has_gemini():
+            available.append(item)
+    return available
+
+
 def _is_enabled() -> bool:
-    return bool(
-        Telegram.GEMINI_MATCHER_ENABLED
-        and Telegram.GEMINI_API_KEY
-        and Telegram.GEMINI_MATCHER_MODEL
-    )
+    return bool(Telegram.GEMINI_MATCHER_ENABLED and _provider_order())
+
+
+def _models_for_provider(provider: str) -> list[str]:
+    if provider == "groq":
+        models = [Telegram.GROQ_MATCHER_MODEL, Telegram.GROQ_MATCHER_FALLBACK_MODEL]
+    else:
+        models = [Telegram.GEMINI_MATCHER_MODEL, Telegram.GEMINI_MATCHER_FALLBACK_MODEL]
+
+    result: list[str] = []
+    for model in models:
+        model = (model or "").strip()
+        if model and model not in result:
+            result.append(model)
+    return result
 
 
 def _candidate_key(value: dict | MatchCandidate | None) -> str:
@@ -115,7 +157,7 @@ async def _get_client() -> httpx.AsyncClient:
     global _CLIENT
     if _CLIENT is None:
         _CLIENT = httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=4, max_keepalive_connections=2),
+            limits=httpx.Limits(max_connections=6, max_keepalive_connections=3),
             follow_redirects=False,
         )
     return _CLIENT
@@ -152,7 +194,7 @@ def _prompt(intent: MatchIntent, candidates: list[dict]) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def _request_body(prompt: str) -> dict:
+def _gemini_request_body(prompt: str) -> dict:
     return {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -172,49 +214,119 @@ def _request_body(prompt: str) -> dict:
     }
 
 
-def _extract_json(response_data: dict) -> dict:
+def _groq_request_body(model: str, prompt: str) -> dict:
+    return {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Return only compact JSON with selected_candidate_index, confidence, and reason. Select only from the provided candidates.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0,
+        "max_tokens": 80,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+
+
+def _loads_json_text(text: str) -> dict:
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("LLM response did not include text")
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text).strip()
+    if not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start:end + 1]
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError("LLM response JSON was not an object")
+    return data
+
+
+def _extract_gemini_json(response_data: dict) -> dict:
     parts = (
         response_data.get("candidates", [{}])[0]
         .get("content", {})
         .get("parts", [])
     )
     text = "".join(str(part.get("text") or "") for part in parts).strip()
-    if not text:
-        raise ValueError("Gemini response did not include text")
-    return json.loads(text)
+    return _loads_json_text(text)
 
 
-async def _request_model(model: str, prompt: str, timeout: float) -> dict:
+def _extract_groq_json(response_data: dict) -> dict:
+    message = (
+        response_data.get("choices", [{}])[0]
+        .get("message", {})
+    )
+    return _loads_json_text(str(message.get("content") or ""))
+
+
+def _timeout(timeout: float) -> httpx.Timeout:
+    return httpx.Timeout(
+        timeout,
+        connect=min(0.35, timeout),
+        read=timeout,
+        write=min(0.35, timeout),
+        pool=min(0.1, timeout),
+    )
+
+
+async def _request_gemini_model(model: str, prompt: str, timeout: float) -> dict:
     client = await _get_client()
     url = f"{GEMINI_API_BASE}/{model}:generateContent"
     response = await client.post(
         url,
         params={"key": Telegram.GEMINI_API_KEY},
-        json=_request_body(prompt),
-        timeout=httpx.Timeout(timeout, connect=min(0.35, timeout), read=timeout, write=min(0.35, timeout), pool=min(0.1, timeout)),
+        json=_gemini_request_body(prompt),
+        timeout=_timeout(timeout),
     )
     response.raise_for_status()
-    return _extract_json(response.json())
+    return _extract_gemini_json(response.json())
 
 
-async def _request_with_optional_fallback(prompt: str, timeout: float) -> tuple[dict, str]:
-    models = [Telegram.GEMINI_MATCHER_MODEL]
-    fallback = Telegram.GEMINI_MATCHER_FALLBACK_MODEL
-    if fallback and fallback not in models:
-        models.append(fallback)
+async def _request_groq_model(model: str, prompt: str, timeout: float) -> dict:
+    client = await _get_client()
+    response = await client.post(
+        f"{GROQ_API_BASE}/chat/completions",
+        headers={"Authorization": f"Bearer {Telegram.GROQ_API_KEY}"},
+        json=_groq_request_body(model, prompt),
+        timeout=_timeout(timeout),
+    )
+    response.raise_for_status()
+    return _extract_groq_json(response.json())
 
+
+async def _request_provider_model(provider: str, model: str, prompt: str, timeout: float) -> dict:
+    if provider == "groq":
+        return await _request_groq_model(model, prompt, timeout)
+    return await _request_gemini_model(model, prompt, timeout)
+
+
+async def _request_with_optional_fallback(prompt: str, timeout: float) -> tuple[dict, str, str]:
     last_error: Exception | None = None
-    for model in models:
-        try:
-            return await _request_model(model, prompt, timeout), model
-        except httpx.HTTPStatusError as exc:
-            last_error = exc
-            if exc.response.status_code not in {400, 404}:
-                break
-        except Exception as exc:
-            last_error = exc
-            break
-    raise last_error or RuntimeError("Gemini rerank failed")
+    for provider in _provider_order():
+        for model in _models_for_provider(provider):
+            try:
+                return await _request_provider_model(provider, model, prompt, timeout), provider, model
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                LOGGER.debug(
+                    "Metadata rerank provider model failed: provider=%s model=%s status=%s",
+                    provider,
+                    model,
+                    exc.response.status_code,
+                )
+                continue
+            except Exception as exc:
+                last_error = exc
+                raise
+    raise last_error or RuntimeError("Metadata rerank failed")
 
 
 def _find_candidate(candidates: list[MatchCandidate], selected: dict) -> MatchCandidate | None:
@@ -238,6 +350,59 @@ def _with_extra(decision: MatchDecision, extra: dict) -> MatchDecision:
     )
 
 
+def _primary_provider() -> str:
+    order = _provider_order()
+    return order[0] if order else ""
+
+
+def _primary_model() -> str:
+    provider = _primary_provider()
+    models = _models_for_provider(provider) if provider else []
+    return models[0] if models else ""
+
+
+def _diagnostic_extra(
+    *,
+    used: bool,
+    timeout: bool = False,
+    cached: bool = False,
+    provider: str = "",
+    model: str = "",
+    reason: str = "",
+    confidence: Any = None,
+    selected_index: int | None = None,
+    deterministic_reason: str | None = None,
+    deterministic_confidence: float | None = None,
+) -> dict:
+    extra = {
+        "rerank_used": used,
+        "rerank_timeout": timeout,
+        "rerank_cached": cached,
+        "rerank_provider": provider,
+        "rerank_model": model,
+        "rerank_confidence": confidence,
+        "rerank_reason": str(reason or "")[:500],
+        "rerank_selected_candidate_index": selected_index,
+    }
+    if deterministic_reason is not None:
+        extra["deterministic_match_reason"] = deterministic_reason
+    if deterministic_confidence is not None:
+        extra["deterministic_match_confidence"] = deterministic_confidence
+
+    # Backward-compatible diagnostics for older database/UI code.
+    if provider == "gemini":
+        extra.update({
+            "gemini_used": used,
+            "gemini_timeout": timeout,
+            "gemini_cached": cached,
+            "gemini_model": model,
+            "gemini_confidence": confidence,
+            "gemini_reason": str(reason or "")[:500],
+            "gemini_selected_candidate_index": selected_index,
+        })
+    return extra
+
+
 async def maybe_rerank_with_gemini(
     intent: MatchIntent,
     decision: MatchDecision,
@@ -254,72 +419,80 @@ async def maybe_rerank_with_gemini(
     try:
         if cached is not None:
             result = cached
-            model = result.get("model") or Telegram.GEMINI_MATCHER_MODEL
+            provider = result.get("provider") or _primary_provider()
+            model = result.get("model") or _primary_model()
             from_cache = True
         else:
-            result, model = await asyncio.wait_for(
+            result, provider, model = await asyncio.wait_for(
                 _request_with_optional_fallback(_prompt(intent, public_candidates), timeout),
                 timeout=timeout,
             )
             result = dict(result)
+            result["provider"] = provider
             result["model"] = model
             _set_cached(key, result)
             from_cache = False
 
         selected_index = result.get("selected_candidate_index")
         if not isinstance(selected_index, int) or selected_index < 0 or selected_index >= len(public_candidates):
-            return _with_extra(decision, {
-                "gemini_used": False,
-                "gemini_invalid": True,
-                "gemini_reason": "invalid_selected_candidate_index",
-            })
+            return _with_extra(decision, _diagnostic_extra(
+                used=False,
+                provider=provider,
+                model=model,
+                reason="invalid_selected_candidate_index",
+            ) | {"rerank_invalid": True})
 
         selected_public = public_candidates[selected_index]
         if selected_public.get("media_type") != intent.media_type:
-            return _with_extra(decision, {
-                "gemini_used": False,
-                "gemini_invalid": True,
-                "gemini_reason": "selected_media_type_mismatch",
-            })
+            return _with_extra(decision, _diagnostic_extra(
+                used=False,
+                provider=provider,
+                model=model,
+                reason="selected_media_type_mismatch",
+            ) | {"rerank_invalid": True})
 
         selected_candidate = _find_candidate(candidates, selected_public)
         if not selected_candidate:
-            return _with_extra(decision, {
-                "gemini_used": False,
-                "gemini_invalid": True,
-                "gemini_reason": "selected_candidate_not_found",
-            })
+            return _with_extra(decision, _diagnostic_extra(
+                used=False,
+                provider=provider,
+                model=model,
+                reason="selected_candidate_not_found",
+            ) | {"rerank_invalid": True})
 
         confidence = float(selected_public.get("score") or decision.confidence)
         return MatchDecision(
             True,
             selected_candidate,
             confidence,
-            "accepted_gemini_rerank",
+            "accepted_llm_rerank",
             decision.candidates,
-            {
-                "gemini_used": True,
-                "gemini_timeout": False,
-                "gemini_cached": from_cache,
-                "gemini_model": model,
-                "gemini_confidence": result.get("confidence"),
-                "gemini_reason": str(result.get("reason") or "")[:500],
-                "gemini_selected_candidate_index": selected_index,
-                "deterministic_match_reason": decision.reason,
-                "deterministic_match_confidence": decision.confidence,
-            },
+            _diagnostic_extra(
+                used=True,
+                timeout=False,
+                cached=from_cache,
+                provider=provider,
+                model=model,
+                confidence=result.get("confidence"),
+                reason=result.get("reason"),
+                selected_index=selected_index,
+                deterministic_reason=decision.reason,
+                deterministic_confidence=decision.confidence,
+            ),
         )
     except (asyncio.TimeoutError, httpx.TimeoutException):
-        return _with_extra(decision, {
-            "gemini_used": False,
-            "gemini_timeout": True,
-            "gemini_model": Telegram.GEMINI_MATCHER_MODEL,
-            "gemini_reason": "timeout",
-        })
+        return _with_extra(decision, _diagnostic_extra(
+            used=False,
+            timeout=True,
+            provider=_primary_provider(),
+            model=_primary_model(),
+            reason="timeout",
+        ))
     except Exception as exc:
-        LOGGER.debug("Gemini metadata rerank skipped after error: %s", exc)
-        return _with_extra(decision, {
-            "gemini_used": False,
-            "gemini_error": type(exc).__name__,
-            "gemini_reason": "error",
-        })
+        LOGGER.debug("Metadata rerank skipped after error: %s", exc)
+        return _with_extra(decision, _diagnostic_extra(
+            used=False,
+            provider=_primary_provider(),
+            model=_primary_model(),
+            reason="error",
+        ) | {"rerank_error": type(exc).__name__})

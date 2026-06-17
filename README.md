@@ -81,7 +81,7 @@ This project is designed for personal or private-community use where you control
 - 🧠 **Smart Telegram routing** with multi-client support, DC awareness, probing, timeout scoring, cooldowns, and fallback retry.
 - 🛡️ **Adaptive prefetch** that protects small VPS machines by lowering load when RAM is low or multiple streams are active.
 - 🗂️ **Custom catalogs and auto catalogs** for curated and generated Stremio sections.
-- 🛠️ **Metadata tools** including highest-score auto-matching, optional fast Gemini reranking, metadata rescan, and manual IMDb/TMDb correction flows.
+- 🛠️ **Metadata tools** including highest-score auto-matching, optional fast LLM reranking, metadata rescan, and manual IMDb/TMDb correction flows.
 - 🧹 **Manual duplicate controls** to hide, show, recommend, and annotate stream qualities without deleting them.
 - 💳 **Subscription management** with plans, payment review, token generation, expiry handling, and access controls.
 - 📊 **Admin dashboards** for active streams, failed streams, egress, token usage, Telegram routing, and watch-request tracking.
@@ -91,7 +91,7 @@ This project is designed for personal or private-community use where you control
 - ✅ **Callback-based Watch in Stremio tracking** - channel buttons record who requested a watch link.
 - ✅ **Watch Requests page** - a dedicated admin view for recent Telegram watch-link clicks.
 - ✅ **Highest-score metadata matching** - ambiguous files are indexed to the best-scored candidate instead of stopping ingestion.
-- ✅ **Optional Gemini reranker** - low-confidence matches can be reranked through Gemini with a sub-second timeout and safe fallback.
+- ✅ **Optional LLM reranker** - low-confidence matches can be reranked through Groq or Gemini with a hard timeout and safe fallback.
 - ✅ **Metadata rescan UI** - replace incorrect metadata while preserving all stream qualities.
 - ✅ **Custom catalog manager** - create, edit, hide, delete, and fill custom catalogs.
 - ✅ **Auto catalog generation** - opt-in background/manual generation for language, OTT, and smart categories.
@@ -470,13 +470,18 @@ Never commit real secrets.
 
 | Variable | Description |
 | :--- | :--- |
-| `GEMINI_MATCHER_ENABLED` | Enable Gemini only for low-confidence metadata reranking. |
+| `METADATA_RERANKER_ENABLED` | Enable the optional LLM reranker only for low-confidence metadata matches. |
+| `GEMINI_MATCHER_ENABLED` | Backward-compatible enable alias for older config files. |
+| `METADATA_RERANKER_PROVIDER` | `auto`, `groq`, or `gemini`. `auto` prefers Groq when configured, then Gemini. |
+| `GROQ_API_KEY` | Groq API key. Keep this secret and never commit it. |
+| `GROQ_MATCHER_MODEL` | Primary Groq model, for example `llama-3.1-8b-instant`. |
+| `GROQ_MATCHER_FALLBACK_MODEL` | Optional Groq fallback model. |
 | `GEMINI_API_KEY` | Gemini API key. Keep this secret and never commit it. |
-| `GEMINI_MATCHER_MODEL` | Primary fast model, for example `gemini-3.1-flash-lite`. |
-| `GEMINI_MATCHER_FALLBACK_MODEL` | Optional fallback model if the primary model is unavailable. |
-| `GEMINI_MATCHER_TIMEOUT_SECONDS` | Hard rerank timeout; default `0.9` keeps ingestion fast. |
-| `GEMINI_MATCHER_MAX_CANDIDATES` | Maximum top candidates sent to Gemini. |
-| `GEMINI_MATCHER_MIN_TOP_MARGIN` | Skip Gemini when the deterministic top score is clearly ahead. |
+| `GEMINI_MATCHER_MODEL` | Primary Gemini model, for example `gemini-3.1-flash-lite`. |
+| `GEMINI_MATCHER_FALLBACK_MODEL` | Optional Gemini fallback model if the primary model is unavailable. |
+| `GEMINI_MATCHER_TIMEOUT_SECONDS` | Hard rerank timeout. Clean/high-confidence matches skip LLM calls entirely. |
+| `GEMINI_MATCHER_MAX_CANDIDATES` | Maximum top candidates sent to the reranker. |
+| `GEMINI_MATCHER_MIN_TOP_MARGIN` | Skip reranking when the deterministic top score is clearly ahead. |
 | `GEMINI_MATCHER_CACHE_TTL_SECONDS` | Cache repeated rerank decisions. |
 | `GEMINI_MATCHER_CACHE_MAX` | Maximum in-memory rerank cache entries. |
 

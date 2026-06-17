@@ -176,7 +176,7 @@ def _attach_match_details(metadata_info: dict | None, match_details: dict | None
         "match_candidates": match_details.get("match_candidates") or [],
     })
     for key, value in match_details.items():
-        if key.startswith("gemini_") or key.startswith("deterministic_match_"):
+        if key.startswith("rerank_") or key.startswith("gemini_") or key.startswith("deterministic_match_"):
             metadata_info[key] = value
     if str(reason).startswith("accepted_low_confidence"):
         top_candidates = metadata_info["match_candidates"][:3]

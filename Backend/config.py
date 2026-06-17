@@ -76,12 +76,20 @@ class Telegram:
     TMDB_API = getenv("TMDB_API", "")
 
     # -------------------------------
-    # Gemini metadata reranker (optional, fast fallback for low-confidence matches)
+    # LLM metadata reranker (optional, fast fallback for low-confidence matches)
     # -------------------------------
-    GEMINI_MATCHER_ENABLED = getenv("GEMINI_MATCHER_ENABLED", "false").lower() == "true"
+    METADATA_RERANKER_ENABLED = getenv(
+        "METADATA_RERANKER_ENABLED",
+        getenv("GEMINI_MATCHER_ENABLED", "false"),
+    ).lower() == "true"
+    GEMINI_MATCHER_ENABLED = METADATA_RERANKER_ENABLED
+    METADATA_RERANKER_PROVIDER = getenv("METADATA_RERANKER_PROVIDER", "auto").strip().lower()
     GEMINI_API_KEY = getenv("GEMINI_API_KEY", "").strip()
     GEMINI_MATCHER_MODEL = getenv("GEMINI_MATCHER_MODEL", "gemini-3.1-flash-lite").strip()
     GEMINI_MATCHER_FALLBACK_MODEL = getenv("GEMINI_MATCHER_FALLBACK_MODEL", "gemini-2.5-flash-lite").strip()
+    GROQ_API_KEY = getenv("GROQ_API_KEY", "").strip()
+    GROQ_MATCHER_MODEL = getenv("GROQ_MATCHER_MODEL", "llama-3.1-8b-instant").strip()
+    GROQ_MATCHER_FALLBACK_MODEL = getenv("GROQ_MATCHER_FALLBACK_MODEL", "llama-3.3-70b-versatile").strip()
     try:
         GEMINI_MATCHER_TIMEOUT_SECONDS = max(0.1, float(getenv("GEMINI_MATCHER_TIMEOUT_SECONDS", "0.9") or 0.9))
     except Exception:
