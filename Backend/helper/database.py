@@ -1037,6 +1037,15 @@ class Database:
             match_confidence=metadata_info.get("match_confidence"),
             match_reason=metadata_info.get("match_reason"),
             match_candidates=metadata_info.get("match_candidates"),
+            gemini_used=bool(metadata_info.get("gemini_used", False)),
+            gemini_timeout=bool(metadata_info.get("gemini_timeout", False)),
+            gemini_cached=bool(metadata_info.get("gemini_cached", False)),
+            gemini_model=metadata_info.get("gemini_model"),
+            gemini_confidence=metadata_info.get("gemini_confidence"),
+            gemini_reason=metadata_info.get("gemini_reason"),
+            gemini_selected_candidate_index=metadata_info.get("gemini_selected_candidate_index"),
+            deterministic_match_reason=metadata_info.get("deterministic_match_reason"),
+            deterministic_match_confidence=metadata_info.get("deterministic_match_confidence"),
         )
 
     def _source_type(self, quality: dict) -> str:

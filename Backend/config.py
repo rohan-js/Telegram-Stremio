@@ -75,6 +75,34 @@ class Telegram:
 
     TMDB_API = getenv("TMDB_API", "")
 
+    # -------------------------------
+    # Gemini metadata reranker (optional, fast fallback for low-confidence matches)
+    # -------------------------------
+    GEMINI_MATCHER_ENABLED = getenv("GEMINI_MATCHER_ENABLED", "false").lower() == "true"
+    GEMINI_API_KEY = getenv("GEMINI_API_KEY", "").strip()
+    GEMINI_MATCHER_MODEL = getenv("GEMINI_MATCHER_MODEL", "gemini-3.1-flash-lite").strip()
+    GEMINI_MATCHER_FALLBACK_MODEL = getenv("GEMINI_MATCHER_FALLBACK_MODEL", "gemini-2.5-flash-lite").strip()
+    try:
+        GEMINI_MATCHER_TIMEOUT_SECONDS = max(0.1, float(getenv("GEMINI_MATCHER_TIMEOUT_SECONDS", "0.9") or 0.9))
+    except Exception:
+        GEMINI_MATCHER_TIMEOUT_SECONDS = 0.9
+    try:
+        GEMINI_MATCHER_MAX_CANDIDATES = max(2, min(8, int(getenv("GEMINI_MATCHER_MAX_CANDIDATES", "4") or 4)))
+    except Exception:
+        GEMINI_MATCHER_MAX_CANDIDATES = 4
+    try:
+        GEMINI_MATCHER_MIN_TOP_MARGIN = float(getenv("GEMINI_MATCHER_MIN_TOP_MARGIN", "8") or 8)
+    except Exception:
+        GEMINI_MATCHER_MIN_TOP_MARGIN = 8.0
+    try:
+        GEMINI_MATCHER_CACHE_TTL_SECONDS = max(0, int(getenv("GEMINI_MATCHER_CACHE_TTL_SECONDS", "86400") or 86400))
+    except Exception:
+        GEMINI_MATCHER_CACHE_TTL_SECONDS = 86400
+    try:
+        GEMINI_MATCHER_CACHE_MAX = max(0, int(getenv("GEMINI_MATCHER_CACHE_MAX", "2000") or 2000))
+    except Exception:
+        GEMINI_MATCHER_CACHE_MAX = 2000
+
     UPSTREAM_REPO = getenv("UPSTREAM_REPO", "")
     UPSTREAM_BRANCH = getenv("UPSTREAM_BRANCH", "")
 

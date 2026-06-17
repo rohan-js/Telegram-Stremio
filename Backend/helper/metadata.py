@@ -17,6 +17,7 @@ from Backend.helper.metadata_matcher import (
     decision_metadata,
     normalize_title,
 )
+from Backend.helper.gemini_matcher import maybe_rerank_with_gemini
 
 # ----------------- Configuration -----------------
 DELAY = 0
@@ -174,6 +175,9 @@ def _attach_match_details(metadata_info: dict | None, match_details: dict | None
         "match_reason": reason,
         "match_candidates": match_details.get("match_candidates") or [],
     })
+    for key, value in match_details.items():
+        if key.startswith("gemini_") or key.startswith("deterministic_match_"):
+            metadata_info[key] = value
     if str(reason).startswith("accepted_low_confidence"):
         top_candidates = metadata_info["match_candidates"][:3]
         LOGGER.warning(
@@ -355,7 +359,9 @@ async def resolve_movie_match(title: str, year=None, raw_title: str | None = Non
         media_type="movie",
         title_variants=variants,
     )
-    decision = choose_best_candidate(intent, await _movie_candidates(variants, year))
+    candidates = await _movie_candidates(variants, year)
+    decision = choose_best_candidate(intent, candidates)
+    decision = await maybe_rerank_with_gemini(intent, decision, candidates)
     return decision.candidate if decision.accepted else None, decision_metadata(decision, intent)
 
 
@@ -377,7 +383,9 @@ async def resolve_tv_match(title: str, season=None, episode=None, year=None, sea
         episode=episode,
         season_pack=season_pack,
     )
-    decision = choose_best_candidate(intent, await _tv_candidates(variants, year))
+    candidates = await _tv_candidates(variants, year)
+    decision = choose_best_candidate(intent, candidates)
+    decision = await maybe_rerank_with_gemini(intent, decision, candidates)
     return decision.candidate if decision.accepted else None, decision_metadata(decision, intent)
 
 

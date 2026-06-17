@@ -30,6 +30,15 @@ class QualityDetail(BaseModel):
     match_confidence: Optional[float] = None
     match_reason: Optional[str] = None
     match_candidates: Optional[List[dict]] = None
+    gemini_used: bool = False
+    gemini_timeout: bool = False
+    gemini_cached: bool = False
+    gemini_model: Optional[str] = None
+    gemini_confidence: Optional[int] = None
+    gemini_reason: Optional[str] = None
+    gemini_selected_candidate_index: Optional[int] = None
+    deterministic_match_reason: Optional[str] = None
+    deterministic_match_confidence: Optional[float] = None
 
 
 # ---------------------------

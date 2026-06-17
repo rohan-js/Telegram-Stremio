@@ -74,6 +74,7 @@ class MatchDecision:
     confidence: float
     reason: str
     candidates: list[dict]
+    extra: dict | None = None
 
 
 def normalize_title(value: str | None) -> str:
@@ -389,7 +390,7 @@ def choose_best_candidate(intent: MatchIntent, candidates: list[MatchCandidate])
 
 
 def decision_metadata(decision: MatchDecision, intent: MatchIntent) -> dict:
-    return {
+    data = {
         "parsed_title": intent.clean_title,
         "parsed_year": intent.year,
         "parsed_media_type": intent.media_type,
@@ -400,3 +401,6 @@ def decision_metadata(decision: MatchDecision, intent: MatchIntent) -> dict:
         "match_candidates": decision.candidates,
         "auto_matched": bool(decision.candidate),
     }
+    if decision.extra:
+        data.update(decision.extra)
+    return data
