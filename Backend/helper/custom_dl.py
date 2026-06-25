@@ -874,13 +874,14 @@ class ByteStreamer:
             producer_task = asyncio.create_task(producer())
             current_part_idx = 1
             first_yielded = False
+            finalized = False
 
             try:
                 while True:
                     try:
                         if request and await request.is_disconnected():
                             LOGGER.debug("Client disconnected for stream %s; cancelling stream", stream_id)
-                            ACTIVE_STREAMS[stream_id]["status"] = "cancelled"
+                            registry_entry["status"] = "cancelled"
                             stop_event.set()
                             break
                     except Exception:
@@ -900,11 +901,11 @@ class ByteStreamer:
                         chunk_len = 0
 
                     now_ts = time.time()
-                    elapsed = now_ts - ACTIVE_STREAMS[stream_id]["last_ts"]
+                    elapsed = now_ts - registry_entry["last_ts"]
                     if elapsed <= 0:
                         elapsed = 1e-6
 
-                    recent = ACTIVE_STREAMS[stream_id]["recent_measurements"]
+                    recent = registry_entry["recent_measurements"]
                     recent.append((chunk_len, elapsed))
 
                     if len(recent) >= 2:
@@ -914,37 +915,37 @@ class ByteStreamer:
                     else:
                         instant_mbps = 0.0
 
-                    ACTIVE_STREAMS[stream_id]["total_bytes"] += chunk_len
-                    ACTIVE_STREAMS[stream_id]["last_ts"] = now_ts
+                    registry_entry["total_bytes"] += chunk_len
+                    registry_entry["last_ts"] = now_ts
 
-                    total_time = now_ts - ACTIVE_STREAMS[stream_id]["start_ts"]
+                    total_time = now_ts - registry_entry["start_ts"]
                     if total_time <= 0:
                         total_time = 1e-6
 
-                    ACTIVE_STREAMS[stream_id]["avg_mbps"] = (ACTIVE_STREAMS[stream_id]["total_bytes"] / (1024 * 1024)) / total_time
-                    ACTIVE_STREAMS[stream_id]["instant_mbps"] = instant_mbps
+                    registry_entry["avg_mbps"] = (registry_entry["total_bytes"] / (1024 * 1024)) / total_time
+                    registry_entry["instant_mbps"] = instant_mbps
 
-                    if instant_mbps > ACTIVE_STREAMS[stream_id]["peak_mbps"]:
-                        ACTIVE_STREAMS[stream_id]["peak_mbps"] = instant_mbps
+                    if instant_mbps > registry_entry["peak_mbps"]:
+                        registry_entry["peak_mbps"] = instant_mbps
 
                     if part_count == 1:
                         if not first_yielded:
-                            ACTIVE_STREAMS[stream_id]["ttfb_sec"] = round(time.time() - ACTIVE_STREAMS[stream_id]["start_ts"], 3)
+                            registry_entry["ttfb_sec"] = round(time.time() - registry_entry["start_ts"], 3)
                             first_yielded = True
                         yield chunk[first_part_cut:last_part_cut]
                     elif current_part_idx == 1:
                         if not first_yielded:
-                            ACTIVE_STREAMS[stream_id]["ttfb_sec"] = round(time.time() - ACTIVE_STREAMS[stream_id]["start_ts"], 3)
+                            registry_entry["ttfb_sec"] = round(time.time() - registry_entry["start_ts"], 3)
                             first_yielded = True
                         yield chunk[first_part_cut:]
                     elif current_part_idx == part_count:
                         if not first_yielded:
-                            ACTIVE_STREAMS[stream_id]["ttfb_sec"] = round(time.time() - ACTIVE_STREAMS[stream_id]["start_ts"], 3)
+                            registry_entry["ttfb_sec"] = round(time.time() - registry_entry["start_ts"], 3)
                             first_yielded = True
                         yield chunk[:last_part_cut]
                     else:
                         if not first_yielded:
-                            ACTIVE_STREAMS[stream_id]["ttfb_sec"] = round(time.time() - ACTIVE_STREAMS[stream_id]["start_ts"], 3)
+                            registry_entry["ttfb_sec"] = round(time.time() - registry_entry["start_ts"], 3)
                             first_yielded = True
                         yield chunk
 
@@ -954,16 +955,20 @@ class ByteStreamer:
                 LOGGER.debug("Consumer cancelled for stream %s", stream_id)
                 if not producer_task.done():
                     producer_task.cancel()
-                ACTIVE_STREAMS[stream_id]["status"] = "cancelled"
+                registry_entry["status"] = "cancelled"
                 raise
             except Exception as e:
                 LOGGER.exception("Consumer error for stream %s: %s", stream_id, e)
-                ACTIVE_STREAMS[stream_id]["status"] = "error"
-                ACTIVE_STREAMS[stream_id]["error_reason"] = f"consumer_error:{type(e).__name__}"
+                registry_entry["status"] = "error"
+                registry_entry["error_reason"] = f"consumer_error:{type(e).__name__}"
                 if not producer_task.done():
                     producer_task.cancel()
                 raise
             finally:
+                if finalized:
+                    return
+                finalized = True
+
                 if not producer_task.done():
                     try:
                         producer_task.cancel()
@@ -973,12 +978,12 @@ class ByteStreamer:
 
                 try:
                     end_ts = time.time()
-                    total_bytes = ACTIVE_STREAMS[stream_id]["total_bytes"]
-                    start_ts = ACTIVE_STREAMS[stream_id]["start_ts"]
+                    entry = ACTIVE_STREAMS.get(stream_id) or registry_entry
+                    total_bytes = entry.get("total_bytes", 0)
+                    start_ts = entry.get("start_ts", end_ts)
                     duration = end_ts - start_ts if end_ts > start_ts else 0.0
                     avg_mbps = (total_bytes / (1024 * 1024)) / (duration if duration > 0 else 1e-6)
 
-                    entry = ACTIVE_STREAMS.get(stream_id, {})
                     part_count_value = int(entry.get("part_count", 0) or 0)
                     timeout_count = int(entry.get("chunk_timeouts", 0) or 0)
                     zero_pad_count = int(entry.get("zero_pad_chunks", 0) or 0)
