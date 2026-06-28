@@ -1,5 +1,6 @@
 from asyncio import Queue, Lock, create_task, sleep as asleep
 from html import escape
+from time import monotonic
 
 import Backend
 from pyrogram import Client, filters
@@ -35,6 +36,7 @@ from Backend.helper.disk_cache import PRECACHE_MANAGER, PrecacheJob
 file_queue = Queue()
 db_lock = Lock()
 reply_queue = Queue()
+STATUS_EDIT_MIN_INTERVAL = 1.0
 
 METADATA_FAILED_TEXT = (
     "⚠️ <b>Metadata failed</b>\n"
@@ -104,6 +106,24 @@ async def _delete_status(chat_id: int | None, msg_id: int | None) -> None:
         LOGGER.debug(f"Could not delete ingest status message {msg_id}: {e}")
 
 
+async def _send_status_message(message: Message, title: str, position: int | None) -> tuple[int | None, int | None]:
+    try:
+        sent = await message.reply_text(
+            _format_queue_status("queued", title, position=position),
+            quote=True,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+        return int(sent.chat.id), int(sent.id)
+    except FloodWait as e:
+        LOGGER.info(f"FloodWait in ingest status reply: sleeping for {e.value}s")
+        await asleep(e.value)
+        return await _send_status_message(message, title, position)
+    except Exception as e:
+        LOGGER.debug(f"Could not create ingest status message for {getattr(message, 'id', None)}: {e}")
+        return None, None
+
+
 def _format_queue_status(state: str, title: str, position: int | None = None, reason: str | None = None) -> str:
     parts = [f"📥 <b>Ingestion {escape(state)}</b>", f"<code>{escape(title)}</code>"]
     if position:
@@ -111,6 +131,46 @@ def _format_queue_status(state: str, title: str, position: int | None = None, re
     if reason:
         parts.append(f"Reason: <code>{escape(reason[:220])}</code>")
     return "\n".join(parts)
+
+
+async def _set_status(job: dict, state: str, reason: str | None = None, force: bool = False) -> None:
+    title = job.get("display_name") or job.get("title") or job.get("file_name") or "unknown"
+    text = _format_queue_status(state, title, position=job.get("queue_position"), reason=reason)
+    if text == job.get("_last_status_text"):
+        return
+    now = monotonic()
+    last_at = float(job.get("_last_status_at") or 0)
+    if not force and last_at and now - last_at < STATUS_EDIT_MIN_INTERVAL:
+        await asleep(STATUS_EDIT_MIN_INTERVAL - (now - last_at))
+    await _edit_status(job.get("status_chat_id"), job.get("status_msg_id"), text)
+    job["_last_status_text"] = text
+    job["_last_status_at"] = monotonic()
+
+
+async def _finalize_failed_status_or_reply(job: dict, reason: str) -> None:
+    if job.get("status_chat_id") and job.get("status_msg_id"):
+        title = job.get("display_name") or job.get("title") or job.get("file_name") or "unknown"
+        template = TORRENT_METADATA_FAILED_TEXT if job.get("source_type") == "torrent" else METADATA_FAILED_TEXT
+        text = f"{template.format(title=escape(title))}\n\nReason: <code>{escape(str(reason)[:120])}</code>"
+        await _edit_status(job.get("status_chat_id"), job.get("status_msg_id"), text)
+        job["_last_status_text"] = text
+        job["_last_status_at"] = monotonic()
+        return
+    await _send_metadata_failed_reply(job, reason)
+
+
+async def _enqueue_ingest_job(message: Message, job: dict) -> None:
+    title = job.get("display_name") or job.get("title") or job.get("file_name") or "unknown"
+    position = file_queue.qsize() + 1
+    status_chat_id, status_msg_id = await _send_status_message(message, title, position)
+    job.update({
+        "queue_position": position,
+        "status_chat_id": status_chat_id,
+        "status_msg_id": status_msg_id,
+        "_last_status_text": _format_queue_status("queued", title, position=position) if status_msg_id else None,
+        "_last_status_at": monotonic() if status_msg_id else 0,
+    })
+    await file_queue.put(job)
 
 
 async def _send_metadata_failed_reply(job: dict, reason: str) -> None:
@@ -153,17 +213,15 @@ async def _metadata_for_job(job: dict) -> dict | None:
 async def _process_ingest_job(job: dict) -> None:
     title = job.get("title") or job.get("file_name") or "unknown"
 
+    await _set_status(job, "processing metadata")
+    await _set_status(job, "matching movie/series")
     metadata_info = await _metadata_for_job(job)
     if metadata_info is None:
         match_details = pop_match_failure(job.get("channel"), job.get("msg_id"))
         reason = match_details.get("match_rejection_reason") or "metadata_failed"
         if match_details:
             job["match_details"] = match_details
-        await _delete_status(
-            job.get("status_chat_id"),
-            job.get("status_msg_id"),
-        )
-        await _send_metadata_failed_reply(job, reason)
+        await _finalize_failed_status_or_reply(job, reason)
         LOGGER.warning(f"Metadata failed for queued {job.get('source_type')} item: {title} (ID: {job.get('msg_id')})")
         return
 
@@ -193,6 +251,7 @@ async def _process_ingest_job(job: dict) -> None:
             "torrent_file_msg_id": torrent.get("torrent_file_msg_id"),
         })
 
+    await _set_status(job, "indexing stream")
     updated_id = await db.insert_media(
         metadata_info,
         channel=int(job["channel"]),
@@ -203,18 +262,22 @@ async def _process_ingest_job(job: dict) -> None:
     )
     if updated_id:
         LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
-        await _delete_status(
-            job.get("status_chat_id"),
-            job.get("status_msg_id"),
-        )
-        await reply_queue.put((job["chat_id"], job["original_msg_id"], metadata_info, job.get("display_name") or title, job.get("size") or ""))
+        await _set_status(job, "preparing reply")
+        await reply_queue.put({
+            "chat_id": job["chat_id"],
+            "msg_id": job["original_msg_id"],
+            "metadata_info": metadata_info,
+            "title": job.get("display_name") or title,
+            "size": job.get("size") or "",
+            "status_chat_id": job.get("status_chat_id"),
+            "status_msg_id": job.get("status_msg_id"),
+        })
     else:
         reason = "database_insert_failed"
-        await _edit_status(
-            job.get("status_chat_id"),
-            job.get("status_msg_id"),
-            _format_queue_status("failed", title, reason=reason),
-        )
+        if job.get("status_chat_id") and job.get("status_msg_id"):
+            await _set_status(job, "failed", reason=reason, force=True)
+        else:
+            await _send_metadata_failed_reply(job, reason)
         LOGGER.info("Queued update failed due to validation/database errors.")
 
 
@@ -237,7 +300,15 @@ async def process_file():
                     )
                     if updated_id:
                         LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
-                        await reply_queue.put((chat_id, original_msg_id, metadata_info, title, size))
+                        await reply_queue.put({
+                            "chat_id": chat_id,
+                            "msg_id": original_msg_id,
+                            "metadata_info": metadata_info,
+                            "title": title,
+                            "size": size,
+                            "status_chat_id": None,
+                            "status_msg_id": None,
+                        })
                     else:
                         LOGGER.info("Update failed due to validation errors.")
         except Exception as e:
@@ -250,7 +321,19 @@ async def send_reply_messages():
     from Backend.pyrofork.bot import StreamBot
 
     while True:
-        chat_id, msg_id, metadata_info, title, size = await reply_queue.get()
+        reply_job = await reply_queue.get()
+        if isinstance(reply_job, dict):
+            chat_id = reply_job["chat_id"]
+            msg_id = reply_job["msg_id"]
+            metadata_info = reply_job["metadata_info"]
+            title = reply_job.get("title") or ""
+            size = reply_job.get("size") or ""
+            status_chat_id = reply_job.get("status_chat_id")
+            status_msg_id = reply_job.get("status_msg_id")
+        else:
+            chat_id, msg_id, metadata_info, title, size = reply_job
+            status_chat_id = None
+            status_msg_id = None
         try:
             base_url = Telegram.BASE_URL.rstrip("/")
             token = Telegram.DEFAULT_ADDON_TOKEN
@@ -373,12 +456,19 @@ async def send_reply_messages():
                 disable_web_page_preview=True,
                 reply_markup=buttons,
             )
+            await _delete_status(status_chat_id, status_msg_id)
             LOGGER.info(f"Sent stream link reply for: {movie_title}")
         except FloodWait as e:
             LOGGER.info(f"FloodWait in reply: sleeping for {e.value}s")
             await asleep(e.value)
+            await reply_queue.put(reply_job)
         except Exception as e:
             LOGGER.error(f"Failed to send reply message: {e}")
+            await _edit_status(
+                status_chat_id,
+                status_msg_id,
+                _format_queue_status("failed", title or "unknown", reason="final_reply_failed"),
+            )
         reply_queue.task_done()
 
 
@@ -508,7 +598,7 @@ async def _queue_torrent_item(message: Message, item: TorrentItem, override_id: 
     if display_title and not display_title.lower().endswith(VIDEO_EXTENSIONS):
         display_title += ".mkv"
 
-    await file_queue.put({
+    await _enqueue_ingest_job(message, {
         "source_type": "torrent",
         "source_key": f"torrent:{message.chat.id}:{msg_id}:{item.info_hash}:{item.file_idx}",
         "item_key": f"{item.info_hash}:{item.file_idx}",
@@ -516,8 +606,6 @@ async def _queue_torrent_item(message: Message, item: TorrentItem, override_id: 
         "chat_id": int(message.chat.id),
         "msg_id": msg_id,
         "original_msg_id": message.id,
-        "status_chat_id": None,
-        "status_msg_id": None,
         "title": title,
         "file_name": item.file_name or display_title,
         "display_name": display_title or title,
@@ -625,15 +713,13 @@ async def file_receive_handler(client: Client, message: Message):
                     new_caption = (message.caption + "\n\n" + Backend.USE_DEFAULT_ID) if message.caption else Backend.USE_DEFAULT_ID
                     create_task(edit_message(chat_id=message.chat.id, msg_id=message.id, new_caption=new_caption))
 
-                await file_queue.put({
+                await _enqueue_ingest_job(message, {
                     "source_type": "telegram",
                     "source_key": f"telegram:{message.chat.id}:{msg_id}",
                     "channel": int(channel),
                     "chat_id": int(message.chat.id),
                     "msg_id": int(msg_id),
                     "original_msg_id": message.id,
-                    "status_chat_id": None,
-                    "status_msg_id": None,
                     "title": title,
                     "file_name": file_name or title,
                     "display_name": title,
@@ -695,15 +781,13 @@ async def file_edited_handler(client: Client, message: Message):
                     title = remove_urls(title)
                     if not title.endswith((".mkv", ".mp4")):
                         title += ".mkv"
-                    await file_queue.put({
+                    await _enqueue_ingest_job(message, {
                         "source_type": "telegram",
                         "source_key": f"telegram:{message.chat.id}:{msg_id}",
                         "channel": int(channel),
                         "chat_id": int(message.chat.id),
                         "msg_id": int(msg_id),
                         "original_msg_id": message.id,
-                        "status_chat_id": None,
-                        "status_msg_id": None,
                         "title": title,
                         "file_name": getattr(file, "file_name", None) or title,
                         "display_name": title,
