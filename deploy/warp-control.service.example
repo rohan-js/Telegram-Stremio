@@ -1,0 +1,19 @@
+[Unit]
+Description=Telegram-Stremio WARP control helper
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/telegram-stremio
+Environment=WARP_CONTROL_BIND=127.0.0.1
+Environment=WARP_CONTROL_PORT=8765
+Environment=WARP_CONTROL_SECRET=replace-with-a-long-random-secret
+Environment=WARP_TOGGLE_SCRIPT=/home/ubuntu/telegram-stremio/deploy/warp_toggle.sh
+Environment=CONFIG_FILE=/home/ubuntu/telegram-stremio/config.env
+ExecStart=/usr/bin/python3 /home/ubuntu/telegram-stremio/deploy/warp_control_server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

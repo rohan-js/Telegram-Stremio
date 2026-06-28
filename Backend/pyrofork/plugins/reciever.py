@@ -199,6 +199,7 @@ async def _process_ingest_job(job: dict) -> None:
         msg_id=int(job["msg_id"]),
         size=job.get("size") or "",
         name=job.get("display_name") or title,
+        raw_size=int(job.get("file_size") or job.get("raw_size") or 0),
     )
     if updated_id:
         LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
@@ -232,6 +233,7 @@ async def process_file():
                         msg_id=msg_id,
                         size=size,
                         name=title,
+                        raw_size=0,
                     )
                     if updated_id:
                         LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")

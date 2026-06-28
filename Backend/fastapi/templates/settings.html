@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Settings - TG Stremio{% endblock %}
+
+{% block content %}
+<section class="space-y-6">
+  <div class="glass-panel rounded-3xl p-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <p class="text-xs uppercase tracking-[0.24em] text-text-secondary font-bold">Admin</p>
+        <h1 class="text-2xl md:text-3xl font-black mt-1">Settings</h1>
+      </div>
+      <button id="save-btn" class="bg-primary text-background px-5 py-2.5 rounded-full font-bold hover:opacity-90">
+        <i class="fa-solid fa-floppy-disk mr-2"></i>Save
+      </button>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="glass-panel rounded-3xl p-6 space-y-5">
+      <h2 class="font-black text-xl">Core</h2>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>Replace Mode</b>
+          <span class="block text-sm text-text-secondary">Replace same source/quality when a new upload arrives.</span>
+        </span>
+        <input id="replace_mode" type="checkbox" class="w-5 h-5" {% if settings.replace_mode %}checked{% endif %}>
+      </label>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>Hide Catalogs</b>
+          <span class="block text-sm text-text-secondary">Globally hide addon catalogs from manifest responses.</span>
+        </span>
+        <input id="hide_catalog" type="checkbox" class="w-5 h-5" {% if settings.hide_catalog %}checked{% endif %}>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Auth Channels</span>
+        <textarea id="auth_channels" rows="4" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">{{ (settings.auth_channels or []) | join('\n') }}</textarea>
+        <span class="text-xs text-text-secondary">One channel ID per line.</span>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Anime Channels</span>
+        <textarea id="anime_channels" rows="3" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">{{ (settings.anime_channels or []) | join('\n') }}</textarea>
+      </label>
+    </div>
+
+    <div class="glass-panel rounded-3xl p-6 space-y-5">
+      <h2 class="font-black text-xl">Subscription</h2>
+      <label class="flex items-center justify-between gap-4">
+        <span><b>Subscription Mode</b></span>
+        <input id="subscription" type="checkbox" class="w-5 h-5" {% if settings.subscription %}checked{% endif %}>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Subscription Group ID</span>
+        <input id="subscription_group_id" value="{{ settings.subscription_group_id or 0 }}" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Approver IDs</span>
+        <textarea id="approver_ids" rows="3" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">{{ (settings.approver_ids or []) | join('\n') }}</textarea>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Payment Instructions</span>
+        <textarea id="payment_instructions" rows="4" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">{{ settings.payment_instructions or '' }}</textarea>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Payment QR URL</span>
+        <input id="payment_qr_url" value="{{ settings.payment_qr_url or '' }}" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+      </label>
+    </div>
+
+    <div class="glass-panel rounded-3xl p-6 space-y-5">
+      <h2 class="font-black text-xl">Proxy Stream Display</h2>
+      <label class="block">
+        <span class="text-sm font-bold">HTTP Proxy URL</span>
+        <input id="http_proxy_url" value="{{ settings.http_proxy_url or '' }}" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+      </label>
+      <label class="flex items-center justify-between gap-4">
+        <span><b>Show Proxy And Direct</b></span>
+        <input id="show_proxy_and_non_proxy_both" type="checkbox" class="w-5 h-5" {% if settings.show_proxy_and_non_proxy_both %}checked{% endif %}>
+      </label>
+    </div>
+
+    <div class="glass-panel rounded-3xl p-6 space-y-5">
+      <h2 class="font-black text-xl">Runtime Notes</h2>
+      <div class="rounded-2xl border border-border p-4 text-sm text-text-secondary space-y-2">
+        <p>Secrets stay in <code>config.env</code>: bot tokens, API hash, MongoDB, Gemini/Groq, and WARP keys.</p>
+        <p>Multi-token helper bots are currently env-only. Active helper count is shown in the dashboard.</p>
+        <p>Some settings apply immediately; routing/proxy process changes still require an app restart.</p>
+      </div>
+      <label class="flex items-center justify-between gap-4">
+        <span><b>Global Search</b><span class="block text-sm text-text-secondary">Requires a configured user session.</span></span>
+        <input id="global_search" type="checkbox" class="w-5 h-5" {% if settings.global_search %}checked{% endif %}>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Global Search Channels</span>
+        <textarea id="global_search_channels" rows="3" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">{{ (settings.global_search_channels or []) | join('\n') }}</textarea>
+      </label>
+    </div>
+  </div>
+</section>
+
+<script>
+function lines(id) {
+  return document.getElementById(id).value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+}
+
+document.getElementById('save-btn').addEventListener('click', async () => {
+  const payload = {
+    replace_mode: document.getElementById('replace_mode').checked,
+    hide_catalog: document.getElementById('hide_catalog').checked,
+    auth_channels: lines('auth_channels'),
+    anime_channels: lines('anime_channels'),
+    subscription: document.getElementById('subscription').checked,
+    subscription_group_id: Number(document.getElementById('subscription_group_id').value || 0),
+    approver_ids: lines('approver_ids').map(Number).filter(Boolean),
+    payment_instructions: document.getElementById('payment_instructions').value,
+    payment_qr_url: document.getElementById('payment_qr_url').value,
+    http_proxy_url: document.getElementById('http_proxy_url').value,
+    show_proxy_and_non_proxy_both: document.getElementById('show_proxy_and_non_proxy_both').checked,
+    global_search: document.getElementById('global_search').checked,
+    global_search_channels: lines('global_search_channels'),
+  };
+  const res = await fetch('/api/admin/settings', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showToast(data.detail || 'Settings save failed', 'error', 'Error');
+    return;
+  }
+  showToast(data.message || 'Settings saved', 'success', 'Saved');
+});
+</script>
+{% endblock %}

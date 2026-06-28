@@ -9,6 +9,7 @@ from Backend.logger import LOGGER
 from Backend.config import Telegram
 from Backend.fastapi import server
 from Backend.helper.pyro import restart_notification, setup_bot_commands
+from Backend.helper.settings_manager import SettingsManager
 from Backend.pyrofork.bot import Helper, StreamBot
 from Backend.pyrofork.clients import initialize_clients
 from Backend.pyrofork.plugins.channels import _load_channels_from_db
@@ -26,6 +27,7 @@ from Backend.helper.iptv import (
     start_iptv_interval_loop,
     start_iptv_sync_background,
 )
+from Backend.helper.scan_manager import scan_manager
 from Backend.fastapi.main import app
 
 
@@ -83,6 +85,12 @@ async def start_services():
         
         await db.connect()
         await asleep(1.2)
+
+        await SettingsManager.initialize(db)
+        await asleep(0.3)
+
+        await scan_manager.load(db)
+        await asleep(0.2)
 
         LOGGER.info("Initializing Telegram-Stremio Web Server...")
         loop.create_task(server.serve())

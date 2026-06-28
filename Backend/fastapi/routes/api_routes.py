@@ -23,6 +23,10 @@ from Backend.helper.iptv import (
     start_iptv_sync_background,
     update_iptv_settings,
 )
+from Backend.helper.settings_manager import SettingsManager
+from Backend.helper.scan_manager import dbcheck_manager, scan_manager
+from Backend.config import Telegram
+from Backend.helper.warp_control import apply_warp_mode, get_warp_status
 from Backend.helper.metadata import (
     fetch_selected_movie_metadata,
     fetch_selected_tv_metadata,
@@ -30,6 +34,22 @@ from Backend.helper.metadata import (
     search_tv_candidates,
 )
 from time import time
+
+
+def _public_settings(data: dict) -> dict:
+    public = dict(data or {})
+    public["admin_password"] = ""
+    public["secrets_env_only"] = [
+        "BOT_TOKEN",
+        "HELPER_BOT_TOKEN",
+        "API_HASH",
+        "DATABASE",
+        "TMDB_API",
+        "GEMINI_API_KEY",
+        "GROQ_API_KEY",
+        "WARP_PRIVATE_KEYS",
+    ]
+    return public
 
 
 # --- API Routes for System Stats ---
@@ -130,6 +150,83 @@ async def update_iptv_settings_api(payload: dict):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def get_settings_api():
+    try:
+        return {"settings": _public_settings(SettingsManager.current().to_dict())}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def update_settings_api(payload: dict):
+    try:
+        results = await SettingsManager.update(db, payload or {})
+        return {
+            "message": "Settings saved.",
+            "settings": _public_settings(SettingsManager.current().to_dict()),
+            "results": results,
+        }
+    except Exception as e:
+        LOGGER.error(f"update_settings_api failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def get_tools_channels_api():
+    return {
+        "channels": [{"id": channel, "label": str(channel)} for channel in Telegram.AUTH_CHANNEL],
+    }
+
+
+async def start_tools_scan_api(payload: dict):
+    channels = payload.get("channels") or list(Telegram.AUTH_CHANNEL)
+    mode = payload.get("mode") or "scan"
+    if mode not in {"scan", "rescan"}:
+        raise HTTPException(status_code=400, detail="mode must be scan or rescan")
+    result = await scan_manager.start(StreamBot, channels, mode=mode)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("message") or "Scan could not start")
+    return result
+
+
+async def cancel_tools_scan_api():
+    return await scan_manager.cancel()
+
+
+async def get_tools_scan_status_api():
+    return {"status": scan_manager.get_status()}
+
+
+async def start_tools_dbcheck_api():
+    result = await dbcheck_manager.start(StreamBot, db)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("message") or "DB check could not start")
+    return result
+
+
+async def cancel_tools_dbcheck_api():
+    return await dbcheck_manager.cancel()
+
+
+async def get_tools_dbcheck_status_api():
+    return {"status": dbcheck_manager.get_status()}
+
+
+async def purge_tools_dead_links_api(payload: dict):
+    return await dbcheck_manager.purge(db, payload.get("stream_ids") or [])
+
+
+async def get_warp_status_api():
+    return get_warp_status()
+
+
+async def apply_warp_api(payload: dict):
+    enable = bool(payload.get("enable"))
+    force = bool(payload.get("force", False))
+    result = await apply_warp_mode(enable, force=force)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("message") or "WARP switch failed")
+    return result
     
 # --- API Routes for Media Management ---
 

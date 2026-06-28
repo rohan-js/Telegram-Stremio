@@ -9,6 +9,8 @@ from Backend.config import Telegram
 import Backend
 from Backend.logger import LOGGER
 from Backend.helper.encrypt import encode_string
+from Backend.helper.split_files import parse_split_info, strip_part_suffix
+from Backend.helper.anime import fetch_anime_metadata, fetch_anime_movie_metadata
 from Backend.helper.metadata_matcher import (
     MatchCandidate,
     MatchIntent,
@@ -94,6 +96,11 @@ def has_combined_marker(*values) -> bool:
         if any("combined" in str(item).lower() for item in parts):
             return True
     return False
+
+
+def _is_anime_channel(channel) -> bool:
+    target = str(channel).replace("-100", "")
+    return any(str(item).replace("-100", "") == target for item in getattr(Telegram, "ANIME_CHANNELS", []) or [])
 
 
 def infer_resolution_from_filename(filename: str, parsed: dict) -> str:
@@ -524,12 +531,14 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         LOGGER.error(f"PTN parsing failed for {filename}: {e}\n{traceback.format_exc()}")
         return None
 
-    # Skip split/multipart files
-    # if Telegram.SKIP_MULTIPART:
-    multipart_pattern = compile(r'(?:part|cd|disc|disk)[s._-]*\d+(?=\.\w+$)', IGNORECASE)
-    if multipart_pattern.search(filename):
-        LOGGER.info(f"Skipping {filename}: seems to be a split/multipart file")
-        return None
+    split_info = parse_split_info(filename)
+    part_number = split_info[1] if split_info else None
+    metadata_filename = strip_part_suffix(filename) if split_info else filename
+    if split_info:
+        try:
+            parsed = PTN.parse(metadata_filename)
+        except Exception:
+            pass
 
     title = parsed.get("title")
     season = parsed.get("season")
@@ -580,11 +589,20 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         encoded_string = await encode_string(data)
     except Exception:
         encoded_string = None
+    group_key = f"{channel}:{quality}:{split_info[0]}" if split_info else None
+    anime_channel = _is_anime_channel(channel)
 
     try:
         if season and episode:
             LOGGER.info(f"Fetching TV metadata: {title} S{season}E{episode}")
             match_details = None
+            if anime_channel and not explicit_default_id:
+                anime_result = await fetch_anime_metadata(title, season, episode, encoded_string, year, quality)
+                if anime_result:
+                    result = _attach_match_details(anime_result, None, filename)
+                    result["group_key"] = group_key
+                    result["part_number"] = part_number
+                    return result
             if not explicit_default_id and not default_id:
                 candidate, match_details = await resolve_tv_match(title, season, episode, year, raw_title=filename, parsed=parsed)
                 if not candidate:
@@ -592,7 +610,7 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
                     LOGGER.warning(f"TV metadata match failed for {filename}: {match_details.get('match_rejection_reason')}")
                     return None
                 default_id = candidate.imdb_id or candidate.tmdb_id
-            return _attach_match_details(await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id), match_details, filename)
+            result = _attach_match_details(await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id), match_details, filename)
         elif season:
             LOGGER.info(f"Fetching TV season-pack metadata: {title} S{season}")
             match_details = None
@@ -603,10 +621,17 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
                     LOGGER.warning(f"TV season-pack metadata match failed for {filename}: {match_details.get('match_rejection_reason')}")
                     return None
                 default_id = candidate.imdb_id or candidate.tmdb_id
-            return _attach_match_details(await fetch_tv_season_pack_metadata(title, season, encoded_string, year, quality, default_id), match_details, filename)
+            result = _attach_match_details(await fetch_tv_season_pack_metadata(title, season, encoded_string, year, quality, default_id), match_details, filename)
         else:
             LOGGER.info(f"Fetching Movie metadata: {title} ({year})")
             match_details = None
+            if anime_channel and not explicit_default_id:
+                anime_result = await fetch_anime_movie_metadata(title, encoded_string, year, quality)
+                if anime_result:
+                    result = _attach_match_details(anime_result, None, filename)
+                    result["group_key"] = group_key
+                    result["part_number"] = part_number
+                    return result
             if not explicit_default_id and not default_id:
                 candidate, match_details = await resolve_movie_match(title, year, raw_title=filename, parsed=parsed)
                 if not candidate:
@@ -614,7 +639,11 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
                     LOGGER.warning(f"Movie metadata match failed for {filename}: {match_details.get('match_rejection_reason')}")
                     return None
                 default_id = candidate.imdb_id or candidate.tmdb_id
-            return _attach_match_details(await fetch_movie_metadata(title, encoded_string, year, quality, default_id), match_details, filename)
+            result = _attach_match_details(await fetch_movie_metadata(title, encoded_string, year, quality, default_id), match_details, filename)
+        if result is not None:
+            result["group_key"] = group_key
+            result["part_number"] = part_number
+        return result
     except Exception as e:
         LOGGER.error(f"Error while fetching metadata for {filename}: {e}\n{traceback.format_exc()}")
         return None

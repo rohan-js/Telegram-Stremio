@@ -11,6 +11,7 @@ import time
 from Backend.helper.custom_dl import ACTIVE_STREAMS, RECENT_STREAMS
 from Backend.helper.nginx_egress import get_nginx_egress_summary
 from Backend.helper.host_outbound import get_vps_outbound_summary, empty_vps_outbound_summary
+from Backend.helper.settings_manager import SettingsManager
 
 templates = Jinja2Templates(directory="Backend/fastapi/templates")
 
@@ -212,6 +213,38 @@ async def live_tv_page(request: Request, _: bool = Depends(require_auth)):
     current_user = get_current_user(request)
 
     return templates.TemplateResponse("live_tv.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "current_user": current_user,
+    })
+
+
+async def settings_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "dark_professional")
+    theme = get_theme(theme_name)
+    current_user = get_current_user(request)
+    settings = SettingsManager.current().to_dict()
+    settings["admin_password"] = ""
+    settings["multi_token_count"] = len([k for k in __import__("os").environ if k.startswith("MULTI_TOKEN")])
+
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "current_user": current_user,
+        "settings": settings,
+    })
+
+
+async def tools_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "dark_professional")
+    theme = get_theme(theme_name)
+    current_user = get_current_user(request)
+
+    return templates.TemplateResponse("tools.html", {
         "request": request,
         "theme": theme,
         "themes": get_all_themes(),

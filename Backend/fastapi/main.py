@@ -12,7 +12,7 @@ from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page, public_status_page, stremio_guide_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, vlc_redirect,
-    custom_catalogs_page, watch_requests_page, live_tv_page
+    custom_catalogs_page, watch_requests_page, live_tv_page, settings_page, tools_page
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
@@ -35,7 +35,12 @@ from Backend.fastapi.routes.api_routes import (
     get_duplicate_media_api,
     update_quality_flags_api, clear_quality_flags_api,
     get_iptv_status_api, sync_iptv_api, list_iptv_channels_api,
-    update_iptv_channel_api, get_iptv_settings_api, update_iptv_settings_api
+    update_iptv_channel_api, get_iptv_settings_api, update_iptv_settings_api,
+    get_settings_api, update_settings_api,
+    get_tools_channels_api, start_tools_scan_api, cancel_tools_scan_api,
+    get_tools_scan_status_api, start_tools_dbcheck_api, cancel_tools_dbcheck_api,
+    get_tools_dbcheck_status_api, purge_tools_dead_links_api,
+    get_warp_status_api, apply_warp_api
 )
 
 app = FastAPI(
@@ -130,6 +135,14 @@ async def watch_requests(request: Request, _: bool = Depends(require_auth)):
 @app.get("/live-tv", response_class=HTMLResponse)
 async def live_tv(request: Request, _: bool = Depends(require_auth)):
     return await live_tv_page(request, _)
+
+@app.get("/admin/settings", response_class=HTMLResponse)
+async def admin_settings(request: Request, _: bool = Depends(require_auth)):
+    return await settings_page(request, _)
+
+@app.get("/admin/tools", response_class=HTMLResponse)
+async def admin_tools(request: Request, _: bool = Depends(require_auth)):
+    return await tools_page(request, _)
 
 @app.get("/media/edit", response_class=HTMLResponse)
 async def edit_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
@@ -235,6 +248,54 @@ async def get_iptv_settings_route(_: bool = Depends(require_auth)):
 @app.put("/api/iptv/settings")
 async def update_iptv_settings_route(payload: dict, _: bool = Depends(require_auth)):
     return await update_iptv_settings_api(payload)
+
+@app.get("/api/admin/settings")
+async def get_settings(_: bool = Depends(require_auth)):
+    return await get_settings_api()
+
+@app.put("/api/admin/settings")
+async def update_settings(payload: dict, _: bool = Depends(require_auth)):
+    return await update_settings_api(payload)
+
+@app.get("/api/admin/tools/channels")
+async def admin_tools_channels(_: bool = Depends(require_auth)):
+    return await get_tools_channels_api()
+
+@app.post("/api/admin/tools/scan/start")
+async def admin_tools_scan_start(payload: dict, _: bool = Depends(require_auth)):
+    return await start_tools_scan_api(payload)
+
+@app.post("/api/admin/tools/scan/cancel")
+async def admin_tools_scan_cancel(_: bool = Depends(require_auth)):
+    return await cancel_tools_scan_api()
+
+@app.get("/api/admin/tools/scan/status")
+async def admin_tools_scan_status(_: bool = Depends(require_auth)):
+    return await get_tools_scan_status_api()
+
+@app.post("/api/admin/tools/dbcheck/start")
+async def admin_tools_dbcheck_start(_: bool = Depends(require_auth)):
+    return await start_tools_dbcheck_api()
+
+@app.post("/api/admin/tools/dbcheck/cancel")
+async def admin_tools_dbcheck_cancel(_: bool = Depends(require_auth)):
+    return await cancel_tools_dbcheck_api()
+
+@app.get("/api/admin/tools/dbcheck/status")
+async def admin_tools_dbcheck_status(_: bool = Depends(require_auth)):
+    return await get_tools_dbcheck_status_api()
+
+@app.post("/api/admin/tools/dead-links/purge")
+async def admin_tools_dead_links_purge(payload: dict, _: bool = Depends(require_auth)):
+    return await purge_tools_dead_links_api(payload)
+
+@app.get("/api/admin/warp/status")
+async def admin_warp_status(_: bool = Depends(require_auth)):
+    return await get_warp_status_api()
+
+@app.post("/api/admin/warp/apply")
+async def admin_warp_apply(payload: dict, _: bool = Depends(require_auth)):
+    return await apply_warp_api(payload)
 
 @app.get("/api/system/workloads")
 async def get_workloads(_: bool = Depends(require_auth)):

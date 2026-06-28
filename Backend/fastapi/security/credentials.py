@@ -4,12 +4,10 @@ from Backend.config import Telegram
 from typing import Optional
 import hashlib
 
-ADMIN_PASSWORD_HASH = hashlib.sha256(Telegram.ADMIN_PASSWORD.encode()).hexdigest()
-
 security = HTTPBearer(auto_error=False)
 
 def verify_password(password: str) -> bool:
-    return hashlib.sha256(password.encode()).hexdigest() == ADMIN_PASSWORD_HASH
+    return hashlib.sha256(password.encode()).hexdigest() == hashlib.sha256(Telegram.ADMIN_PASSWORD.encode()).hexdigest()
 
 def verify_credentials(username: str, password: str) -> bool:
     return username == Telegram.ADMIN_USERNAME and verify_password(password)

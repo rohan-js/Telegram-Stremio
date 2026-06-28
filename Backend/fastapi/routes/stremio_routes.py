@@ -926,6 +926,8 @@ async def get_streams(
         badges = []
         if quality.get("recommended"):
             badges.append("Recommended")
+        if quality.get("parts"):
+            badges.append("Split")
         if quality.get("flagged_duplicate"):
             badges.append("Duplicate")
         if quality.get("quality_note"):

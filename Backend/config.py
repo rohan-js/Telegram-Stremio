@@ -17,6 +17,9 @@ class Telegram:
         TELEGRAM_PROXY_PORT = 0
     TELEGRAM_PROXY_USERNAME = getenv("TELEGRAM_PROXY_USERNAME", "").strip()
     TELEGRAM_PROXY_PASSWORD = getenv("TELEGRAM_PROXY_PASSWORD", "").strip()
+    WARP_CONTROL_COMMAND = getenv("WARP_CONTROL_COMMAND", "").strip()
+    WARP_CONTROL_URL = getenv("WARP_CONTROL_URL", "").strip().rstrip("/")
+    WARP_CONTROL_SECRET = getenv("WARP_CONTROL_SECRET", "").strip()
     try:
         TELEGRAM_CLIENT_START_TIMEOUT_SEC = int(getenv("TELEGRAM_CLIENT_START_TIMEOUT_SEC", "45") or 45)
     except Exception:
@@ -79,6 +82,9 @@ class Telegram:
         SMART_ROUTING_CHUNK_TIMEOUT_SEC = 15.0
 
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
+    ANIME_CHANNELS = [channel.strip() for channel in (getenv("ANIME_CHANNELS") or "").split(",") if channel.strip()]
+    GLOBAL_SEARCH = getenv("GLOBAL_SEARCH", "false").lower() == "true"
+    GLOBAL_SEARCH_CHANNELS = [channel.strip() for channel in (getenv("GLOBAL_SEARCH_CHANNELS") or "").split(",") if channel.strip()]
     DATABASE = [db.strip() for db in (getenv("DATABASE") or "").split(",") if db.strip()]
 
     TMDB_API = getenv("TMDB_API", "")

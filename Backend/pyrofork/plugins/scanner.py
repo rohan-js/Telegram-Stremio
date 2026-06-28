@@ -239,6 +239,7 @@ async def _scan_channel(client: Client, chat_id: int):
                     msg_id=msg_id,
                     size=size,
                     name=title_clean,
+                    raw_size=int(getattr(file, "file_size", 0) or 0),
                 )
                 if updated_id:
                     s.indexed += 1

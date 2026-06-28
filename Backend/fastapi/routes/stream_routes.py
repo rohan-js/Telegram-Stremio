@@ -23,6 +23,7 @@ from Backend.helper.custom_dl import (
     is_client_cooled_down,
     record_route_failure,
 )
+from Backend.helper.virtual_dl import resolve_virtual_parts, virtual_stream_generator
 from Backend.helper.disk_cache import (
     disk_cache_enabled,
     cache_abspath,
@@ -544,6 +545,15 @@ async def stream_handler(
     token_data: dict = Depends(verify_token),
 ):
     decoded = await decode_string(id)
+    if decoded.get("parts"):
+        return await virtual_media_streamer(
+            request=request,
+            parts_payload=decoded["parts"],
+            token=token,
+            token_data=token_data,
+            stream_id_hash=id,
+        )
+
     msg_id = decoded.get("msg_id")
     if not msg_id:
         raise HTTPException(status_code=400, detail="Missing id")
@@ -569,6 +579,125 @@ async def stream_handler(
         token_data=token_data,
         stream_id_hash=id,
         target_dc=target_dc,
+    )
+
+async def virtual_media_streamer(
+    request: Request,
+    parts_payload: list,
+    token: str,
+    token_data: dict = None,
+    stream_id_hash: str = None,
+):
+    base_index = select_best_client(0)
+    streamer = get_streamer(base_index)
+    parts, file_size = await resolve_virtual_parts(parts_payload, streamer)
+    if not parts or file_size <= 0:
+        raise HTTPException(status_code=404, detail="Split media parts not found")
+
+    range_header = request.headers.get("Range", "")
+    start, end = parse_range_header(range_header, file_size)
+    req_length = end - start + 1
+    chunk_size = select_telegram_chunk_size(range_header)
+
+    first_file_id = parts[0]["file_id"]
+    target_dc = int(getattr(first_file_id, "dc_id", 0) or 0)
+    index = select_best_client(target_dc)
+    streamer = get_streamer(index)
+
+    file_name = first_file_id.file_name or f"{secrets.token_hex(4)}.bin"
+    mime_type = resolve_video_mime_type(file_name, first_file_id.mime_type)
+    if "." not in file_name and "/" in mime_type:
+        file_name = f"{file_name}.{mime_type.split('/')[1]}"
+
+    from urllib.parse import unquote
+
+    stream_id = secrets.token_hex(8)
+    decoded_name = unquote(request.path_params.get("name", ""))
+    db_title = await db.get_title_by_stream_id(stream_id_hash) if stream_id_hash else None
+    final_title = db_title if db_title else decoded_name
+
+    configured_prefetch, configured_parallelism = get_configured_stream_concurrency()
+    active_streams = count_active_telegram_streams()
+    mem_available_mb = get_mem_available_mb()
+    prefetch_count, parallelism, prefetch_reason = choose_effective_prefetch(
+        configured_prefetch,
+        configured_parallelism,
+        file_size=file_size,
+        request_length=req_length,
+        active_streams=active_streams,
+        mem_available_mb=mem_available_mb,
+    )
+
+    meta = {
+        "request_path": str(request.url.path),
+        "request_range": range_header or None,
+        "request_start": start,
+        "request_end": end,
+        "request_length": req_length,
+        "client_host": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent"),
+        "title": final_title,
+        "filename": file_name,
+        "source_type": "telegram_split",
+        "split_parts": len(parts),
+        "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
+        "adaptive_prefetch": {
+            "configured_prefetch": configured_prefetch,
+            "configured_parallelism": configured_parallelism,
+            "effective_prefetch": prefetch_count,
+            "effective_parallelism": parallelism,
+            "reason": prefetch_reason,
+            "active_streams": active_streams,
+            "mem_available_mb": mem_available_mb,
+        },
+        "smart_routing": {
+            "target_dc": target_dc,
+            "selected_client": index,
+            "probe_results": [],
+        },
+    }
+
+    from fastapi.responses import Response as PlainResponse
+
+    headers = {
+        "Content-Type": mime_type,
+        "Content-Disposition": f'inline; filename="{file_name}"',
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=3600",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+    }
+    if range_header:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        headers["Content-Length"] = str(req_length)
+        status = 206
+    else:
+        status = 200
+
+    if request.method == "HEAD":
+        headers["Content-Length"] = str(req_length)
+        return PlainResponse(status_code=status, headers=headers)
+
+    body_gen = virtual_stream_generator(
+        parts=parts,
+        start=start,
+        end=end,
+        chunk_size=chunk_size,
+        streamer=streamer,
+        client_index=index,
+        request=request,
+        meta=meta,
+        stream_id=stream_id,
+        parallelism=parallelism,
+        prefetch_count=prefetch_count,
+    )
+
+    asyncio.create_task(track_usage_from_stats(stream_id, token, token_data))
+    return StreamingResponse(
+        body_gen,
+        headers=headers,
+        status_code=status,
+        media_type=mime_type,
     )
 
 async def media_streamer(

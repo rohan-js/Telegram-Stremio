@@ -12,8 +12,8 @@ from typing import Dict, List, Optional, Tuple, Any
 from Backend.logger import LOGGER
 from Backend.config import Telegram
 import re
-from Backend.helper.encrypt import decode_string
-from Backend.helper.modal import Episode, MovieSchema, QualityDetail, Season, TVShowSchema
+from Backend.helper.encrypt import decode_string, encode_string
+from Backend.helper.modal import Episode, MovieSchema, QualityDetail, QualityPart, Season, TVShowSchema
 from Backend.helper.task_manager import delete_message
 from Backend.helper.torrent_stats import scrape_torrent_trackers
 from Backend.helper.host_outbound import build_vps_outbound_sample
@@ -81,6 +81,28 @@ class Database:
             {"$set": {"current_index": self.current_db_index}},
             upsert=True
         )
+
+    async def get_settings(self) -> dict:
+        try:
+            doc = await self.dbs["tracking"]["settings"].find_one({"_id": "app_settings"})
+            return doc or {}
+        except Exception as e:
+            LOGGER.error(f"Database.get_settings error: {e}")
+            return {}
+
+    async def save_settings(self, settings: dict) -> bool:
+        try:
+            clean = {k: v for k, v in (settings or {}).items() if k != "_id"}
+            clean["updated_at"] = datetime.utcnow()
+            await self.dbs["tracking"]["settings"].update_one(
+                {"_id": "app_settings"},
+                {"$set": clean},
+                upsert=True,
+            )
+            return True
+        except Exception as e:
+            LOGGER.error(f"Database.save_settings error: {e}")
+            return False
 
     async def record_vps_outbound_sample(
         self,
@@ -942,9 +964,9 @@ class Database:
 
     async def insert_media(
         self, metadata_info: dict,
-        channel: int, msg_id: int, size: str, name: str
+        channel: int, msg_id: int, size: str, name: str, raw_size: int = 0
     ) -> Optional[ObjectId]:
-        quality_detail = self._quality_from_metadata(metadata_info, size, name)
+        quality_detail = await self._quality_from_metadata(metadata_info, channel, msg_id, size, name, raw_size)
         
         if metadata_info['media_type'] == "movie":
             media = MovieSchema(
@@ -962,7 +984,8 @@ class Database:
                 cast=metadata_info['cast'],
                 runtime=metadata_info['runtime'],
                 media_type=metadata_info['media_type'],
-                telegram=[quality_detail]
+                telegram=[quality_detail],
+                is_anime=bool(metadata_info.get("is_anime", False)),
             )
             return await self.update_movie(media)
         else:
@@ -1004,6 +1027,7 @@ class Database:
                 cast=metadata_info['cast'],
                 runtime=metadata_info['runtime'],
                 media_type=metadata_info['media_type'],
+                is_anime=bool(metadata_info.get("is_anime", False)),
                 seasons=[Season(
                     season_number=metadata_info['season_number'],
                     episodes=episodes
@@ -1011,20 +1035,60 @@ class Database:
             )
             return await self.update_tv_show(tv_show)
 
-    def _quality_from_metadata(self, metadata_info: dict, size: str, name: str) -> QualityDetail:
+    async def _build_part_id_and_size(self, parts: List[dict]) -> Tuple[str, str]:
+        sorted_parts = sorted(parts or [], key=lambda p: int(p.get("part_number") or 0))
+        payload = {
+            "parts": [
+                {
+                    "chat_id": int(str(p["chat_id"]).replace("-100", "")),
+                    "msg_id": int(p["msg_id"]),
+                }
+                for p in sorted_parts
+            ]
+        }
+        encoded = await encode_string(payload)
+        total_bytes = sum(int(p.get("size_bytes") or 0) for p in sorted_parts)
+        from Backend.helper.pyro import get_readable_file_size
+        return encoded, get_readable_file_size(total_bytes)
+
+    async def _quality_from_metadata(
+        self,
+        metadata_info: dict,
+        channel: int,
+        msg_id: int,
+        size: str,
+        name: str,
+        raw_size: int = 0,
+    ) -> QualityDetail:
+        group_key = metadata_info.get("group_key")
+        parts = None
+        encoded_id = metadata_info["encoded_string"]
+        effective_size = size
+        if group_key and metadata_info.get("source_type", "telegram") == "telegram":
+            part = {
+                "part_number": int(metadata_info.get("part_number") or 1),
+                "chat_id": int(channel),
+                "msg_id": int(msg_id),
+                "size_bytes": int(raw_size or metadata_info.get("video_size") or 0),
+            }
+            encoded_id, effective_size = await self._build_part_id_and_size([part])
+            parts = [QualityPart(**part)]
+
         return QualityDetail(
             quality=metadata_info["quality"],
-            id=metadata_info["encoded_string"],
+            id=encoded_id,
             name=name,
-            size=size,
+            size=effective_size,
+            group_key=group_key,
+            parts=parts,
             source_type=metadata_info.get("source_type", "telegram"),
             info_hash=metadata_info.get("info_hash"),
             file_idx=metadata_info.get("file_idx"),
             sources=metadata_info.get("sources"),
             filename=metadata_info.get("filename") or name,
             video_size=metadata_info.get("video_size"),
-            origin_chat_id=metadata_info.get("origin_chat_id"),
-            origin_msg_id=metadata_info.get("origin_msg_id"),
+            origin_chat_id=metadata_info.get("origin_chat_id") or (int(f"-100{channel}") if metadata_info.get("source_type", "telegram") == "telegram" else None),
+            origin_msg_id=metadata_info.get("origin_msg_id") or (int(msg_id) if metadata_info.get("source_type", "telegram") == "telegram" else None),
             torrent_private=bool(metadata_info.get("torrent_private", False)),
             torrent_source_uri=metadata_info.get("torrent_source_uri"),
             torrent_file_chat_id=metadata_info.get("torrent_file_chat_id"),
@@ -1060,6 +1124,12 @@ class Database:
         return quality.get("source_type") or "telegram"
 
     def _same_replace_group(self, existing_quality: dict, new_quality: dict) -> bool:
+        if existing_quality.get("group_key") or new_quality.get("group_key"):
+            return (
+                existing_quality.get("quality") == new_quality.get("quality")
+                and self._source_type(existing_quality) == self._source_type(new_quality)
+                and existing_quality.get("group_key") == new_quality.get("group_key")
+            )
         return (
             existing_quality.get("quality") == new_quality.get("quality")
             and self._source_type(existing_quality) == self._source_type(new_quality)
@@ -1067,6 +1137,9 @@ class Database:
 
     def _source_identity_key(self, quality: dict) -> Optional[str]:
         source_type = self._source_type(quality)
+
+        if source_type == "telegram" and quality.get("group_key"):
+            return f"telegram-group:{quality.get('group_key')}"
 
         if source_type == "torrent":
             info_hash = str(quality.get("info_hash") or "").lower()
@@ -1097,6 +1170,42 @@ class Database:
             merged["quality_note"] = existing_quality.get("quality_note")
         return merged
 
+    async def _merge_split_quality(self, qualities: list, new_quality: dict) -> Tuple[list, bool]:
+        group_key = new_quality.get("group_key")
+        incoming_parts = list(new_quality.get("parts") or [])
+        if not group_key or not incoming_parts:
+            return qualities, False
+
+        new_part = incoming_parts[0]
+        updated = []
+        merged = False
+        for quality in qualities:
+            if quality.get("group_key") != group_key:
+                updated.append(quality)
+                continue
+
+            existing_parts = [
+                p for p in (quality.get("parts") or [])
+                if int(p.get("part_number") or 0) != int(new_part.get("part_number") or 0)
+            ]
+            existing_parts.append(new_part)
+            encoded_id, size_text = await self._build_part_id_and_size(existing_parts)
+            merged_quality = dict(quality)
+            merged_quality.update(
+                {
+                    "id": encoded_id,
+                    "size": size_text,
+                    "name": new_quality.get("name") or quality.get("name"),
+                    "parts": sorted(existing_parts, key=lambda p: int(p.get("part_number") or 0)),
+                }
+            )
+            updated.append(merged_quality)
+            merged = True
+
+        if not merged:
+            updated.append(new_quality)
+        return updated, True
+
     def _replace_exact_source_quality(self, qualities: list, new_quality: dict) -> Tuple[list, bool]:
         replaced = False
         updated = []
@@ -1122,6 +1231,15 @@ class Database:
     async def _delete_encoded_quality_safely(self, encoded_id: str) -> None:
         try:
             decoded_data = await decode_string(encoded_id)
+            if isinstance(decoded_data, dict) and decoded_data.get("parts"):
+                for part in decoded_data.get("parts") or []:
+                    try:
+                        chat_id = int(f"-100{str(part['chat_id']).replace('-100', '')}")
+                        msg_id = int(part["msg_id"])
+                        await delete_message(chat_id, msg_id)
+                    except Exception as e:
+                        LOGGER.error(f"Failed to queue split part for deletion: {e}")
+                return
             chat_id = int(f"-100{decoded_data['chat_id']}")
             msg_id = int(decoded_data["msg_id"])
             await delete_message(chat_id, msg_id)
@@ -1186,10 +1304,16 @@ class Database:
         movie_id = existing_movie["_id"]
         existing_qualities = existing_movie.get("telegram", [])
 
-        existing_qualities, exact_source_replaced = self._replace_exact_source_quality(
-            existing_qualities,
-            quality_to_update,
-        )
+        if quality_to_update.get("group_key"):
+            existing_qualities, exact_source_replaced = await self._merge_split_quality(
+                existing_qualities,
+                quality_to_update,
+            )
+        else:
+            existing_qualities, exact_source_replaced = self._replace_exact_source_quality(
+                existing_qualities,
+                quality_to_update,
+            )
 
         if exact_source_replaced:
             pass
@@ -1209,6 +1333,8 @@ class Database:
             existing_qualities.append(quality_to_update)
 
         existing_movie["telegram"] = existing_qualities
+        if movie_dict.get("is_anime"):
+            existing_movie["is_anime"] = True
         existing_movie["updated_on"] = datetime.utcnow()
 
         if existing_db_index != self.current_db_index:
@@ -1307,11 +1433,16 @@ class Database:
                 existing_episode.setdefault("telegram", [])
 
                 for quality in episode["telegram"]:
-                    target_quality = quality.get("quality")
-                    existing_episode["telegram"], exact_source_replaced = self._replace_exact_source_quality(
-                        existing_episode["telegram"],
-                        quality,
-                    )
+                    if quality.get("group_key"):
+                        existing_episode["telegram"], exact_source_replaced = await self._merge_split_quality(
+                            existing_episode["telegram"],
+                            quality,
+                        )
+                    else:
+                        existing_episode["telegram"], exact_source_replaced = self._replace_exact_source_quality(
+                            existing_episode["telegram"],
+                            quality,
+                        )
 
                     if exact_source_replaced:
                         continue
@@ -1334,6 +1465,8 @@ class Database:
                         existing_episode["telegram"].append(quality)
 
         existing_tv["updated_on"] = datetime.utcnow()
+        if tv_show_dict.get("is_anime"):
+            existing_tv["is_anime"] = True
 
         # ---------------- MOVE DB IF NEEDED ----------------
         if existing_db_index != self.current_db_index:
@@ -1696,6 +1829,12 @@ class Database:
     async def get_title_by_stream_id(self, stream_id_hash: str) -> Optional[str]:
         """Look up the original media title across all storage DBs using the telegram file ID hash.
         For TV shows, it includes the Season and Episode number in the title."""
+        decoded_lookup = None
+        try:
+            decoded_lookup = await decode_string(stream_id_hash)
+        except Exception:
+            decoded_lookup = None
+
         for i in range(1, self.current_db_index + 1):
             db = self.dbs[f"storage_{i}"]
             
@@ -1705,6 +1844,10 @@ class Database:
                 for t in movie["telegram"]:
                     if t.get("id") == stream_id_hash:
                         return movie.get("title")
+            if isinstance(decoded_lookup, dict) and decoded_lookup.get("parts"):
+                movie = await db["movie"].find_one({"telegram.parts": {"$elemMatch": decoded_lookup["parts"][0]}})
+                if movie:
+                    return movie.get("title")
 
             # Check TV Shows
             tv = await db["tv"].find_one({"seasons.episodes.telegram.id": stream_id_hash})
@@ -1717,12 +1860,57 @@ class Database:
                                 s_num = season.get("season_number", 0)
                                 e_num = episode.get("episode_number", 0)
                                 return f"{title} S{s_num:02d}E{e_num:02d}"
+            if isinstance(decoded_lookup, dict) and decoded_lookup.get("parts"):
+                tv = await db["tv"].find_one({"seasons.episodes.telegram.parts": {"$elemMatch": decoded_lookup["parts"][0]}})
+                if tv:
+                    title = tv.get("title", "Unknown Series")
+                    for season in tv.get("seasons", []):
+                        for episode in season.get("episodes", []):
+                            for t in episode.get("telegram", []):
+                                if t.get("parts"):
+                                    s_num = season.get("season_number", 0)
+                                    e_num = episode.get("episode_number", 0)
+                                    return f"{title} S{s_num:02d}E{e_num:02d}"
 
         return None
 
     async def delete_media_by_stream_id(self, stream_id_hash: str) -> bool:
         """Finds and removes a specific stream quality by its hash across all DBs. 
         If it's the last quality, it cleans up the movie or episode/season/show."""
+        decoded_lookup = None
+        try:
+            decoded_lookup = await decode_string(stream_id_hash)
+        except Exception:
+            decoded_lookup = None
+
+        def _matches_deleted_part(quality: dict) -> bool:
+            if not isinstance(decoded_lookup, dict) or "chat_id" not in decoded_lookup or "msg_id" not in decoded_lookup:
+                return False
+            target_chat = int(decoded_lookup["chat_id"])
+            target_msg = int(decoded_lookup["msg_id"])
+            return any(
+                int(str(part.get("chat_id")).replace("-100", "")) == target_chat
+                and int(part.get("msg_id")) == target_msg
+                for part in (quality.get("parts") or [])
+            )
+
+        async def _remove_deleted_part(quality: dict) -> Optional[dict]:
+            target_chat = int(decoded_lookup["chat_id"])
+            target_msg = int(decoded_lookup["msg_id"])
+            remaining = [
+                part for part in (quality.get("parts") or [])
+                if not (
+                    int(str(part.get("chat_id")).replace("-100", "")) == target_chat
+                    and int(part.get("msg_id")) == target_msg
+                )
+            ]
+            if not remaining:
+                return None
+            updated = dict(quality)
+            updated["parts"] = remaining
+            updated["id"], updated["size"] = await self._build_part_id_and_size(remaining)
+            return updated
+
         for i in range(1, self.current_db_index + 1):
             db = self.dbs[f"storage_{i}"]
             
@@ -1736,6 +1924,32 @@ class Database:
                     movie['updated_on'] = datetime.utcnow()
                     await db["movie"].replace_one({"_id": movie["_id"]}, movie)
                 return True
+
+            if isinstance(decoded_lookup, dict) and "chat_id" in decoded_lookup and "msg_id" in decoded_lookup:
+                part_query = {
+                    "chat_id": int(decoded_lookup["chat_id"]),
+                    "msg_id": int(decoded_lookup["msg_id"]),
+                }
+                movie = await db["movie"].find_one({"telegram.parts": {"$elemMatch": part_query}})
+                if movie:
+                    changed = False
+                    new_qualities = []
+                    for q in movie.get("telegram", []):
+                        if _matches_deleted_part(q):
+                            changed = True
+                            updated_q = await _remove_deleted_part(q)
+                            if updated_q:
+                                new_qualities.append(updated_q)
+                        else:
+                            new_qualities.append(q)
+                    if changed:
+                        if new_qualities:
+                            movie["telegram"] = new_qualities
+                            movie["updated_on"] = datetime.utcnow()
+                            await db["movie"].replace_one({"_id": movie["_id"]}, movie)
+                        else:
+                            await db["movie"].delete_one({"_id": movie["_id"]})
+                        return True
 
             # Check TV Shows
             tv = await db["tv"].find_one({"seasons.episodes.telegram.id": stream_id_hash})
@@ -1755,6 +1969,35 @@ class Database:
                                 tv['updated_on'] = datetime.utcnow()
                                 await db["tv"].replace_one({"_id": tv["_id"]}, tv)
                                 return True
+            if isinstance(decoded_lookup, dict) and "chat_id" in decoded_lookup and "msg_id" in decoded_lookup:
+                part_query = {
+                    "chat_id": int(decoded_lookup["chat_id"]),
+                    "msg_id": int(decoded_lookup["msg_id"]),
+                }
+                tv = await db["tv"].find_one({"seasons.episodes.telegram.parts": {"$elemMatch": part_query}})
+                if tv:
+                    changed = False
+                    for season in tv.get("seasons", []):
+                        for episode in season.get("episodes", []):
+                            new_qualities = []
+                            for q in episode.get("telegram", []):
+                                if _matches_deleted_part(q):
+                                    changed = True
+                                    updated_q = await _remove_deleted_part(q)
+                                    if updated_q:
+                                        new_qualities.append(updated_q)
+                                else:
+                                    new_qualities.append(q)
+                            episode["telegram"] = new_qualities
+                        season["episodes"] = [e for e in season.get("episodes", []) if e.get("telegram")]
+                    tv["seasons"] = [s for s in tv.get("seasons", []) if s.get("episodes")]
+                    if changed:
+                        if tv["seasons"]:
+                            tv["updated_on"] = datetime.utcnow()
+                            await db["tv"].replace_one({"_id": tv["_id"]}, tv)
+                        else:
+                            await db["tv"].delete_one({"_id": tv["_id"]})
+                        return True
         return False
 
     async def delete_media_by_origin(self, origin_chat_id: int, origin_msg_id: int) -> bool:
@@ -1772,6 +2015,8 @@ class Database:
                 movie["telegram"] = [
                     q for q in movie.get("telegram", [])
                     if not (
+                        not q.get("parts")
+                        and
                         q.get("origin_chat_id") == int(origin_chat_id)
                         and q.get("origin_msg_id") == int(origin_msg_id)
                     )
@@ -1799,6 +2044,8 @@ class Database:
                         episode["telegram"] = [
                             q for q in episode.get("telegram", [])
                             if not (
+                                not q.get("parts")
+                                and
                                 q.get("origin_chat_id") == int(origin_chat_id)
                                 and q.get("origin_msg_id") == int(origin_msg_id)
                             )

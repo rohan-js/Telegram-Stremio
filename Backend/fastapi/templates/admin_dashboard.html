@@ -314,6 +314,32 @@
     </div>
 
     <div class="glass-card rounded-3xl overflow-hidden mb-6 sm:mb-8">
+        <div class="px-5 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-white/10 bg-white/5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            <div>
+                <h2 class="section-title text-xl sm:text-2xl">Telegram Route</h2>
+                <p class="muted text-sm mt-1">Switch only Telegram client traffic between direct routing and the configured WARP proxy helper.</p>
+            </div>
+            <span class="pill" id="warp-mode-pill">Loading</span>
+        </div>
+        <div class="p-4 sm:p-5 lg:p-6 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4">
+            <div class="mobile-kv">
+                <div class="key">Mode</div><div id="warp-mode">-</div>
+                <div class="key">Proxy</div><div id="warp-proxy">-</div>
+                <div class="key">Active Streams</div><div id="warp-active">-</div>
+                <div class="key">Control</div><div id="warp-control">-</div>
+            </div>
+            <div class="flex flex-col sm:flex-row lg:flex-col gap-3">
+                <button onclick="applyWarp(true, false)" class="btn-ui btn-primary"><i class="fas fa-cloud"></i> Enable WARP</button>
+                <button onclick="applyWarp(false, false)" class="btn-ui btn-ghost"><i class="fas fa-network-wired"></i> Disable WARP</button>
+                <label class="flex items-center gap-2 muted text-sm">
+                    <input id="warp-force" type="checkbox"> Force if streams active
+                </label>
+            </div>
+        </div>
+        <pre id="warp-result" class="mx-4 sm:mx-5 lg:mx-6 mb-5 rounded-2xl bg-background border border-border p-4 text-xs overflow-auto hidden"></pre>
+    </div>
+
+    <div class="glass-card rounded-3xl overflow-hidden mb-6 sm:mb-8">
         <div class="px-5 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-white/10 bg-white/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
                 <h2 class="section-title text-xl sm:text-2xl">Bot Health & Load</h2>
@@ -707,12 +733,53 @@
         }
     }
 
+    async function fetchWarpStatus() {
+        try {
+            const res = await fetch('/api/admin/warp/status');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Unable to load WARP status');
+            document.getElementById('warp-mode').textContent = data.mode || '-';
+            document.getElementById('warp-mode-pill').textContent = data.mode || '-';
+            document.getElementById('warp-proxy').textContent = `${data.proxy_scheme || ''}://${data.proxy_host || '-'}:${data.proxy_port || '-'}`;
+            document.getElementById('warp-active').textContent = data.active_streams ?? 0;
+            document.getElementById('warp-control').textContent = data.control_available ? 'Configured' : 'Not configured';
+            const result = document.getElementById('warp-result');
+            if (data.last_result && Object.keys(data.last_result).length) {
+                result.classList.remove('hidden');
+                result.textContent = JSON.stringify(data.last_result, null, 2);
+            }
+        } catch (err) {
+            document.getElementById('warp-control').textContent = 'Status error';
+        }
+    }
+
+    async function applyWarp(enable, force) {
+        const useForce = force || document.getElementById('warp-force').checked;
+        if (useForce && !confirm('Force switching can interrupt active Telegram streams. Continue?')) return;
+        try {
+            const res = await fetch('/api/admin/warp/apply', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enable, force: useForce})
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || data.message || 'WARP switch failed');
+            showToast(data.message || 'WARP switch command completed', 'success', 'WARP');
+            await fetchWarpStatus();
+        } catch (err) {
+            showToast(err.message || 'WARP switch failed', 'error', 'WARP');
+            await fetchWarpStatus();
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         fetchStats();
         fetchAnalytics();
         fetchDeadLinks();
+        fetchWarpStatus();
         setInterval(fetchStats, 10000);
         setInterval(fetchAnalytics, 15000);
+        setInterval(fetchWarpStatus, 15000);
     });
 </script>
 {% endblock %}
