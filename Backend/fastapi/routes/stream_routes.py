@@ -669,7 +669,6 @@ async def virtual_media_streamer(
     }
     if range_header:
         headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-        headers["Content-Length"] = str(req_length)
         status = 206
     else:
         status = 200
@@ -910,8 +909,11 @@ async def media_streamer(
     # the file/range size without opening a stream.
     # GET 200: keep full-file Telegram streams chunked. If Telegram ends early,
     # h11 would enforce Content-Length strictly and log protocol errors.
-    # GET 206: include Content-Length for strict TV/mobile players. Some clients
-    # restart from byte 0 after seeking when partial responses are chunked.
+    # GET 206: keep Telegram-backed live streams chunked. Telegram may fail a
+    # later chunk after headers are sent; strict Content-Length would then cause
+    # h11 LocalProtocolError ("Too little data for declared Content-Length").
+    # Disk-cache/downloaded paths can still use Content-Length because their
+    # byte source is local and deterministic.
 
     # HEAD request support
     from fastapi.responses import Response as PlainResponse
@@ -965,7 +967,6 @@ async def media_streamer(
 
     if range_header:
         headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-        headers["Content-Length"] = str(req_length)
         status = 206
     else:
         status = 200

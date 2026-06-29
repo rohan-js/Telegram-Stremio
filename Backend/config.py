@@ -50,7 +50,7 @@ class Telegram:
     PARALLEL = int(getenv("PARALLEL", "1"))
     PRE_FETCH = int(getenv("PRE_FETCH", "1"))
 
-    TELEGRAM_CDN_ENABLED = getenv("TELEGRAM_CDN_ENABLED", "true").lower() == "true"
+    TELEGRAM_CDN_ENABLED = getenv("TELEGRAM_CDN_ENABLED", "false").lower() == "true"
     TELEGRAM_CDN_VERIFY_HASHES = getenv("TELEGRAM_CDN_VERIFY_HASHES", "true").lower() == "true"
     try:
         TELEGRAM_CDN_MAX_REUPLOAD_ATTEMPTS = int(getenv("TELEGRAM_CDN_MAX_REUPLOAD_ATTEMPTS", "2") or 2)
