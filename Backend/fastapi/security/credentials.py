@@ -1,16 +1,14 @@
 from fastapi import HTTPException, Request
 from fastapi.security import HTTPBearer
-from Backend.config import Telegram
 from typing import Optional
-import hashlib
+from Backend.helper.passwords import verify_password
+from Backend.helper.settings_manager import SettingsManager
 
 security = HTTPBearer(auto_error=False)
 
-def verify_password(password: str) -> bool:
-    return hashlib.sha256(password.encode()).hexdigest() == hashlib.sha256(Telegram.ADMIN_PASSWORD.encode()).hexdigest()
-
 def verify_credentials(username: str, password: str) -> bool:
-    return username == Telegram.ADMIN_USERNAME and verify_password(password)
+    settings = SettingsManager.current()
+    return username == settings.admin_username and verify_password(password, settings.admin_password)
 
 def is_authenticated(request: Request) -> bool:
     return request.session.get("authenticated", False)

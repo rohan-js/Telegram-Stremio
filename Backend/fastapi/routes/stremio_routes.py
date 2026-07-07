@@ -7,6 +7,8 @@ import PTN
 from datetime import datetime, timezone, timedelta
 from Backend.fastapi.security.tokens import verify_token
 from Backend.helper.encrypt import encode_string
+from Backend.helper.global_search import global_search, is_global_search_enabled
+from Backend.logger import LOGGER
 from Backend.helper.torrent_downloads import select_completed_torrent_file
 from Backend.helper.iptv import (
     IPTV_ALL_CATALOG_ID,
@@ -904,7 +906,7 @@ async def get_streams(
         episode_number=episode_num
     )
 
-    if not media_details or "telegram" not in media_details:
+    if not media_details:
         return {
             "streams": [],
             "cacheMaxAge": 0,
@@ -994,6 +996,34 @@ async def get_streams(
                 "url": original_url,
                 "_recommended": bool(quality.get("recommended")),
             })
+
+    if len(streams) < 3 and is_global_search_enabled():
+        try:
+            global_results = await global_search(
+                media_details.get("title") or "",
+                Telegram.AUTH_CHANNEL,
+                year=media_details.get("release_year"),
+                season=season_num,
+                episode=episode_num,
+            )
+            for result in global_results:
+                quality = result.get("quality") or "HD"
+                filename = result.get("title") or "video.mkv"
+                streams.append({
+                    "name": f"🌐 GLOBAL {quality}",
+                    "title": "\n".join(
+                        part for part in [
+                            f"📁 {filename}",
+                            f"💾 {result.get('size')}" if result.get("size") else "",
+                            f"📡 {result.get('source_chat')}" if result.get("source_chat") else "📡 Global Search",
+                        ]
+                        if part
+                    ),
+                    "url": f"{BASE_URL}/dl/{token}/{result.get('token')}/video.mkv",
+                    "_recommended": False,
+                })
+        except Exception as e:
+            LOGGER.warning(f"Global Search failed for {media_details.get('title')}: {e}")
 
     streams.sort(
         key=lambda s: (1 if s.get("_recommended") else 0, get_resolution_priority(s.get("name", ""))),

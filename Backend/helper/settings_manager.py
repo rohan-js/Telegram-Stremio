@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from Backend.config import Telegram
+from Backend.helper.passwords import hash_password, is_hashed
 from Backend.logger import LOGGER
 
 
@@ -11,6 +12,8 @@ DEFAULTS: Dict[str, Any] = {
     "hide_catalog": False,
     "auth_channels": [],
     "admin_username": "",
+    "admin_password": "",
+    "session_secret": "",
     "subscription": False,
     "subscription_group_id": 0,
     "approver_ids": [],
@@ -33,6 +36,8 @@ def _seed_from_env() -> Dict[str, Any]:
             "hide_catalog": bool(Telegram.HIDE_CATALOG),
             "auth_channels": list(Telegram.AUTH_CHANNEL),
             "admin_username": Telegram.ADMIN_USERNAME,
+            "admin_password": hash_password(Telegram.ADMIN_PASSWORD),
+            "session_secret": Telegram.SESSION_SECRET,
             "subscription": bool(Telegram.SUBSCRIPTION),
             "subscription_group_id": int(Telegram.SUBSCRIPTION_GROUP_ID or 0),
             "approver_ids": list(getattr(Telegram, "APPROVER_IDS", []) or []),
@@ -79,6 +84,18 @@ class Settings:
     def global_search_channels(self) -> List[str]:
         return [str(x).strip() for x in (self._data.get("global_search_channels") or []) if str(x).strip()]
 
+    @property
+    def admin_username(self) -> str:
+        return str(self._data.get("admin_username") or Telegram.ADMIN_USERNAME)
+
+    @property
+    def admin_password(self) -> str:
+        return str(self._data.get("admin_password") or "")
+
+    @property
+    def session_secret(self) -> str:
+        return str(self._data.get("session_secret") or Telegram.SESSION_SECRET)
+
 
 class SettingsManager:
     _current: Settings | None = None
@@ -88,6 +105,18 @@ class SettingsManager:
         raw = await db.get_settings()
         if not raw:
             raw = _seed_from_env()
+            await db.save_settings(raw)
+        changed = False
+        if not raw.get("admin_password"):
+            raw["admin_password"] = hash_password(Telegram.ADMIN_PASSWORD)
+            changed = True
+        elif raw.get("admin_password") and not is_hashed(raw.get("admin_password")):
+            raw["admin_password"] = hash_password(str(raw.get("admin_password")))
+            changed = True
+        if not raw.get("session_secret"):
+            raw["session_secret"] = Telegram.SESSION_SECRET
+            changed = True
+        if changed:
             await db.save_settings(raw)
         cls._current = Settings(raw)
         cls.apply_to_runtime(cls._current)
@@ -104,6 +133,8 @@ class SettingsManager:
         data = settings.to_dict()
         Telegram.REPLACE_MODE = bool(data.get("replace_mode", Telegram.REPLACE_MODE))
         Telegram.HIDE_CATALOG = bool(data.get("hide_catalog", Telegram.HIDE_CATALOG))
+        Telegram.ADMIN_USERNAME = str(data.get("admin_username") or Telegram.ADMIN_USERNAME)
+        Telegram.SESSION_SECRET = str(data.get("session_secret") or Telegram.SESSION_SECRET)
         Telegram.AUTH_CHANNEL = [str(x).strip() for x in (data.get("auth_channels") or []) if str(x).strip()]
         Telegram.SUBSCRIPTION = bool(data.get("subscription", Telegram.SUBSCRIPTION))
         Telegram.SUBSCRIPTION_GROUP_ID = int(data.get("subscription_group_id") or 0)
@@ -119,7 +150,20 @@ class SettingsManager:
         current = cls.current().to_dict()
         allowed = set(DEFAULTS)
         merged = dict(current)
-        merged.update({k: v for k, v in (payload or {}).items() if k in allowed})
+        incoming = {k: v for k, v in (payload or {}).items() if k in allowed}
+        if "admin_password" in incoming:
+            raw_password = str(incoming.get("admin_password") or "").strip()
+            if raw_password:
+                incoming["admin_password"] = raw_password if is_hashed(raw_password) else hash_password(raw_password)
+            else:
+                incoming.pop("admin_password", None)
+        if "session_secret" in incoming:
+            raw_secret = str(incoming.get("session_secret") or "").strip()
+            if raw_secret:
+                incoming["session_secret"] = raw_secret
+            else:
+                incoming.pop("session_secret", None)
+        merged.update(incoming)
 
         for key in ("auth_channels", "anime_channels", "global_search_channels"):
             merged[key] = [str(x).strip() for x in (merged.get(key) or []) if str(x).strip()]
@@ -128,6 +172,8 @@ class SettingsManager:
             if str(x).strip().lstrip("-").isdigit()
         ]
         merged["subscription_group_id"] = int(merged.get("subscription_group_id") or 0)
+        if merged.get("global_search") and not getattr(Telegram, "USER_SESSION_STRING", ""):
+            merged["global_search"] = False
 
         await db.save_settings(merged)
         cls._current = Settings(merged)

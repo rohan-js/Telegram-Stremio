@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from Backend import __version__
+from Backend.config import Telegram
 from Backend.fastapi.security.credentials import require_auth
 from Backend.fastapi.routes.stream_routes import router as stream_router, decay_client_failures
 from Backend.fastapi.routes.stremio_routes import router as stremio_router
@@ -27,6 +28,7 @@ from Backend.fastapi.routes.api_routes import (
     get_all_subscribers_api, manage_subscriber_api,
     get_all_tokens_api, assign_plan_api, link_token_user_api,
     search_media_rescan_api, apply_media_rescan_api,
+    resolve_telegram_api, manual_add_media_api,
     list_custom_catalogs_api, create_custom_catalog_api, update_custom_catalog_api,
     delete_custom_catalog_api, get_custom_catalog_items_api, search_catalog_media_api,
     add_custom_catalog_item_api, remove_custom_catalog_item_api,
@@ -50,7 +52,7 @@ app = FastAPI(
 )
 
 # --- Middleware Setup ---
-app.add_middleware(SessionMiddleware, secret_key="f6d2e3b9a0f43d9a2e6a56b2d3175cd9c05bbfe31d95ed2a7306b57cb1a8b6f0")
+app.add_middleware(SessionMiddleware, secret_key=Telegram.SESSION_SECRET)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -184,6 +186,14 @@ async def apply_media_rescan(
     _: bool = Depends(require_auth),
 ):
     return await apply_media_rescan_api(request, tmdb_id, db_index, media_type)
+
+@app.post("/api/media/resolve-telegram")
+async def resolve_telegram_message_route(payload: dict, _: bool = Depends(require_auth)):
+    return await resolve_telegram_api(payload)
+
+@app.post("/api/media/manual-add")
+async def manual_add_media_route(payload: dict, _: bool = Depends(require_auth)):
+    return await manual_add_media_api(payload)
 
 @app.delete("/api/media/delete-quality")
 async def delete_movie_quality(tmdb_id: int, db_index: int, id: str, _: bool = Depends(require_auth)):

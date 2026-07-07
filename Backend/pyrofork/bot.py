@@ -24,6 +24,22 @@ Helper = Client(
     max_concurrent_transmissions=10
 )
 
+USERBOT_CLIENT_INDEX = -1
+
+Userbot = None
+if Telegram.USER_SESSION_STRING:
+    Userbot = Client(
+        name="userbot",
+        api_id=Telegram.API_ID,
+        api_hash=Telegram.API_HASH,
+        session_string=Telegram.USER_SESSION_STRING,
+        proxy=Telegram.telegram_proxy(),
+        sleep_threshold=20,
+        workers=6,
+        max_concurrent_transmissions=10,
+        no_updates=True,
+    )
+
 multi_clients = {}
 work_loads = {}
 client_dc_map = {}

@@ -1,5 +1,7 @@
 import asyncio
 import json
+import random
+import secrets
 from fastapi import Request, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from Backend import db, StartTime, __version__
@@ -15,6 +17,8 @@ from Backend.helper.auto_catalog import (
     start_auto_catalog_sync_background,
     update_auto_catalog_settings,
 )
+from Backend.helper.encrypt import encode_string
+from Backend.helper.manual_add import resolve_telegram_message
 from Backend.helper.iptv import (
     get_iptv_settings,
     get_iptv_sync_status,
@@ -33,12 +37,16 @@ from Backend.helper.metadata import (
     search_movie_candidates,
     search_tv_candidates,
 )
+from Backend.helper.split_files import strip_part_suffix
 from time import time
 
 
 def _public_settings(data: dict) -> dict:
     public = dict(data or {})
+    public["admin_password_set"] = bool(public.get("admin_password"))
     public["admin_password"] = ""
+    public["session_secret_set"] = bool(public.get("session_secret"))
+    public["session_secret"] = ""
     public["secrets_env_only"] = [
         "BOT_TOKEN",
         "HELPER_BOT_TOKEN",
@@ -47,6 +55,8 @@ def _public_settings(data: dict) -> dict:
         "TMDB_API",
         "GEMINI_API_KEY",
         "GROQ_API_KEY",
+        "USER_SESSION_STRING",
+        "SESSION_SECRET",
         "WARP_PRIVATE_KEYS",
     ]
     return public
@@ -1026,6 +1036,220 @@ async def apply_media_rescan_api(request: Request, tmdb_id: int, db_index: int, 
         "db_index": updated_doc.get("db_index", db_index),
         "media_type": media_type,
         "data": updated_doc,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Manual Add API
+# ---------------------------------------------------------------------------
+
+def _scan_client():
+    if StreamBot is not None:
+        return StreamBot
+    if multi_clients:
+        return multi_clients.get(0) or next(iter(multi_clients.values()))
+    return None
+
+
+async def resolve_telegram_api(payload: dict) -> dict:
+    client = _scan_client()
+    if client is None:
+        raise HTTPException(status_code=503, detail="No Telegram client is connected yet.")
+    try:
+        data = await resolve_telegram_message(
+            client,
+            url=payload.get("url"),
+            chat_id=payload.get("chat_id"),
+            msg_id=payload.get("msg_id"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read that message: {exc}")
+    return {"status": "success", "data": data}
+
+
+def _metadata_base(source: dict, from_doc: bool = False) -> dict:
+    genres = source.get("genres")
+    if isinstance(genres, str):
+        genres = [g.strip() for g in genres.split(",") if g.strip()]
+    year = source.get("release_year") if from_doc else source.get("year")
+    rate = source.get("rating") if from_doc else source.get("rate")
+    return {
+        "tmdb_id": source.get("tmdb_id"),
+        "imdb_id": source.get("imdb_id") or None,
+        "title": (source.get("title") or "").strip(),
+        "year": int(year) if str(year or "").strip().lstrip("-").isdigit() else 0,
+        "rate": float(rate) if str(rate or "").replace(".", "", 1).isdigit() else 0,
+        "description": source.get("description") or "",
+        "poster": source.get("poster") or "",
+        "backdrop": source.get("backdrop") or "",
+        "logo": source.get("logo") or "",
+        "genres": genres or [],
+        "cast": source.get("cast") or [],
+        "runtime": str(source.get("runtime") or ""),
+    }
+
+
+_PLACEHOLDER_GENRES = ["Action", "Adventure", "Comedy", "Drama", "Thriller", "Mystery"]
+_PLACEHOLDER_DESCRIPTIONS = [
+    "A manually added title from a Telegram source.",
+    "A Telegram-hosted stream added from the admin panel.",
+    "A manually indexed media entry.",
+]
+
+
+def _fill_placeholder_metadata(meta: dict) -> None:
+    if not meta.get("genres"):
+        meta["genres"] = random.sample(_PLACEHOLDER_GENRES, 2)
+    if not meta.get("rate"):
+        meta["rate"] = round(random.uniform(6.0, 8.5), 1)
+    if not meta.get("description"):
+        meta["description"] = random.choice(_PLACEHOLDER_DESCRIPTIONS)
+
+
+async def _find_media_db_index(media_type: str, tmdb_id: int) -> int:
+    collection_name = "movie" if media_type == "movie" else "tv"
+    try:
+        tmdb_id = int(tmdb_id)
+    except Exception:
+        return db.current_db_index
+    for db_key in sorted(key for key in db.dbs if key.startswith("storage_")):
+        doc = await db.dbs[db_key][collection_name].find_one({"tmdb_id": tmdb_id}, {"_id": 1})
+        if doc:
+            try:
+                return int(db_key.split("_", 1)[1])
+            except Exception:
+                return db.current_db_index
+    return db.current_db_index
+
+
+async def manual_add_media_api(payload: dict) -> dict:
+    media_type = payload.get("media_type")
+    if media_type not in ("movie", "tv"):
+        raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'tv'.")
+
+    stream = payload.get("stream") or {}
+    quality = str(stream.get("quality") or "").strip()
+    if not quality:
+        raise HTTPException(status_code=400, detail="A quality label like 1080p is required.")
+
+    part_sources = stream.get("parts")
+    if not isinstance(part_sources, list) or not part_sources:
+        part_sources = [{"url": stream.get("url"), "chat_id": stream.get("chat_id"), "msg_id": stream.get("msg_id")}]
+    part_sources = [p for p in part_sources if p and (p.get("url") or (p.get("chat_id") and p.get("msg_id")))]
+    if not part_sources:
+        raise HTTPException(status_code=400, detail="Provide at least one Telegram message link or chat/message id.")
+
+    client = _scan_client()
+    if client is None:
+        raise HTTPException(status_code=503, detail="No Telegram client is connected yet.")
+
+    resolved_parts = []
+    for src in part_sources:
+        try:
+            resolved_parts.append(
+                await resolve_telegram_message(
+                    client,
+                    url=src.get("url"),
+                    chat_id=src.get("chat_id"),
+                    msg_id=src.get("msg_id"),
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Could not read that message: {exc}")
+
+    primary = resolved_parts[0]
+    is_split = len(resolved_parts) > 1
+    raw_name = (stream.get("name") or primary["name"]).strip()
+    name = strip_part_suffix(raw_name) if is_split else raw_name
+
+    tmdb_id = payload.get("tmdb_id")
+    db_index = payload.get("db_index")
+    selected_id = str(payload.get("selected_id") or "").strip()
+
+    base = None
+    if tmdb_id and db_index:
+        doc = await db.get_document(media_type, int(tmdb_id), int(db_index))
+        if doc:
+            base = _metadata_base(doc, from_doc=True)
+    if base is None and selected_id:
+        selected = await (
+            fetch_selected_movie_metadata(selected_id)
+            if media_type == "movie"
+            else fetch_selected_tv_metadata(selected_id)
+        )
+        if not selected:
+            raise HTTPException(status_code=404, detail="Could not fetch metadata for the selected title.")
+        base = _metadata_base(selected, from_doc=True)
+    if base is None:
+        base = _metadata_base(payload.get("manual_metadata") or {})
+        if not base["title"]:
+            raise HTTPException(status_code=400, detail="A title is required for manual entry.")
+        if not base["year"]:
+            base["year"] = int(primary.get("upload_year") or 0)
+
+    if not base.get("tmdb_id"):
+        base["tmdb_id"] = -(secrets.randbelow(2_000_000_000) + 1)
+    if not base.get("imdb_id"):
+        base["imdb_id"] = f"tg{abs(int(base['tmdb_id']))}"
+    _fill_placeholder_metadata(base)
+
+    group_key = f"manual:{primary['chat_id']}:{quality}:{secrets.token_hex(6)}" if is_split else None
+
+    tv_extra = {}
+    if media_type == "tv":
+        try:
+            season_number = int(payload.get("season_number"))
+            episode_number = int(payload.get("episode_number"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Season and episode numbers are required for TV.")
+        tv_extra = {
+            "season_number": season_number,
+            "episode_number": episode_number,
+            "episode_title": (payload.get("episode_title") or "").strip() or f"S{season_number:02d}E{episode_number:02d}",
+            "episode_backdrop": payload.get("episode_backdrop") or base.get("backdrop") or "",
+            "episode_overview": payload.get("episode_overview") or "",
+            "episode_released": payload.get("episode_released") or "",
+        }
+
+    for index, part in enumerate(resolved_parts, start=1):
+        channel = int(part["chat_id"])
+        msg_id = int(part["msg_id"])
+        encoded = await encode_string({"chat_id": channel, "msg_id": msg_id})
+        metadata_info = dict(base)
+        metadata_info.update(
+            {
+                "media_type": media_type,
+                "quality": quality,
+                "encoded_string": encoded,
+                "group_key": group_key,
+                "part_number": index if is_split else None,
+                "is_anime": False,
+            }
+        )
+        metadata_info.update(tv_extra)
+        updated_id = await db.insert_media(
+            metadata_info,
+            channel=channel,
+            msg_id=msg_id,
+            size=part["size"],
+            name=name,
+            raw_size=int(part.get("raw_size") or 0),
+        )
+        if not updated_id:
+            raise HTTPException(status_code=500, detail="Failed to add media.")
+
+    result_tmdb_id = int(base["tmdb_id"])
+    result_db_index = await _find_media_db_index(media_type, result_tmdb_id)
+    return {
+        "status": "success",
+        "message": f"Split stream added ({len(resolved_parts)} parts)." if is_split else "Stream added successfully.",
+        "tmdb_id": result_tmdb_id,
+        "db_index": result_db_index,
+        "media_type": media_type,
     }
 
 

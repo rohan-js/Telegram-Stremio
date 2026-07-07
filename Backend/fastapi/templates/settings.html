@@ -68,6 +68,28 @@
     </div>
 
     <div class="glass-panel rounded-3xl p-6 space-y-5">
+      <h2 class="font-black text-xl">Admin Authentication</h2>
+      <label class="block">
+        <span class="text-sm font-bold">Admin Username</span>
+        <input id="admin_username" value="{{ settings.admin_username or '' }}" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Admin Password</span>
+        <input id="admin_password" type="password" placeholder="Leave blank to keep current password" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+        <span class="text-xs text-text-secondary">
+          {% if settings.admin_password_set %}Password is set and stored as a hash.{% else %}Password will be seeded from config.env on startup.{% endif %}
+        </span>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Session Secret</span>
+        <input id="session_secret" type="password" placeholder="Leave blank to keep current secret" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+        <span class="text-xs text-text-secondary">
+          {% if settings.session_secret_set %}Session secret is set. Changing it logs out active admin sessions after restart.{% else %}Using config.env/fallback session secret.{% endif %}
+        </span>
+      </label>
+    </div>
+
+    <div class="glass-panel rounded-3xl p-6 space-y-5">
       <h2 class="font-black text-xl">Proxy Stream Display</h2>
       <label class="block">
         <span class="text-sm font-bold">HTTP Proxy URL</span>
@@ -107,6 +129,9 @@ document.getElementById('save-btn').addEventListener('click', async () => {
   const payload = {
     replace_mode: document.getElementById('replace_mode').checked,
     hide_catalog: document.getElementById('hide_catalog').checked,
+    admin_username: document.getElementById('admin_username').value.trim(),
+    admin_password: document.getElementById('admin_password').value,
+    session_secret: document.getElementById('session_secret').value,
     auth_channels: lines('auth_channels'),
     anime_channels: lines('anime_channels'),
     subscription: document.getElementById('subscription').checked,

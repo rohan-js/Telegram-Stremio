@@ -8,6 +8,7 @@ class Telegram:
     API_HASH = getenv("API_HASH", "")
     BOT_TOKEN = getenv("BOT_TOKEN", "")
     HELPER_BOT_TOKEN = getenv("HELPER_BOT_TOKEN", "")
+    USER_SESSION_STRING = getenv("USER_SESSION_STRING", "").strip()
     TELEGRAM_PROXY_ENABLED = getenv("TELEGRAM_PROXY_ENABLED", "false").lower() == "true"
     TELEGRAM_PROXY_SCHEME = getenv("TELEGRAM_PROXY_SCHEME", "socks5").strip().lower()
     TELEGRAM_PROXY_HOST = getenv("TELEGRAM_PROXY_HOST", "").strip()
@@ -46,6 +47,10 @@ class Telegram:
 
     BASE_URL = getenv("BASE_URL", "").rstrip('/')
     PORT = int(getenv("PORT", "8000"))
+    SESSION_SECRET = getenv(
+        "SESSION_SECRET",
+        "f6d2e3b9a0f43d9a2e6a56b2d3175cd9c05bbfe31d95ed2a7306b57cb1a8b6f0",
+    )
 
     PARALLEL = int(getenv("PARALLEL", "1"))
     PRE_FETCH = int(getenv("PRE_FETCH", "1"))

@@ -40,6 +40,8 @@ from Backend.helper.torrent_downloads import (
 )
 from Backend.pyrofork.bot import (
     StreamBot,
+    USERBOT_CLIENT_INDEX,
+    Userbot,
     work_loads,
     multi_clients,
     client_dc_map,
@@ -194,6 +196,15 @@ def select_best_client(target_dc: int) -> int:
 
 
 def get_streamer(index: int) -> ByteStreamer:
+    if index == USERBOT_CLIENT_INDEX:
+        if Userbot is None:
+            raise HTTPException(status_code=503, detail="Global Search userbot is not configured")
+        work_loads.setdefault(index, 0)
+        client_failures.setdefault(index, 0)
+        client_avg_mbps.setdefault(index, 0.0)
+        if Userbot not in _streamer_by_client:
+            _streamer_by_client[Userbot] = ByteStreamer(Userbot, index)
+        return _streamer_by_client[Userbot]
     tg_client = multi_clients[index]
     if tg_client not in _streamer_by_client:
         _streamer_by_client[tg_client] = ByteStreamer(tg_client, index)
@@ -558,8 +569,18 @@ async def stream_handler(
     if not msg_id:
         raise HTTPException(status_code=400, detail="Missing id")
 
-    chat_id = int(f"-100{decoded['chat_id']}")
-    message = await StreamBot.get_messages(chat_id, int(msg_id))
+    if decoded.get("global"):
+        if Userbot is None:
+            raise HTTPException(status_code=503, detail="Global Search userbot is not configured")
+        chat_id = int(decoded["chat_id"])
+        message = await Userbot.get_messages(chat_id, int(msg_id))
+        source_type = "global_search"
+        forced_client_index = USERBOT_CLIENT_INDEX
+    else:
+        chat_id = int(f"-100{decoded['chat_id']}")
+        message = await StreamBot.get_messages(chat_id, int(msg_id))
+        source_type = "telegram"
+        forced_client_index = None
     file = message.video or message.document
     if not file:
         raise HTTPException(status_code=404, detail="No media found")
@@ -579,6 +600,8 @@ async def stream_handler(
         token_data=token_data,
         stream_id_hash=id,
         target_dc=target_dc,
+        forced_client_index=forced_client_index,
+        source_type=source_type,
     )
 
 async def virtual_media_streamer(
@@ -708,6 +731,8 @@ async def media_streamer(
     token_data: dict = None,
     stream_id_hash: str = None,
     target_dc: int | None = None,
+    forced_client_index: int | None = None,
+    source_type: str = "telegram",
 ):
     global _failure_decay_started
     if not _failure_decay_started:
@@ -717,7 +742,7 @@ async def media_streamer(
         except Exception:
             pass
 
-    base_index = select_best_client(target_dc or 0)
+    base_index = forced_client_index if forced_client_index is not None else select_best_client(target_dc or 0)
     base_streamer = get_streamer(base_index)
 
     # Fetch one FileId first so we can parse Range and validate the media.
@@ -739,14 +764,17 @@ async def media_streamer(
 
     probe_granularity = max(4096, min(int(getattr(Telegram, "SMART_ROUTING_PROBE_BYTES", 262144) or 262144), 1024 * 1024))
     probe_offset = start - (start % probe_granularity)
-    index, streamer, file_id, probe_results = await choose_smart_client(
-        request=request,
-        chat_id=chat_id,
-        msg_id=msg_id,
-        target_dc=target_dc or real_dc,
-        base_index=base_index,
-        probe_offset=probe_offset,
-    )
+    if forced_client_index is not None:
+        index, streamer, probe_results = base_index, base_streamer, []
+    else:
+        index, streamer, file_id, probe_results = await choose_smart_client(
+            request=request,
+            chat_id=chat_id,
+            msg_id=msg_id,
+            target_dc=target_dc or real_dc,
+            base_index=base_index,
+            probe_offset=probe_offset,
+        )
 
     if secure_hash != "SKIP_HASH_CHECK":
         if file_id.unique_id[:6] != secure_hash:
@@ -794,7 +822,7 @@ async def media_streamer(
         "user_agent": request.headers.get("user-agent"),
         "title": final_title,
         "filename": file_name,
-        "source_type": "telegram",
+        "source_type": source_type,
         "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
         "smart_routing": {
             "target_dc": real_dc,

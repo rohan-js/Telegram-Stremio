@@ -10,7 +10,7 @@ from Backend.config import Telegram
 from Backend.fastapi import server
 from Backend.helper.pyro import restart_notification, setup_bot_commands
 from Backend.helper.settings_manager import SettingsManager
-from Backend.pyrofork.bot import Helper, StreamBot
+from Backend.pyrofork.bot import Helper, StreamBot, USERBOT_CLIENT_INDEX, Userbot, client_dc_map, client_failures, client_avg_mbps, work_loads
 from Backend.pyrofork.clients import initialize_clients
 from Backend.pyrofork.plugins.channels import _load_channels_from_db
 from Backend.helper.subscription_checker import subscription_checker_loop
@@ -46,6 +46,21 @@ async def start_telegram_services():
             LOGGER.info(f"Helper Bot Client : [@{Helper.username}]")
             await asleep(1.2)
 
+            if Userbot is not None:
+                await asyncio.wait_for(Userbot.start(), timeout=Telegram.TELEGRAM_CLIENT_START_TIMEOUT_SEC)
+                Userbot.username = Userbot.me.username
+                try:
+                    client_dc_map[USERBOT_CLIENT_INDEX] = await Userbot.storage.dc_id()
+                except Exception:
+                    client_dc_map[USERBOT_CLIENT_INDEX] = None
+                work_loads[USERBOT_CLIENT_INDEX] = 0
+                client_failures[USERBOT_CLIENT_INDEX] = 0
+                client_avg_mbps[USERBOT_CLIENT_INDEX] = 0.0
+                LOGGER.info(f"Userbot Client : [@{Userbot.username}]")
+            else:
+                LOGGER.info("Userbot not configured (USER_SESSION_STRING empty); Global Search disabled.")
+            await asleep(1.2)
+
             LOGGER.info("Initializing Multi Clients...")
             await initialize_clients()
             await asleep(2)
@@ -69,9 +84,9 @@ async def start_telegram_services():
             return
         except Exception:
             LOGGER.error("Telegram client startup failed; retrying in 60 seconds:\n" + format_exc())
-            for client in (StreamBot, Helper):
+            for client in (StreamBot, Helper, Userbot):
                 try:
-                    if getattr(client, "is_connected", False):
+                    if client is not None and getattr(client, "is_connected", False):
                         await client.stop()
                 except Exception:
                     LOGGER.warning("Ignoring Telegram client cleanup error during retry.", exc_info=True)
@@ -135,6 +150,8 @@ async def stop_services():
 
         await StreamBot.stop()
         await Helper.stop()
+        if Userbot is not None:
+            await Userbot.stop()
 
         await db.disconnect()
         
