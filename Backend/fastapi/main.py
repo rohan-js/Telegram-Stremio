@@ -14,7 +14,7 @@ from Backend.fastapi.routes.template_routes import (
     media_management_page, edit_media_page, public_status_page, stremio_guide_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, vlc_redirect,
     custom_catalogs_page, watch_requests_page, live_tv_page, settings_page, tools_page,
-    launch_readiness_page, policy_page
+    launch_readiness_page, policy_page, admin_requests_page, public_request_page
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
@@ -44,7 +44,11 @@ from Backend.fastapi.routes.api_routes import (
     get_tools_scan_status_api, start_tools_dbcheck_api, cancel_tools_dbcheck_api,
     get_tools_dbcheck_status_api, purge_tools_dead_links_api,
     get_warp_status_api, apply_warp_api,
-    get_launch_readiness_api, run_backup_api, admin_takedown_api
+    get_launch_readiness_api, run_backup_api, admin_takedown_api,
+    request_search_api, request_popular_api, request_submit_api,
+    get_requests_api, update_request_api, delete_request_api,
+    get_health_api, get_admin_logs_api, download_admin_logs_api,
+    export_config_api, import_config_api
 )
 
 app = FastAPI(
@@ -127,6 +131,25 @@ async def acceptable_use(request: Request):
 async def takedown(request: Request):
     return await policy_page(request, "takedown")
 
+@app.get("/request", response_class=HTMLResponse)
+async def public_request(request: Request):
+    return await public_request_page(request)
+
+@app.get("/api/request/search")
+async def request_search(q: str = Query("", max_length=120)):
+    return await request_search_api(q)
+
+@app.get("/api/request/popular")
+async def request_popular():
+    return await request_popular_api()
+
+@app.post("/api/request/submit")
+async def request_submit(request: Request):
+    payload = await request.json()
+    client_ip = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+    client_ip = client_ip or (request.client.host if request.client else "unknown")
+    return await request_submit_api(payload, client_ip)
+
 # --- Protected Routes (Authentication Required) ---
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request, _: bool = Depends(require_auth)):
@@ -167,6 +190,10 @@ async def admin_tools(request: Request, _: bool = Depends(require_auth)):
 @app.get("/admin/launch-readiness", response_class=HTMLResponse)
 async def admin_launch_readiness(request: Request, _: bool = Depends(require_auth)):
     return await launch_readiness_page(request, _)
+
+@app.get("/admin/requests", response_class=HTMLResponse)
+async def admin_requests(request: Request, _: bool = Depends(require_auth)):
+    return await admin_requests_page(request, _)
 
 @app.get("/media/edit", response_class=HTMLResponse)
 async def edit_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
@@ -336,6 +363,38 @@ async def admin_launch_readiness_api(_: bool = Depends(require_auth)):
 @app.post("/api/admin/backup/run")
 async def admin_backup_run(payload: dict | None = None, _: bool = Depends(require_auth)):
     return await run_backup_api(payload)
+
+@app.get("/api/admin/backup/export")
+async def admin_backup_export(_: bool = Depends(require_auth)):
+    return await export_config_api()
+
+@app.post("/api/admin/backup/import")
+async def admin_backup_import(payload: dict, _: bool = Depends(require_auth)):
+    return await import_config_api(payload)
+
+@app.get("/api/admin/health")
+async def admin_health(force: bool = False, _: bool = Depends(require_auth)):
+    return await get_health_api(force)
+
+@app.get("/api/admin/logs")
+async def admin_logs(max_bytes: int = 200000, _: bool = Depends(require_auth)):
+    return await get_admin_logs_api(max_bytes)
+
+@app.get("/api/admin/logs/download")
+async def admin_logs_download(max_bytes: int = 500000, _: bool = Depends(require_auth)):
+    return await download_admin_logs_api(max_bytes)
+
+@app.get("/api/admin/requests")
+async def admin_requests_list(_: bool = Depends(require_auth)):
+    return await get_requests_api()
+
+@app.patch("/api/admin/requests/{request_id}")
+async def admin_request_update(request_id: str, payload: dict, _: bool = Depends(require_auth)):
+    return await update_request_api(request_id, payload)
+
+@app.delete("/api/admin/requests/{request_id}")
+async def admin_request_delete(request_id: str, _: bool = Depends(require_auth)):
+    return await delete_request_api(request_id)
 
 @app.post("/api/admin/takedown")
 async def admin_takedown(payload: dict, _: bool = Depends(require_auth)):

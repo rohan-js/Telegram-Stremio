@@ -10,6 +10,7 @@ from Backend.helper.encrypt import encode_string
 from Backend.helper.global_search import global_search, is_global_search_enabled
 from Backend.logger import LOGGER
 from Backend.helper.torrent_downloads import select_completed_torrent_file
+from Backend.helper.subtitles import get_subtitles_for, stremio_subtitle_entries
 from Backend.helper.iptv import (
     IPTV_ALL_CATALOG_ID,
     IPTV_CATALOG_ID,
@@ -295,27 +296,44 @@ def apply_stremio_no_cache(response: Response) -> None:
     response.headers["Expires"] = "0"
     response.headers["Surrogate-Control"] = "no-store"
 
+
+def _token_can_view(mode: str | None, allowed_tokens: list | None, token_data: dict) -> bool:
+    mode = mode or "public"
+    if mode == "public":
+        return True
+    if mode == "tokens":
+        return (token_data or {}).get("token") in (allowed_tokens or [])
+    return False
+
+
+def _effective_catalog_visibility(catalog: dict, item: dict | None = None) -> tuple[str, list]:
+    item = item or {}
+    if item.get("visibility") in ("public", "tokens", "owner"):
+        return item.get("visibility"), item.get("allowed_tokens") or []
+    return catalog.get("visibility") or ("public" if catalog.get("visible", True) else "owner"), catalog.get("allowed_tokens") or []
+
+
+def _media_visible_to_token(media: dict | None, token_data: dict, *, allow_searchable_exclusive: bool = False) -> bool:
+    if not media:
+        return False
+    if media.get("exclusive_catalog_id") and not (allow_searchable_exclusive and media.get("exclusive_searchable")):
+        return False
+    return _token_can_view(media.get("visibility") or "public", media.get("allowed_tokens") or [], token_data)
+
+
+def _filter_visible_media(items: list[dict], token_data: dict, *, allow_searchable_exclusive: bool = False) -> list[dict]:
+    return [item for item in items if _media_visible_to_token(item, token_data, allow_searchable_exclusive=allow_searchable_exclusive)]
+
 # --- Routes ---
 @router.get("/{token}/manifest.json")
 async def get_manifest(token: str, response: Response, token_data: dict = Depends(verify_token)):
     apply_stremio_no_cache(response)
     if Telegram.HIDE_CATALOG:
-        resources = ["stream"]
+        resources = ["stream", "subtitles"]
         catalogs = []
     else:
-        resources = ["catalog", "meta", "stream"]
+        resources = ["catalog", "meta", "stream", "subtitles"]
         catalogs = [
-            {
-                "type": "movie",
-                "id": "top_movies",
-                "name": "Popular Movies",
-                "extra": [
-                    {"name": "genre", "isRequired": False, "options": GENRES},
-                    {"name": "skip"},
-                    {"name": "search", "isRequired": False}
-                ],
-                "extraSupported": ["genre", "skip", "search"]
-            },
             {
                 "type": "movie",
                 "id": "latest_movies",
@@ -337,6 +355,17 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
                 "extraSupported": ["genre", "skip"]
             },
             {
+                "type": "movie",
+                "id": "top_movies",
+                "name": "Popular Movies",
+                "extra": [
+                    {"name": "genre", "isRequired": False, "options": GENRES},
+                    {"name": "skip"},
+                    {"name": "search", "isRequired": False}
+                ],
+                "extraSupported": ["genre", "skip", "search"]
+            },
+            {
                 "type": "series",
                 "id": "top_series",
                 "name": "Popular Series",
@@ -352,6 +381,8 @@ async def get_manifest(token: str, response: Response, token_data: dict = Depend
         try:
             custom_catalogs = await db.get_custom_catalogs(visible_only=True)
             for catalog in custom_catalogs:
+                if not _token_can_view(catalog.get("visibility") or "public", catalog.get("allowed_tokens") or [], token_data):
+                    continue
                 catalog_id = str(catalog.get("_id"))
                 catalog_name = catalog.get("name") or "Custom Catalog"
                 catalogs.append({
@@ -690,7 +721,11 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
         if id.startswith("custom_"):
             catalog_id = id.removeprefix("custom_")
             catalog = await db.get_custom_catalog(catalog_id)
-            if not catalog or not catalog.get("visible", True):
+            if (
+                not catalog
+                or not catalog.get("visible", True)
+                or not _token_can_view(catalog.get("visibility") or "public", catalog.get("allowed_tokens") or [], token_data)
+            ):
                 return {
                     "metas": [],
                     "cacheMaxAge": 0,
@@ -705,12 +740,31 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
                 page=page,
                 page_size=PAGE_SIZE,
             )
-            items = data.get("items", [])
+            raw_items = data.get("items", [])
+            visible_items = []
+            raw_catalog_items = catalog.get("items") or []
+            for media_doc in raw_items:
+                matching_item = next(
+                    (
+                        item for item in raw_catalog_items
+                        if int(item.get("tmdb_id", -1)) == int(media_doc.get("tmdb_id", -2))
+                        and int(item.get("db_index", -1)) == int(media_doc.get("db_index", -2))
+                        and item.get("media_type") == media_doc.get("media_type")
+                    ),
+                    {},
+                )
+                if _token_can_view(*_effective_catalog_visibility(catalog, matching_item), token_data):
+                    visible_items.append(media_doc)
+            items = visible_items
         elif search_query:
             search_results = await db.search_documents(query=search_query, page=page, page_size=PAGE_SIZE)
             all_items = search_results.get("results", [])
             db_media_type = "tv" if media_type == "series" else "movie"
-            items = [item for item in all_items if item.get("media_type") == db_media_type]
+            items = _filter_visible_media(
+                [item for item in all_items if item.get("media_type") == db_media_type],
+                token_data,
+                allow_searchable_exclusive=True,
+            )
         else:
             if "latest" in id:
                 sort_params = [("updated_on", "desc")]
@@ -721,10 +775,10 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
 
             if media_type == "movie":
                 data = await db.sort_movies(sort_params, page, PAGE_SIZE, genre_filter=genre_filter)
-                items = data.get("movies", [])
+                items = _filter_visible_media(data.get("movies", []), token_data)
             else:
                 data = await db.sort_tv_shows(sort_params, page, PAGE_SIZE, genre_filter=genre_filter)
-                items = data.get("tv_shows", [])
+                items = _filter_visible_media(data.get("tv_shows", []), token_data)
     except Exception as e:
         return {
             "metas": [],
@@ -765,6 +819,13 @@ async def get_meta(token: str, media_type: str, id: str, response: Response, tok
 
     media = await db.get_media_details(imdb_id=imdb_id)
     if not media:
+        return {
+            "meta": {},
+            "cacheMaxAge": 0,
+            "staleRevalidate": 0,
+            "staleError": 0,
+        }
+    if not _media_visible_to_token(media, token_data, allow_searchable_exclusive=True):
         return {
             "meta": {},
             "cacheMaxAge": 0,
@@ -825,6 +886,35 @@ async def get_meta(token: str, media_type: str, id: str, response: Response, tok
         "staleRevalidate": 0,
         "staleError": 0,
     }
+
+
+@router.get("/{token}/subtitles/{media_type}/{id}/{extra:path}.json")
+@router.get("/{token}/subtitles/{media_type}/{id}.json")
+async def get_subtitles(
+    token: str,
+    media_type: str,
+    id: str,
+    extra: Optional[str] = None,
+    token_data: dict = Depends(verify_token),
+):
+    try:
+        parts = id.split(":")
+        imdb_id = parts[0]
+        season_num = int(parts[1]) if len(parts) > 1 else None
+        episode_num = int(parts[2]) if len(parts) > 2 else None
+    except Exception:
+        return {"subtitles": []}
+
+    db_media_type = "tv" if media_type in ("series", "tv") else "movie"
+    media = await db.get_media_details(
+        imdb_id=imdb_id,
+        season_number=season_num,
+        episode_number=episode_num,
+    )
+    if not _media_visible_to_token(media, token_data, allow_searchable_exclusive=True):
+        return {"subtitles": []}
+    subtitles = await get_subtitles_for(imdb_id, db_media_type, season_num, episode_num)
+    return {"subtitles": stremio_subtitle_entries(subtitles, token, BASE_URL)}
 
 @router.api_route("/{token}/stream/{media_type}/{id}.json", methods=["GET", "HEAD"])
 async def get_streams(
@@ -910,6 +1000,13 @@ async def get_streams(
     )
 
     if not media_details:
+        return {
+            "streams": [],
+            "cacheMaxAge": 0,
+            "staleRevalidate": 0,
+            "staleError": 0,
+        }
+    if not _media_visible_to_token(media_details, token_data, allow_searchable_exclusive=True):
         return {
             "streams": [],
             "cacheMaxAge": 0,

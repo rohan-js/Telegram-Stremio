@@ -24,6 +24,10 @@ DEFAULTS: Dict[str, Any] = {
     "anime_channels": [],
     "global_search": False,
     "global_search_channels": [],
+    "content_requests_enabled": False,
+    "content_requests_beta_only": True,
+    "announce_new_content": False,
+    "announcement_channel": "",
     "updated_at": None,
 }
 
@@ -46,6 +50,10 @@ def _seed_from_env() -> Dict[str, Any]:
             "anime_channels": list(getattr(Telegram, "ANIME_CHANNELS", []) or []),
             "global_search_channels": list(getattr(Telegram, "GLOBAL_SEARCH_CHANNELS", []) or []),
             "global_search": bool(getattr(Telegram, "GLOBAL_SEARCH", False)),
+            "content_requests_enabled": bool(getattr(Telegram, "CONTENT_REQUESTS_ENABLED", False)),
+            "content_requests_beta_only": bool(getattr(Telegram, "CONTENT_REQUESTS_BETA_ONLY", True)),
+            "announce_new_content": bool(getattr(Telegram, "ANNOUNCE_NEW_CONTENT", False)),
+            "announcement_channel": getattr(Telegram, "ANNOUNCEMENT_CHANNEL", ""),
         }
     )
     return seed
@@ -96,6 +104,26 @@ class Settings:
     def session_secret(self) -> str:
         return str(self._data.get("session_secret") or Telegram.SESSION_SECRET)
 
+    @property
+    def base_url(self) -> str:
+        return Telegram.BASE_URL
+
+    @property
+    def content_requests_enabled(self) -> bool:
+        return bool(self._data.get("content_requests_enabled", False))
+
+    @property
+    def content_requests_beta_only(self) -> bool:
+        return bool(self._data.get("content_requests_beta_only", True))
+
+    @property
+    def announce_new_content(self) -> bool:
+        return bool(self._data.get("announce_new_content", False))
+
+    @property
+    def announcement_channel(self) -> str:
+        return str(self._data.get("announcement_channel") or "").strip()
+
 
 class SettingsManager:
     _current: Settings | None = None
@@ -144,6 +172,10 @@ class SettingsManager:
         Telegram.ANIME_CHANNELS = [str(x).strip() for x in (data.get("anime_channels") or []) if str(x).strip()]
         Telegram.GLOBAL_SEARCH = bool(data.get("global_search", False))
         Telegram.GLOBAL_SEARCH_CHANNELS = [str(x).strip() for x in (data.get("global_search_channels") or []) if str(x).strip()]
+        Telegram.CONTENT_REQUESTS_ENABLED = bool(data.get("content_requests_enabled", False))
+        Telegram.CONTENT_REQUESTS_BETA_ONLY = bool(data.get("content_requests_beta_only", True))
+        Telegram.ANNOUNCE_NEW_CONTENT = bool(data.get("announce_new_content", False))
+        Telegram.ANNOUNCEMENT_CHANNEL = str(data.get("announcement_channel") or "")
 
     @classmethod
     async def update(cls, db, payload: Dict[str, Any]) -> Dict[str, Any]:

@@ -11,6 +11,9 @@ from Backend.helper.encrypt import decode_string, encode_string
 from Backend.helper.metadata import extract_default_id, metadata
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
 from Backend.helper.split_files import parse_split_info, strip_part_suffix
+from Backend.helper.announcer import announce_new_media
+from Backend.helper.requests_manager import mark_uploaded_for_media
+from Backend.helper.subtitles import ingest_subtitle, is_subtitle_file
 from Backend.logger import LOGGER
 
 SCAN_BATCH_SIZE = 200
@@ -64,6 +67,8 @@ class ScanManager:
                 "skipped_dup": 0,
                 "skipped_meta": 0,
                 "skipped_nonvid": 0,
+                "subtitles_added": 0,
+                "subtitles_skipped": 0,
                 "errors": 0,
             },
             "started_at": 0.0,
@@ -243,6 +248,13 @@ class ScanManager:
 
         mime = getattr(file, "mime_type", "") or ""
         name = message.caption or getattr(file, "file_name", "") or ""
+        file_name = getattr(file, "file_name", "") or ""
+        if message.document and is_subtitle_file(file_name):
+            channel_int = int(str(chat_id).replace("-100", ""))
+            ok = await ingest_subtitle(file_name, channel_int, int(message.id), caption=message.caption)
+            self.state["counters"]["subtitles_added" if ok else "subtitles_skipped"] += 1
+            return
+
         if not (message.video or mime.startswith("video/") or parse_split_info(name)):
             self.state["counters"]["skipped_nonvid"] += 1
             return
@@ -280,6 +292,11 @@ class ScanManager:
         )
         if updated:
             self.state["counters"]["indexed"] += 1
+            announce_new_media(metadata_info)
+            try:
+                await mark_uploaded_for_media(metadata_info)
+            except Exception:
+                pass
         else:
             self.state["counters"]["skipped_meta"] += 1
 

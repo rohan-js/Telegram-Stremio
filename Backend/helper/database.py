@@ -427,15 +427,51 @@ class Database:
     # -------------------------------
     # Custom Catalog Management
     # -------------------------------
-    async def create_custom_catalog(self, name: str, visible: bool = True) -> Optional[str]:
+    def _normalize_visibility(self, visibility: Optional[str], visible: Optional[bool] = None) -> str:
+        if visibility in ("public", "tokens", "owner"):
+            return visibility
+        if visible is False:
+            return "owner"
+        return "public"
+
+    def _catalog_with_visibility_defaults(self, catalog: Optional[dict]) -> Optional[dict]:
+        if not catalog:
+            return None
+        visibility = self._normalize_visibility(catalog.get("visibility"), catalog.get("visible", True))
+        catalog["visibility"] = visibility
+        catalog["visible"] = visibility != "owner"
+        catalog.setdefault("allowed_tokens", [])
+        catalog.setdefault("exclusive", False)
+        catalog.setdefault("searchable", False)
+        for item in catalog.get("items") or []:
+            item.setdefault("visibility", visibility)
+            item.setdefault("allowed_tokens", catalog.get("allowed_tokens") or [])
+        return catalog
+
+    async def create_custom_catalog(
+        self,
+        name: str,
+        visible: bool = True,
+        visibility: Optional[str] = None,
+        allowed_tokens: Optional[List[str]] = None,
+        exclusive: bool = False,
+        searchable: bool = False,
+    ) -> Optional[str]:
         name = (name or "").strip()
         if not name:
             return None
 
         now = datetime.utcnow()
+        final_visibility = self._normalize_visibility(visibility, visible)
+        tokens = [str(t).strip() for t in (allowed_tokens or []) if str(t).strip()]
+        exclusive = bool(exclusive) and final_visibility in ("tokens", "owner")
         result = await self.dbs["tracking"]["custom_catalogs"].insert_one({
             "name": name,
-            "visible": bool(visible),
+            "visible": final_visibility != "owner",
+            "visibility": final_visibility,
+            "allowed_tokens": tokens,
+            "exclusive": exclusive,
+            "searchable": bool(searchable) if exclusive else False,
             "auto": False,
             "auto_key": None,
             "items": [],
@@ -449,36 +485,112 @@ class Database:
         query = {"visible": True} if visible_only else {}
         cursor = self.dbs["tracking"]["custom_catalogs"].find(query).sort("updated_at", DESCENDING)
         catalogs = await cursor.to_list(None)
-        return [convert_objectid_to_str(catalog) for catalog in catalogs]
+        return [convert_objectid_to_str(self._catalog_with_visibility_defaults(catalog)) for catalog in catalogs]
 
     async def get_custom_catalog(self, catalog_id: str) -> Optional[dict]:
         try:
             catalog = await self.dbs["tracking"]["custom_catalogs"].find_one({"_id": ObjectId(catalog_id)})
-            return convert_objectid_to_str(catalog) if catalog else None
+            return convert_objectid_to_str(self._catalog_with_visibility_defaults(catalog)) if catalog else None
         except Exception:
             return None
 
-    async def update_custom_catalog(self, catalog_id: str, name: Optional[str] = None, visible: Optional[bool] = None) -> bool:
+    async def update_custom_catalog(
+        self,
+        catalog_id: str,
+        name: Optional[str] = None,
+        visible: Optional[bool] = None,
+        visibility: Optional[str] = None,
+        allowed_tokens: Optional[List[str]] = None,
+        exclusive: Optional[bool] = None,
+        searchable: Optional[bool] = None,
+    ) -> bool:
         update_data = {"updated_at": datetime.utcnow()}
         if name is not None:
             clean_name = name.strip()
             if clean_name:
                 update_data["name"] = clean_name
-        if visible is not None:
-            update_data["visible"] = bool(visible)
+        existing = await self.get_custom_catalog(catalog_id)
+        if not existing:
+            return False
+        final_visibility = self._normalize_visibility(
+            visibility if visibility is not None else existing.get("visibility"),
+            visible if visible is not None else existing.get("visible", True),
+        )
+        if visible is not None or visibility is not None:
+            update_data["visibility"] = final_visibility
+            update_data["visible"] = final_visibility != "owner"
+        tokens = [str(t).strip() for t in (allowed_tokens or []) if str(t).strip()]
+        if allowed_tokens is not None:
+            update_data["allowed_tokens"] = tokens
+        if exclusive is not None:
+            want_exclusive = bool(exclusive) and final_visibility in ("tokens", "owner") and not existing.get("auto")
+            update_data["exclusive"] = want_exclusive
+            update_data["searchable"] = bool(searchable) if want_exclusive else False
+        elif searchable is not None:
+            update_data["searchable"] = bool(searchable) if existing.get("exclusive") else False
 
         try:
             result = await self.dbs["tracking"]["custom_catalogs"].update_one(
                 {"_id": ObjectId(catalog_id)},
                 {"$set": update_data}
             )
+            catalog = await self.get_custom_catalog(catalog_id)
+            if catalog:
+                items = catalog.get("items") or []
+                if "visibility" in update_data or "allowed_tokens" in update_data:
+                    await self._apply_visibility_to_docs(items, catalog.get("visibility", "public"), catalog.get("allowed_tokens") or [])
+                if catalog.get("exclusive"):
+                    await self._apply_exclusivity_to_docs(items, str(catalog_id), bool(catalog.get("searchable")))
+                else:
+                    await self._clear_exclusivity_for_catalog(str(catalog_id))
             return result.modified_count > 0
         except Exception:
             return False
 
+    async def _apply_visibility_to_docs(self, items: List[dict], visibility: str, allowed_tokens: List[str]) -> None:
+        for item in items or []:
+            try:
+                db_key = f"storage_{int(item.get('db_index'))}"
+                collection = "tv" if item.get("media_type") in ("tv", "series") else "movie"
+                await self.dbs[db_key][collection].update_one(
+                    {"tmdb_id": int(item.get("tmdb_id"))},
+                    {"$set": {"visibility": visibility, "allowed_tokens": list(allowed_tokens or [])}},
+                )
+            except Exception as e:
+                LOGGER.error(f"_apply_visibility_to_docs failed: {e}")
+
+    async def _apply_exclusivity_to_docs(self, items: List[dict], catalog_id: str, searchable: bool) -> None:
+        for item in items or []:
+            try:
+                db_key = f"storage_{int(item.get('db_index'))}"
+                collection = "tv" if item.get("media_type") in ("tv", "series") else "movie"
+                await self.dbs[db_key][collection].update_one(
+                    {"tmdb_id": int(item.get("tmdb_id"))},
+                    {"$set": {"exclusive_catalog_id": catalog_id, "exclusive_searchable": bool(searchable)}},
+                )
+            except Exception as e:
+                LOGGER.error(f"_apply_exclusivity_to_docs failed: {e}")
+
+    async def _clear_exclusivity_for_catalog(self, catalog_id: str) -> None:
+        for i in range(1, self.current_db_index + 1):
+            for collection in ("movie", "tv"):
+                await self.dbs[f"storage_{i}"][collection].update_many(
+                    {"exclusive_catalog_id": catalog_id},
+                    {"$unset": {"exclusive_catalog_id": "", "exclusive_searchable": ""}},
+                )
+
     async def delete_custom_catalog(self, catalog_id: str) -> bool:
         try:
+            catalog = await self.get_custom_catalog(catalog_id)
             result = await self.dbs["tracking"]["custom_catalogs"].delete_one({"_id": ObjectId(catalog_id)})
+            if catalog:
+                await self._clear_exclusivity_for_catalog(str(catalog_id))
+                for item in catalog.get("items") or []:
+                    await self._refresh_media_visibility_from_catalogs(
+                        int(item.get("tmdb_id")),
+                        int(item.get("db_index")),
+                        item.get("media_type", "movie"),
+                    )
             return result.deleted_count > 0
         except Exception:
             return False
@@ -494,6 +606,10 @@ class Database:
             "added_at": datetime.utcnow(),
         }
         try:
+            catalog = await self.get_custom_catalog(catalog_id)
+            if catalog:
+                item["visibility"] = catalog.get("visibility", "public")
+                item["allowed_tokens"] = catalog.get("allowed_tokens") or []
             result = await self.dbs["tracking"]["custom_catalogs"].update_one(
                 {
                     "_id": ObjectId(catalog_id),
@@ -513,6 +629,10 @@ class Database:
                     "$inc": {"item_count": 1},
                 }
             )
+            if catalog:
+                await self._apply_visibility_to_docs([item], item.get("visibility", "public"), item.get("allowed_tokens") or [])
+                if catalog.get("exclusive"):
+                    await self._apply_exclusivity_to_docs([item], str(catalog_id), bool(catalog.get("searchable")))
             return result.modified_count > 0
         except Exception:
             return False
@@ -547,9 +667,53 @@ class Database:
             )
             if result.modified_count > 0:
                 await self._repair_custom_catalog_item_count(catalog_id)
+                await self.clear_item_exclusive(int(tmdb_id), int(db_index), media_type)
+                await self._refresh_media_visibility_from_catalogs(int(tmdb_id), int(db_index), media_type)
             return result.modified_count > 0
         except Exception:
             return False
+
+    async def clear_item_exclusive(self, tmdb_id: int, db_index: int, media_type: str) -> None:
+        try:
+            db_key = f"storage_{int(db_index)}"
+            collection = "tv" if media_type in ("tv", "series") else "movie"
+            await self.dbs[db_key][collection].update_one(
+                {"tmdb_id": int(tmdb_id)},
+                {"$unset": {"exclusive_catalog_id": "", "exclusive_searchable": ""}},
+            )
+        except Exception:
+            pass
+
+    async def _refresh_media_visibility_from_catalogs(self, tmdb_id: int, db_index: int, media_type: str) -> None:
+        try:
+            media_type = "tv" if media_type in ("tv", "series") else "movie"
+            cursor = self.dbs["tracking"]["custom_catalogs"].find({
+                "items": {
+                    "$elemMatch": {
+                        "tmdb_id": int(tmdb_id),
+                        "db_index": int(db_index),
+                        "media_type": media_type,
+                    }
+                }
+            })
+            catalogs = [self._catalog_with_visibility_defaults(c) async for c in cursor]
+            selected = next((c for c in catalogs if c and c.get("visibility") in ("tokens", "owner")), None)
+            visibility = (selected or {}).get("visibility") or "public"
+            allowed = (selected or {}).get("allowed_tokens") or []
+            await self._apply_visibility_to_docs(
+                [{"tmdb_id": int(tmdb_id), "db_index": int(db_index), "media_type": media_type}],
+                visibility,
+                allowed,
+            )
+            exclusive = next((c for c in catalogs if c and c.get("exclusive")), None)
+            if exclusive:
+                await self._apply_exclusivity_to_docs(
+                    [{"tmdb_id": int(tmdb_id), "db_index": int(db_index), "media_type": media_type}],
+                    str(exclusive.get("_id")),
+                    bool(exclusive.get("searchable")),
+                )
+        except Exception:
+            pass
 
     async def _repair_custom_catalog_item_count(self, catalog_id: str) -> None:
         try:
@@ -1718,7 +1882,11 @@ class Database:
                                         "season_number": season_number,
                                         "episode_number": episode_number,
                                         "backdrop": episode.get("episode_backdrop"),
-                                        "db_index": db_idx
+                                        "db_index": db_idx,
+                                        "visibility": tv_show.get("visibility") or "public",
+                                        "allowed_tokens": tv_show.get("allowed_tokens") or [],
+                                        "exclusive_catalog_id": tv_show.get("exclusive_catalog_id"),
+                                        "exclusive_searchable": tv_show.get("exclusive_searchable"),
                                     })
                                     return details
             
@@ -1732,7 +1900,11 @@ class Database:
                                 "imdb_id": imdb_id,
                                 "type": "tv",
                                 "season_number": season_number,
-                                "db_index": db_idx
+                                "db_index": db_idx,
+                                "visibility": tv_show.get("visibility") or "public",
+                                "allowed_tokens": tv_show.get("allowed_tokens") or [],
+                                "exclusive_catalog_id": tv_show.get("exclusive_catalog_id"),
+                                "exclusive_searchable": tv_show.get("exclusive_searchable"),
                             })
                             return details
             

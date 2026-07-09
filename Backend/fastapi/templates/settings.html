@@ -117,6 +117,38 @@
         <textarea id="global_search_channels" rows="3" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">{{ (settings.global_search_channels or []) | join('\n') }}</textarea>
       </label>
     </div>
+
+    <div class="glass-panel rounded-3xl p-6 space-y-5">
+      <h2 class="font-black text-xl">Requests & Announcements</h2>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>Content Requests</b>
+          <span class="block text-sm text-text-secondary">Enable the public /request page.</span>
+        </span>
+        <input id="content_requests_enabled" type="checkbox" class="w-5 h-5" {% if settings.content_requests_enabled %}checked{% endif %}>
+      </label>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>Beta-only Requests</b>
+          <span class="block text-sm text-text-secondary">When subscription mode is enabled, require invited user IDs.</span>
+        </span>
+        <input id="content_requests_beta_only" type="checkbox" class="w-5 h-5" {% if settings.content_requests_beta_only %}checked{% endif %}>
+      </label>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>New Content Announcements</b>
+          <span class="block text-sm text-text-secondary">Post newly indexed titles to a Telegram channel once.</span>
+        </span>
+        <input id="announce_new_content" type="checkbox" class="w-5 h-5" {% if settings.announce_new_content %}checked{% endif %}>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Announcement Channel</span>
+        <input id="announcement_channel" value="{{ settings.announcement_channel or '' }}" placeholder="-100... or @channel" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+      </label>
+      <div class="rounded-2xl border border-border p-4 text-sm text-text-secondary">
+        Config backup/export is available from <a href="/api/admin/backup/export" class="text-primary font-bold">Backup Export</a>. Imports use the protected API and never overwrite admin password/session secret.
+      </div>
+    </div>
   </div>
 </section>
 
@@ -143,6 +175,10 @@ document.getElementById('save-btn').addEventListener('click', async () => {
     show_proxy_and_non_proxy_both: document.getElementById('show_proxy_and_non_proxy_both').checked,
     global_search: document.getElementById('global_search').checked,
     global_search_channels: lines('global_search_channels'),
+    content_requests_enabled: document.getElementById('content_requests_enabled').checked,
+    content_requests_beta_only: document.getElementById('content_requests_beta_only').checked,
+    announce_new_content: document.getElementById('announce_new_content').checked,
+    announcement_channel: document.getElementById('announcement_channel').value.trim(),
   };
   const res = await fetch('/api/admin/settings', {
     method: 'PUT',

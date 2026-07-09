@@ -31,6 +31,9 @@ from Backend.helper.watch_links import (
 )
 from Backend.logger import LOGGER
 from Backend.helper.disk_cache import PRECACHE_MANAGER, PrecacheJob
+from Backend.helper.announcer import announce_new_media
+from Backend.helper.requests_manager import mark_uploaded_for_media
+from Backend.helper.subtitles import ingest_subtitle, is_subtitle_file, remove_subtitle
 
 
 file_queue = Queue()
@@ -262,6 +265,11 @@ async def _process_ingest_job(job: dict) -> None:
     )
     if updated_id:
         LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
+        announce_new_media(metadata_info)
+        try:
+            await mark_uploaded_for_media(metadata_info)
+        except Exception as e:
+            LOGGER.debug(f"Could not update request status for {metadata_info.get('title')}: {e}")
         await _set_status(job, "preparing reply")
         await reply_queue.put({
             "chat_id": job["chat_id"],
@@ -300,6 +308,11 @@ async def process_file():
                     )
                     if updated_id:
                         LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
+                        announce_new_media(metadata_info)
+                        try:
+                            await mark_uploaded_for_media(metadata_info)
+                        except Exception:
+                            pass
                         await reply_queue.put({
                             "chat_id": chat_id,
                             "msg_id": original_msg_id,
@@ -494,6 +507,10 @@ def _is_torrent_document(message: Message) -> bool:
     )
 
 
+def _is_subtitle_document(message: Message) -> bool:
+    return bool(message.document and is_subtitle_file(message.document.file_name or ""))
+
+
 def _message_text(message: Message) -> str:
     return message.text or message.caption or ""
 
@@ -672,6 +689,17 @@ async def _handle_torrent_message(client: Client, message: Message) -> bool:
 async def file_receive_handler(client: Client, message: Message):
     if str(message.chat.id) in Telegram.AUTH_CHANNEL:
         try:
+            if _is_subtitle_document(message):
+                name = message.document.file_name or message.caption or "subtitle.srt"
+                channel = int(str(message.chat.id).replace("-100", ""))
+                ok = await ingest_subtitle(name, channel, int(message.id), caption=message.caption)
+                await message.reply_text(
+                    "✅ Subtitle indexed." if ok else "⚠️ Subtitle metadata match failed. Add IMDb/TMDb link in the caption or use a clearer subtitle filename.",
+                    quote=True,
+                    disable_web_page_preview=True,
+                )
+                return
+
             if await _handle_torrent_message(client, message):
                 return
 
@@ -746,6 +774,14 @@ async def file_receive_handler(client: Client, message: Message):
 async def file_edited_handler(client: Client, message: Message):
     if str(message.chat.id) in Telegram.AUTH_CHANNEL:
         try:
+            if _is_subtitle_document(message):
+                name = message.document.file_name or message.caption or "subtitle.srt"
+                channel = int(str(message.chat.id).replace("-100", ""))
+                ok = await ingest_subtitle(name, channel, int(message.id), caption=message.caption)
+                if ok:
+                    await message.reply_text("✅ Subtitle updated.", quote=True, disable_web_page_preview=True)
+                return
+
             if await _handle_torrent_message(client, message):
                 return
 
@@ -812,8 +848,11 @@ async def file_deleted_handler(client: Client, messages: list[Message]):
                     deleted = await db.delete_media_by_origin(int(message.chat.id), int(msg_id))
                     if not deleted:
                         deleted = await db.delete_media_by_stream_id(stream_id_hash)
+                    sub_deleted = await remove_subtitle(int(message.chat.id), int(msg_id))
                     if deleted:
                         LOGGER.info(f"Automatically purged deleted message {msg_id} from database.")
+                    if sub_deleted:
+                        LOGGER.info(f"Automatically purged deleted subtitle {msg_id} from database.")
                 except Exception as ex:
                     LOGGER.error(f"Failed to scrub deleted message {msg_id}: {ex}")
     except Exception as e:

@@ -101,6 +101,20 @@ def make_json_safe(obj):
     return obj
 
 
+SUBTITLE_MIME_BY_EXTENSION = {
+    ".srt": "application/x-subrip; charset=utf-8",
+    ".vtt": "text/vtt; charset=utf-8",
+    ".ass": "text/x-ssa; charset=utf-8",
+    ".ssa": "text/x-ssa; charset=utf-8",
+    ".sub": "text/plain; charset=utf-8",
+}
+
+
+def subtitle_mime_type(name: str | None) -> str:
+    ext = Path(name or "").suffix.lower()
+    return SUBTITLE_MIME_BY_EXTENSION.get(ext, "text/plain; charset=utf-8")
+
+
 def parse_range_header(range_header: str, file_size: int):
     """
     Parse HTTP Range header.
@@ -178,6 +192,47 @@ async def stream_file_range_with_usage(
         finally:
             if token and pending_usage > 0:
                 await db.update_token_usage(token, pending_usage)
+
+
+@router.get("/sub/{token}/{id}/{name}")
+async def subtitle_handler(token: str, id: str, name: str, token_data: dict = Depends(verify_token)):
+    enforce_playback_token(token_data)
+    try:
+        decoded = await decode_string(id)
+    except InvalidHash:
+        raise HTTPException(status_code=403, detail="Invalid subtitle token")
+
+    if not isinstance(decoded, dict) or decoded.get("source_type") != "subtitle":
+        raise HTTPException(status_code=400, detail="Invalid subtitle source")
+
+    chat_id = int(f"-100{str(decoded['chat_id']).replace('-100', '')}")
+    msg_id = int(decoded["msg_id"])
+    try:
+        message = await StreamBot.get_messages(chat_id, msg_id)
+        if not message or not (message.document or message.video):
+            raise HTTPException(status_code=404, detail="Subtitle message not found")
+        file_obj = message.document or message.video
+        file_name = getattr(file_obj, "file_name", None) or name or "subtitle.srt"
+        downloaded = await StreamBot.download_media(message, in_memory=True)
+        downloaded.seek(0)
+        data = downloaded.read()
+        try:
+            downloaded.close()
+        except Exception:
+            pass
+        return StreamingResponse(
+            iter([data]),
+            media_type=subtitle_mime_type(file_name),
+            headers={
+                "Content-Disposition": f'inline; filename="{Path(file_name).name}"',
+                "Cache-Control": "private, max-age=3600",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        LOGGER.error("Subtitle delivery failed chat=%s msg=%s: %s", chat_id, msg_id, exc)
+        raise HTTPException(status_code=502, detail="Subtitle fetch failed")
 
 
 def select_best_client(target_dc: int) -> int:

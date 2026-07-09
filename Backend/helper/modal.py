@@ -105,6 +105,10 @@ class TVShowSchema(BaseModel):
     watch_providers: Optional[List[str]] = Field(default_factory=list)
     auto_tags: Optional[List[str]] = Field(default_factory=list)
     auto_catalog: Optional[dict] = None
+    visibility: Optional[str] = "public"
+    allowed_tokens: Optional[List[str]] = Field(default_factory=list)
+    exclusive_catalog_id: Optional[str] = None
+    exclusive_searchable: Optional[bool] = False
 
 
 # ---------------------------
@@ -134,3 +138,7 @@ class MovieSchema(BaseModel):
     watch_providers: Optional[List[str]] = Field(default_factory=list)
     auto_tags: Optional[List[str]] = Field(default_factory=list)
     auto_catalog: Optional[dict] = None
+    visibility: Optional[str] = "public"
+    allowed_tokens: Optional[List[str]] = Field(default_factory=list)
+    exclusive_catalog_id: Optional[str] = None
+    exclusive_searchable: Optional[bool] = False

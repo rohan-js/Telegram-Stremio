@@ -227,7 +227,10 @@ async def settings_page(request: Request, _: bool = Depends(require_auth)):
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
     settings = SettingsManager.current().to_dict()
+    settings["admin_password_set"] = bool(settings.get("admin_password"))
     settings["admin_password"] = ""
+    settings["session_secret_set"] = bool(settings.get("session_secret"))
+    settings["session_secret"] = ""
     settings["multi_token_count"] = len([k for k in __import__("os").environ if k.startswith("MULTI_TOKEN")])
 
     return templates.TemplateResponse("settings.html", {
@@ -265,6 +268,32 @@ async def launch_readiness_page(request: Request, _: bool = Depends(require_auth
         "themes": get_all_themes(),
         "current_theme": theme_name,
         "current_user": current_user,
+    })
+
+
+async def admin_requests_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "dark_professional")
+    theme = get_theme(theme_name)
+    return templates.TemplateResponse("requests_manage.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "current_user": get_current_user(request),
+    })
+
+
+async def public_request_page(request: Request):
+    theme_name = request.session.get("theme", "dark_professional")
+    theme = get_theme(theme_name)
+    return templates.TemplateResponse("request_public.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "current_user": get_current_user(request) if is_authenticated(request) else None,
+        "is_authenticated": is_authenticated(request),
+        "requests_enabled": SettingsManager.current().content_requests_enabled,
     })
 
 

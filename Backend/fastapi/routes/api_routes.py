@@ -4,7 +4,7 @@ import random
 import secrets
 from datetime import datetime
 from fastapi import Request, Query, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from Backend import db, StartTime, __version__
 from Backend.logger import LOGGER
 from Backend.helper.pyro import get_readable_time
@@ -34,6 +34,17 @@ from Backend.config import Telegram
 from Backend.helper.warp_control import apply_warp_mode, get_warp_status
 from Backend.helper.production_ops import create_tracking_backup, get_launch_readiness
 from Backend.helper.owner_alerts import schedule_owner_alert
+from Backend.helper.backup import export_config, import_config
+from Backend.helper.health import run_health_checks
+from Backend.helper.log_tools import read_recent_logs
+from Backend.helper.requests_manager import (
+    delete_request,
+    list_requests,
+    popular_requests,
+    search_titles as search_requested_titles,
+    set_status as set_request_status,
+    submit_request,
+)
 from Backend.helper.metadata import (
     fetch_selected_movie_metadata,
     fetch_selected_tv_metadata,
@@ -183,6 +194,88 @@ async def update_settings_api(payload: dict):
     except Exception as e:
         LOGGER.error(f"update_settings_api failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Public content requests ---
+
+async def request_search_api(q: str) -> dict:
+    if not SettingsManager.current().content_requests_enabled:
+        return {"status": "disabled", "results": []}
+    return {"status": "success", "results": await search_requested_titles(q)}
+
+
+async def request_popular_api() -> dict:
+    if not SettingsManager.current().content_requests_enabled:
+        return {"status": "disabled", "requests": []}
+    return {"status": "success", "requests": await popular_requests()}
+
+
+async def request_submit_api(payload: dict, client_ip: str) -> dict:
+    settings = SettingsManager.current()
+    if not settings.content_requests_enabled:
+        return {"ok": False, "reason": "disabled"}
+    if settings.content_requests_beta_only and Telegram.SUBSCRIPTION:
+        user_id = str((payload or {}).get("user_id") or "").strip()
+        allowed = {str(x) for x in getattr(Telegram, "BETA_ALLOWED_USER_IDS", [])}
+        exempt = {str(x) for x in getattr(Telegram, "BETA_EXEMPT_USER_IDS", [])}
+        if not user_id or (user_id not in allowed and user_id not in exempt):
+            return {"ok": False, "reason": "beta_only"}
+    return await submit_request(
+        media_type=(payload or {}).get("media_type"),
+        tmdb_id=(payload or {}).get("tmdb_id"),
+        imdb_id=(payload or {}).get("imdb_id"),
+        title=(payload or {}).get("title"),
+        year=(payload or {}).get("year"),
+        poster=(payload or {}).get("poster"),
+        client_ip=client_ip,
+    )
+
+
+async def get_requests_api() -> dict:
+    return {"status": "success", "data": await list_requests()}
+
+
+async def update_request_api(request_id: str, payload: dict) -> dict:
+    doc = await set_request_status(request_id, (payload or {}).get("status"))
+    if not doc:
+        raise HTTPException(status_code=404, detail="Request not found or invalid status.")
+    return {"status": "success", "request": doc}
+
+
+async def delete_request_api(request_id: str) -> dict:
+    if not await delete_request(request_id):
+        raise HTTPException(status_code=404, detail="Request not found.")
+    return {"status": "success", "message": "Request deleted."}
+
+
+async def get_health_api(force: bool = False) -> dict:
+    return await run_health_checks(force=force)
+
+
+async def get_admin_logs_api(max_bytes: int = 200_000) -> dict:
+    return read_recent_logs(max_bytes=max_bytes)
+
+
+async def download_admin_logs_api(max_bytes: int = 500_000):
+    data = read_recent_logs(max_bytes=max_bytes)
+    return PlainTextResponse(
+        data.get("text") or "",
+        headers={"Content-Disposition": "attachment; filename=telegram-stremio-redacted.log"},
+    )
+
+
+async def export_config_api():
+    return JSONResponse(
+        await export_config(),
+        headers={"Content-Disposition": "attachment; filename=telegram-stremio-config-backup.json"},
+    )
+
+
+async def import_config_api(payload: dict) -> dict:
+    try:
+        return {"status": "success", "result": await import_config(payload or {})}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 async def get_tools_channels_api():
@@ -1360,6 +1453,20 @@ def _normalize_media_type(media_type: str) -> str:
     return "tv" if media_type in ["tv", "series"] else "movie"
 
 
+_VISIBILITY_MODES = {"public", "tokens", "owner"}
+
+
+def _clean_visibility(payload: dict) -> tuple[str | None, list[str]]:
+    visibility = (payload or {}).get("visibility")
+    if visibility not in _VISIBILITY_MODES:
+        visibility = None
+    raw_tokens = (payload or {}).get("allowed_tokens") or []
+    if isinstance(raw_tokens, str):
+        raw_tokens = [item.strip() for item in raw_tokens.replace("\n", ",").split(",")]
+    tokens = [str(item).strip() for item in raw_tokens if str(item).strip()]
+    return visibility, tokens
+
+
 async def list_custom_catalogs_api(
     tmdb_id: int | None = None,
     db_index: int | None = None,
@@ -1384,10 +1491,18 @@ async def list_custom_catalogs_api(
 async def create_custom_catalog_api(payload: dict):
     name = (payload.get("name") or "").strip()
     visible = bool(payload.get("visible", True))
+    visibility, allowed_tokens = _clean_visibility(payload)
     if not name:
         raise HTTPException(status_code=400, detail="Catalog name is required.")
 
-    catalog_id = await db.create_custom_catalog(name=name, visible=visible)
+    catalog_id = await db.create_custom_catalog(
+        name=name,
+        visible=visible,
+        visibility=visibility,
+        allowed_tokens=allowed_tokens,
+        exclusive=bool(payload.get("exclusive", False)),
+        searchable=bool(payload.get("searchable", False)),
+    )
     if not catalog_id:
         raise HTTPException(status_code=500, detail="Failed to create catalog.")
 
@@ -1398,7 +1513,16 @@ async def create_custom_catalog_api(payload: dict):
 async def update_custom_catalog_api(catalog_id: str, payload: dict):
     name = payload.get("name")
     visible = payload.get("visible") if "visible" in payload else None
-    result = await db.update_custom_catalog(catalog_id, name=name, visible=visible)
+    visibility, allowed_tokens = _clean_visibility(payload)
+    result = await db.update_custom_catalog(
+        catalog_id,
+        name=name,
+        visible=visible,
+        visibility=visibility,
+        allowed_tokens=allowed_tokens if "allowed_tokens" in payload else None,
+        exclusive=payload.get("exclusive") if "exclusive" in payload else None,
+        searchable=payload.get("searchable") if "searchable" in payload else None,
+    )
     if not result:
         catalog = await db.get_custom_catalog(catalog_id)
         if not catalog:

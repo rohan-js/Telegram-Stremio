@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Request a Title - TG Stremio{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <div class="glass-panel rounded-3xl p-6">
+    <p class="text-xs uppercase tracking-[0.24em] text-text-secondary font-bold">Requests</p>
+    <h1 class="text-3xl font-black mt-1">Request a Movie or Show</h1>
+    <p class="text-text-secondary mt-2">Search by title, IMDb ID, or TMDb ID. Requests are reviewed by the admin.</p>
+  </div>
+
+  {% if not requests_enabled %}
+  <div class="glass-panel rounded-3xl p-6">
+    <h2 class="text-xl font-black">Requests are currently closed</h2>
+    <p class="text-text-secondary mt-2">The request page is installed but disabled from Settings.</p>
+  </div>
+  {% else %}
+  <div class="glass-panel rounded-3xl p-6 space-y-4">
+    <div class="flex flex-col md:flex-row gap-3">
+      <input id="request-query" class="flex-1 rounded-2xl bg-background border border-border p-3" placeholder="Example: Rocky III 1982 or tt0084602" onkeydown="if(event.key==='Enter') searchRequests()">
+      <button onclick="searchRequests()" class="bg-primary text-background px-5 py-3 rounded-2xl font-bold">Search</button>
+    </div>
+    <div id="request-results" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </div>
+  <div class="glass-panel rounded-3xl p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-xl font-black">Most Requested</h2>
+      <button onclick="loadPopular()" class="px-4 py-2 rounded-full bg-white/10 border border-border">Refresh</button>
+    </div>
+    <div id="popular-requests" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </div>
+  {% endif %}
+</section>
+
+<script>
+function card(item, idx) {
+  const poster = item.poster || 'https://via.placeholder.com/160x240/111827/94a3b8?text=No+Poster';
+  return `<div class="rounded-3xl border border-border bg-card/50 p-4 flex gap-4">
+    <img src="${escapeHtml(poster)}" class="w-20 h-28 object-cover rounded-xl">
+    <div class="min-w-0 flex-1">
+      <h3 class="font-black truncate">${escapeHtml(item.title || 'Untitled')}</h3>
+      <p class="text-sm text-text-secondary">${escapeHtml(item.media_type || '')}${item.year ? ' · ' + escapeHtml(item.year) : ''}</p>
+      <p class="text-xs text-text-secondary line-clamp-3 mt-2">${escapeHtml(item.overview || '')}</p>
+      <button class="mt-3 px-4 py-2 rounded-full bg-primary text-background font-bold" onclick="submitRequest(${idx})">Request</button>
+    </div>
+  </div>`;
+}
+let currentResults = [];
+async function searchRequests() {
+  const q = document.getElementById('request-query').value.trim();
+  if (!q) return showToast('Type a title first.', 'error', 'Search');
+  const box = document.getElementById('request-results');
+  box.innerHTML = '<p class="text-text-secondary">Searching...</p>';
+  const res = await fetch('/api/request/search?q=' + encodeURIComponent(q));
+  const data = await res.json().catch(() => ({}));
+  currentResults = data.results || [];
+  box.innerHTML = currentResults.length ? currentResults.map(card).join('') : '<p class="text-text-secondary">No results found.</p>';
+}
+async function submitRequest(idx) {
+  const item = currentResults[idx];
+  if (!item) return;
+  const res = await fetch('/api/request/submit', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item)});
+  const data = await res.json().catch(() => ({}));
+  const messages = {created:'Request submitted.', added:'Vote added.', already_available:'Already available.', disabled:'Requests are disabled.', beta_only:'Requests are limited to invited users.', rate_limited:'Too many requests. Try later.', banned:'This title cannot be requested.'};
+  showToast(messages[data.reason] || (data.ok ? 'Request saved.' : 'Request failed.'), data.ok ? 'success' : 'error', 'Request');
+  loadPopular();
+}
+async function loadPopular() {
+  const box = document.getElementById('popular-requests');
+  if (!box) return;
+  const res = await fetch('/api/request/popular');
+  const data = await res.json().catch(() => ({}));
+  const items = data.requests || [];
+  box.innerHTML = items.length ? items.map((item) => `<div class="rounded-2xl border border-border p-4"><b>${escapeHtml(item.title)}</b><p class="text-sm text-text-secondary">${escapeHtml(item.media_type)}${item.year ? ' · ' + item.year : ''}</p><p class="text-xs text-text-secondary mt-2">${item.request_count || 0} request(s)</p></div>`).join('') : '<p class="text-text-secondary">No pending requests yet.</p>';
+}
+document.addEventListener('DOMContentLoaded', loadPopular);
+</script>
+{% endblock %}

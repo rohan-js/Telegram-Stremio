@@ -90,6 +90,10 @@ class Telegram:
     ANIME_CHANNELS = [channel.strip() for channel in (getenv("ANIME_CHANNELS") or "").split(",") if channel.strip()]
     GLOBAL_SEARCH = getenv("GLOBAL_SEARCH", "false").lower() == "true"
     GLOBAL_SEARCH_CHANNELS = [channel.strip() for channel in (getenv("GLOBAL_SEARCH_CHANNELS") or "").split(",") if channel.strip()]
+    CONTENT_REQUESTS_ENABLED = getenv("CONTENT_REQUESTS_ENABLED", "false").lower() == "true"
+    CONTENT_REQUESTS_BETA_ONLY = getenv("CONTENT_REQUESTS_BETA_ONLY", "true").lower() == "true"
+    ANNOUNCE_NEW_CONTENT = getenv("ANNOUNCE_NEW_CONTENT", "false").lower() == "true"
+    ANNOUNCEMENT_CHANNEL = getenv("ANNOUNCEMENT_CHANNEL", "").strip()
     DATABASE = [db.strip() for db in (getenv("DATABASE") or "").split(",") if db.strip()]
 
     TMDB_API = getenv("TMDB_API", "")

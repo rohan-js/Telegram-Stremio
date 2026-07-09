@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Content Requests - TG Stremio{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <div class="glass-panel rounded-3xl p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div>
+      <p class="text-xs uppercase tracking-[0.24em] text-text-secondary font-bold">Admin</p>
+      <h1 class="text-3xl font-black mt-1">Content Requests</h1>
+      <p class="text-text-secondary mt-2">Review requested movies and shows from the public request page.</p>
+    </div>
+    <div class="flex gap-3">
+      <a href="/request" target="_blank" class="px-4 py-2 rounded-full bg-white/10 border border-border font-bold">Public Page</a>
+      <button onclick="loadRequests()" class="bg-primary text-background px-5 py-2 rounded-full font-bold">Refresh</button>
+    </div>
+  </div>
+  <div class="glass-panel rounded-3xl p-6">
+    <div id="requests-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+  </div>
+</section>
+<script>
+let requests = [];
+function requestCard(r) {
+  const poster = r.poster || 'https://via.placeholder.com/160x240/111827/94a3b8?text=No+Poster';
+  const id = escapeHtml(r._id);
+  return `<div class="rounded-3xl border border-border bg-card/50 p-4">
+    <div class="flex gap-4">
+      <img src="${escapeHtml(poster)}" class="w-20 h-28 object-cover rounded-xl">
+      <div class="min-w-0 flex-1">
+        <h3 class="font-black truncate">${escapeHtml(r.title || 'Untitled')}</h3>
+        <p class="text-sm text-text-secondary">${escapeHtml(r.media_type || '')}${r.year ? ' · ' + escapeHtml(r.year) : ''}</p>
+        <p class="text-xs text-text-secondary mt-2">${r.request_count || 0} request(s)</p>
+        <span class="inline-block mt-2 text-xs px-2 py-1 rounded-full bg-white/10">${escapeHtml(r.status || 'pending')}</span>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-2 mt-4">
+      <button onclick="setStatus('${id}','uploaded')" class="px-3 py-2 rounded-xl bg-green-500/20 text-green-300 font-bold">Uploaded</button>
+      <button onclick="setStatus('${id}','pending')" class="px-3 py-2 rounded-xl bg-white/10 font-bold">Pending</button>
+      <button onclick="setStatus('${id}','denied')" class="px-3 py-2 rounded-xl bg-yellow-500/20 text-yellow-300 font-bold">Deny</button>
+      <button onclick="setStatus('${id}','banned')" class="px-3 py-2 rounded-xl bg-red-500/20 text-red-300 font-bold">Ban</button>
+      <button onclick="deleteReq('${id}')" class="col-span-2 px-3 py-2 rounded-xl border border-red-500/40 text-red-300 font-bold">Delete</button>
+    </div>
+  </div>`;
+}
+async function loadRequests() {
+  const box = document.getElementById('requests-grid');
+  box.innerHTML = '<p class="text-text-secondary">Loading...</p>';
+  const res = await fetch('/api/admin/requests');
+  const data = await res.json().catch(() => ({}));
+  requests = data.data || [];
+  box.innerHTML = requests.length ? requests.map(requestCard).join('') : '<p class="text-text-secondary">No requests yet.</p>';
+}
+async function setStatus(id, status) {
+  const res = await fetch('/api/admin/requests/' + id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status})});
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return showToast(data.detail || 'Update failed', 'error', 'Request');
+  showToast('Request updated.', 'success', 'Request');
+  loadRequests();
+}
+async function deleteReq(id) {
+  if (!confirm('Delete this request?')) return;
+  const res = await fetch('/api/admin/requests/' + id, {method:'DELETE'});
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return showToast(data.detail || 'Delete failed', 'error', 'Request');
+  showToast('Request deleted.', 'success', 'Request');
+  loadRequests();
+}
+document.addEventListener('DOMContentLoaded', loadRequests);
+</script>
+{% endblock %}

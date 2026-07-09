@@ -338,6 +338,29 @@
             <span class="switch"></span>
           </label>
 
+          <div>
+            <label class="field-label">Visibility Mode</label>
+            <select id="catalog-visibility" class="field-select">
+              <option value="public">Public - all valid tokens</option>
+              <option value="tokens">Token restricted</option>
+              <option value="owner">Owner only / hidden</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Allowed Tokens</label>
+            <textarea id="catalog-allowed-tokens" rows="2" class="field-input" placeholder="One token per line, only for token-restricted catalogs"></textarea>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label class="catalog-card p-4 flex items-center justify-between gap-4">
+              <span><b>Exclusive</b><span class="muted block text-xs">Hide titles from default catalogs.</span></span>
+              <input id="catalog-exclusive" type="checkbox">
+            </label>
+            <label class="catalog-card p-4 flex items-center justify-between gap-4">
+              <span><b>Searchable</b><span class="muted block text-xs">Allow exclusive titles in search.</span></span>
+              <input id="catalog-searchable" type="checkbox">
+            </label>
+          </div>
+
           <button class="btn-ui btn-primary w-full" type="submit">➕ Create Catalog</button>
         </form>
       </div>
@@ -377,6 +400,33 @@
       </div>
 
       <div id="catalog-workspace" class="hidden space-y-6">
+        <div class="catalog-card p-4 sm:p-5">
+          <div class="grid grid-cols-1 md:grid-cols-[1fr_1.2fr_auto] gap-3 items-end">
+            <div>
+              <label class="field-label">Visibility</label>
+              <select id="selected-visibility" class="field-select">
+                <option value="public">Public</option>
+                <option value="tokens">Token restricted</option>
+                <option value="owner">Owner only</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Allowed Tokens</label>
+              <textarea id="selected-allowed-tokens" rows="2" class="field-input" placeholder="One token per line"></textarea>
+            </div>
+            <button onclick="saveSelectedVisibility()" class="btn-ui btn-ghost md:w-auto">Save Visibility</button>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+            <label class="catalog-card p-4 flex items-center justify-between gap-4">
+              <span><b>Exclusive</b><span class="muted block text-xs">Hide these titles from default catalogs.</span></span>
+              <input id="selected-exclusive" type="checkbox">
+            </label>
+            <label class="catalog-card p-4 flex items-center justify-between gap-4">
+              <span><b>Searchable</b><span class="muted block text-xs">Show exclusive titles in search results.</span></span>
+              <input id="selected-searchable" type="checkbox">
+            </label>
+          </div>
+        </div>
         <div class="catalog-card p-4 sm:p-5">
           <div class="flex flex-col sm:flex-row sm:items-end gap-3">
             <div class="flex-1">
@@ -437,7 +487,7 @@ function getSelectedCatalog() {
 
 function updateStats() {
   const total = catalogs.length;
-  const visible = catalogs.filter(c => c.visible).length;
+  const visible = catalogs.filter(c => (c.visibility || (c.visible ? 'public' : 'owner')) !== 'owner').length;
   const items = catalogs.reduce((sum, c) => sum + ((c.items || []).length), 0);
   document.getElementById('stat-total').textContent = total;
   document.getElementById('stat-visible').textContent = visible;
@@ -502,11 +552,11 @@ function renderCatalogs() {
       <div class="flex items-start justify-between gap-3">
         <button class="text-left min-w-0 flex-1" onclick="selectCatalog('${c._id}')">
           <div class="flex items-center gap-2 min-w-0">
-            <span class="text-xl">${c.auto ? '✨' : (c.visible ? '🌐' : '🔒')}</span>
+            <span class="text-xl">${c.auto ? '✨' : ((c.visibility || (c.visible ? 'public' : 'owner')) === 'tokens' ? '🎟️' : (c.visible ? '🌐' : '🔒'))}</span>
             <h3 class="font-black truncate">${escapeHtml(c.name)}</h3>
             ${c.auto ? '<span class="pill text-[0.62rem] px-2 py-0.5">Auto</span>' : ''}
           </div>
-          <p class="muted text-xs mt-2">${count} title${count === 1 ? '' : 's'} · ${c.visible ? 'Visible in Stremio' : 'Hidden from Stremio'}</p>
+          <p class="muted text-xs mt-2">${count} title${count === 1 ? '' : 's'} · ${visibilityLabel(c)}</p>
         </button>
         <label class="flex items-center gap-2 shrink-0" title="Toggle Stremio visibility">
           <input type="checkbox" ${c.visible ? 'checked' : ''} onchange="toggleVisibility('${c._id}', this.checked)" class="switch-input hidden">
@@ -541,21 +591,36 @@ function updateSelectedHeader() {
   deleteBtn.classList.remove('hidden');
   visibilityPill.classList.remove('hidden');
   countPill.classList.remove('hidden');
-  visibilityPill.textContent = catalog.visible ? '🌐 Visible in Stremio' : '🔒 Hidden from Stremio';
+  visibilityPill.textContent = visibilityLabel(catalog);
   countPill.textContent = `${(catalog.items || []).length} title${(catalog.items || []).length === 1 ? '' : 's'}`;
   document.getElementById('selected-title').textContent = catalog.name || 'Selected Catalog';
-  document.getElementById('selected-subtitle').textContent = catalog.visible
+  document.getElementById('selected-subtitle').textContent = (catalog.visibility || (catalog.visible ? 'public' : 'owner')) !== 'owner'
     ? 'This catalog appears on the Stremio catalog screen.'
     : 'This catalog is private in the web panel and hidden from Stremio.';
+  document.getElementById('selected-visibility').value = catalog.visibility || (catalog.visible ? 'public' : 'owner');
+  document.getElementById('selected-allowed-tokens').value = (catalog.allowed_tokens || []).join('\n');
+  document.getElementById('selected-exclusive').checked = !!catalog.exclusive;
+  document.getElementById('selected-searchable').checked = !!catalog.searchable;
+}
+
+function visibilityLabel(c) {
+  const mode = c.visibility || (c.visible ? 'public' : 'owner');
+  if (mode === 'tokens') return '🎟️ Token restricted';
+  if (mode === 'owner') return '🔒 Owner only';
+  return '🌐 Public';
 }
 
 async function createCatalog(event) {
   event.preventDefault();
   const name = document.getElementById('catalog-name').value.trim();
   const visible = document.getElementById('catalog-visible').checked;
+  const visibility = document.getElementById('catalog-visibility').value;
+  const allowed_tokens = document.getElementById('catalog-allowed-tokens').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  const exclusive = document.getElementById('catalog-exclusive').checked;
+  const searchable = document.getElementById('catalog-searchable').checked;
   if (!name) return showToast('Catalog name is required', 'error', 'Error');
   const res = await fetch('/api/custom-catalogs', {
-    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, visible})
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, visible, visibility, allowed_tokens, exclusive, searchable})
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return showToast(data.detail || 'Failed to create catalog', 'error', 'Error');
@@ -567,11 +632,33 @@ async function createCatalog(event) {
 async function toggleVisibility(id, visible) {
   const catalog = catalogs.find(c => c._id === id);
   const res = await fetch(`/api/custom-catalogs/${id}`, {
-    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: catalog?.name, visible})
+    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: catalog?.name, visible, visibility: visible ? 'public' : 'owner'})
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) showToast(data.detail || 'Failed to update visibility', 'error', 'Error');
   await loadCatalogs();
+}
+
+async function saveSelectedVisibility() {
+  const catalog = getSelectedCatalog();
+  if (!catalog) return;
+  const payload = {
+    name: catalog.name,
+    visibility: document.getElementById('selected-visibility').value,
+    allowed_tokens: document.getElementById('selected-allowed-tokens').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean),
+    exclusive: document.getElementById('selected-exclusive').checked,
+    searchable: document.getElementById('selected-searchable').checked,
+  };
+  const res = await fetch(`/api/custom-catalogs/${catalog._id}`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return showToast(data.detail || 'Failed to update visibility', 'error', 'Error');
+  showToast('Visibility updated', 'success', 'Success');
+  await loadCatalogs();
+  updateSelectedHeader();
 }
 
 async function selectCatalog(id) {
