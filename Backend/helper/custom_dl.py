@@ -136,6 +136,16 @@ def record_route_failure(
             client_failures.get(client_index),
             int(until),
         )
+        try:
+            from Backend.helper.owner_alerts import schedule_owner_alert
+
+            schedule_owner_alert(
+                f"Telegram route cooldown: client={client_index} dc={target_dc} failures={client_failures.get(client_index)} reason={str(reason)[:120]}",
+                key=f"route-cooldown:{client_index}:{target_dc}:{reason}",
+                cooldown_sec=600,
+            )
+        except Exception:
+            pass
 
 
 def smart_client_score(client_index: int, target_dc: int):

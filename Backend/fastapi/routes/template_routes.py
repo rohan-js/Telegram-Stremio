@@ -12,6 +12,7 @@ from Backend.helper.custom_dl import ACTIVE_STREAMS, RECENT_STREAMS
 from Backend.helper.nginx_egress import get_nginx_egress_summary
 from Backend.helper.host_outbound import get_vps_outbound_summary, empty_vps_outbound_summary
 from Backend.helper.settings_manager import SettingsManager
+from Backend.config import Telegram
 
 templates = Jinja2Templates(directory="Backend/fastapi/templates")
 
@@ -250,6 +251,43 @@ async def tools_page(request: Request, _: bool = Depends(require_auth)):
         "themes": get_all_themes(),
         "current_theme": theme_name,
         "current_user": current_user,
+    })
+
+
+async def launch_readiness_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "dark_professional")
+    theme = get_theme(theme_name)
+    current_user = get_current_user(request)
+
+    return templates.TemplateResponse("launch_readiness.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "current_user": current_user,
+    })
+
+
+async def policy_page(request: Request, policy: str):
+    theme_name = request.session.get("theme", "dark_professional")
+    theme = get_theme(theme_name)
+    titles = {
+        "terms": "Terms of Service",
+        "privacy": "Privacy Policy",
+        "acceptable-use": "Acceptable Use",
+        "takedown": "Takedown Policy",
+    }
+    if policy not in titles:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    return templates.TemplateResponse("policy.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "current_user": get_current_user(request) if is_authenticated(request) else None,
+        "policy": policy,
+        "title": titles[policy],
+        "terms_version": Telegram.TERMS_VERSION,
     })
 
 

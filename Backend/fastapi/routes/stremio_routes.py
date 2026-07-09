@@ -854,11 +854,14 @@ async def get_streams(
     if token_data.get("limit_exceeded"):
         limit_type = token_data["limit_exceeded"]
 
-        title = (
-            "🚫 Daily Limit Reached – Upgrade Required"
-            if limit_type == "daily"
-            else "🚫 Monthly Limit Reached – Upgrade Required"
-        )
+        if limit_type == "daily":
+            title = "🚫 Daily Limit Reached - Upgrade Required"
+        elif limit_type == "monthly":
+            title = "🚫 Monthly Limit Reached - Upgrade Required"
+        elif limit_type == "active_streams":
+            title = "🚫 Active Stream Limit Reached\nClose another stream and try again."
+        else:
+            title = "🚫 Server Stream Limit Reached\nPlease try again shortly."
 
         return {
             "streams": [

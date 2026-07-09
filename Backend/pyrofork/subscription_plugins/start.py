@@ -3,6 +3,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from Backend.config import Telegram
 from Backend import db
 from datetime import datetime
+from Backend.helper.beta_access import accepted_terms, is_beta_invited, is_exempt_token, terms_keyboard, terms_links_text, waitlist_message
 
 print("DEBUG: Subscription Bot start.py PLUGIN LOADED SUCCESSFULLY!")
 
@@ -41,6 +42,27 @@ async def send_start_message(client: Client, message: Message):
 
         # Subscription logic (When SUBSCRIPTION=True)
         user = await db.get_user(user_id)
+        token_doc = await db.get_api_token_by_user(user_id)
+        if token_doc and is_exempt_token(token_doc):
+            addon_url = f"{base_url}/stremio/{token_doc['token']}/manifest.json"
+            await message.reply_text(
+                '🎉 <b>Welcome back to the Telegram Stremio Subscription Manager!</b>\n\n'
+                'Your existing free addon token is active. Here is your addon link:\n\n'
+                '🎬 <b>Stremio Addon — Install Link:</b>\n'
+                f'<code>{addon_url}</code>\n\n'
+                'Tap the link above → <b>Install</b> in Stremio to start watching!',
+                quote=True,
+                parse_mode=enums.ParseMode.HTML
+            )
+            return
+
+        if not is_beta_invited(user_id):
+            return await message.reply_text(
+                f"🔒 <b>Private beta is invite-only.</b>\n\n{waitlist_message()}",
+                quote=True,
+                parse_mode=enums.ParseMode.HTML,
+            )
+
         now = datetime.utcnow()
         
         # Check if user has an active subscription
@@ -52,6 +74,15 @@ async def send_start_message(client: Client, message: Message):
                 await db.mark_user_expired(user_id)
 
         if not is_active:
+            if not accepted_terms(user):
+                return await message.reply_text(
+                    "📜 <b>Terms acceptance required</b>\n\n"
+                    f"{terms_links_text()}\n\n"
+                    "Tap <b>I Accept</b> after reading them, then use /start again.",
+                    reply_markup=terms_keyboard(),
+                    quote=True,
+                    parse_mode=enums.ParseMode.HTML,
+                )
             plans = await db.get_subscription_plans()
             if not plans:
                 return await message.reply_text(
@@ -77,8 +108,17 @@ async def send_start_message(client: Client, message: Message):
             )
         
         # User is active, fetch their token
-        all_tokens = await db.get_all_api_tokens()
-        token_doc = next((t for t in all_tokens if t.get("user_id") == user_id), None)
+        if not accepted_terms(user):
+            return await message.reply_text(
+                "📜 <b>Terms acceptance required</b>\n\n"
+                f"{terms_links_text()}\n\n"
+                "Tap <b>I Accept</b> after reading them, then use /start again.",
+                reply_markup=terms_keyboard(),
+                quote=True,
+                parse_mode=enums.ParseMode.HTML,
+            )
+
+        token_doc = token_doc or await db.get_api_token_by_user(user_id)
         
         if token_doc and "token" in token_doc:
             token_str = token_doc["token"]

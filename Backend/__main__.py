@@ -29,6 +29,8 @@ from Backend.helper.iptv import (
 )
 from Backend.helper.scan_manager import scan_manager
 from Backend.fastapi.main import app
+from Backend.helper.owner_alerts import schedule_owner_alert
+from Backend.helper.production_ops import start_backup_loop
 
 
 loop = get_event_loop()
@@ -81,6 +83,11 @@ async def start_telegram_services():
                 LOGGER.info("Subscription Checker Task Started.")
 
             LOGGER.info("Telegram clients started successfully.")
+            schedule_owner_alert(
+                f"Telegram-Stremio v{__version__} started successfully.",
+                key="app-started",
+                cooldown_sec=300,
+            )
             return
         except Exception:
             LOGGER.error("Telegram client startup failed; retrying in 60 seconds:\n" + format_exc())
@@ -113,6 +120,10 @@ async def start_services():
         
         link_checker_task = DeadLinkChecker(db, app, check_interval_hours=24)
         loop.create_task(link_checker_task.start())
+
+        if Telegram.BACKUP_ENABLED:
+            loop.create_task(start_backup_loop(db))
+            LOGGER.info("Production backup loop started.")
 
         if AUTO_CATALOG_ON_STARTUP:
             loop.create_task(start_auto_catalog_sync_background(

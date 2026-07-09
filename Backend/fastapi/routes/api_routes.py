@@ -2,6 +2,7 @@ import asyncio
 import json
 import random
 import secrets
+from datetime import datetime
 from fastapi import Request, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from Backend import db, StartTime, __version__
@@ -31,6 +32,8 @@ from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.scan_manager import dbcheck_manager, scan_manager
 from Backend.config import Telegram
 from Backend.helper.warp_control import apply_warp_mode, get_warp_status
+from Backend.helper.production_ops import create_tracking_backup, get_launch_readiness
+from Backend.helper.owner_alerts import schedule_owner_alert
 from Backend.helper.metadata import (
     fetch_selected_movie_metadata,
     fetch_selected_tv_metadata,
@@ -237,6 +240,100 @@ async def apply_warp_api(payload: dict):
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("message") or "WARP switch failed")
     return result
+
+
+async def get_launch_readiness_api():
+    try:
+        return await get_launch_readiness(db)
+    except Exception as e:
+        LOGGER.error(f"get_launch_readiness_api failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def run_backup_api(payload: dict | None = None):
+    try:
+        reason = (payload or {}).get("reason") or "manual"
+        result = await create_tracking_backup(db, reason=reason)
+        if not result.get("ok"):
+            raise HTTPException(status_code=500, detail=result.get("error") or result.get("message") or "Backup failed")
+        return {"status": "success", "backup": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.error(f"run_backup_api failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def admin_takedown_api(payload: dict):
+    media_type = payload.get("media_type")
+    if media_type not in {"movie", "tv"}:
+        raise HTTPException(status_code=400, detail="media_type must be movie or tv.")
+    try:
+        tmdb_id = int(payload.get("tmdb_id"))
+        db_index = int(payload.get("db_index"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="tmdb_id and db_index are required.")
+
+    quality_id = payload.get("id") or payload.get("quality_id")
+    if not quality_id:
+        raise HTTPException(status_code=400, detail="quality_id is required.")
+
+    action = (payload.get("action") or "hide").strip().lower()
+    reason = (payload.get("reason") or "Takedown/admin review").strip()
+    season = payload.get("season")
+    episode = payload.get("episode")
+
+    if action not in {"hide", "delete"}:
+        raise HTTPException(status_code=400, detail="action must be hide or delete.")
+
+    if action == "hide":
+        ok = await db.update_quality_flags(
+            media_type=media_type,
+            tmdb_id=tmdb_id,
+            db_index=db_index,
+            quality_id=quality_id,
+            flags={
+                "hidden_from_stremio": True,
+                "flagged_duplicate": False,
+                "quality_note": reason,
+            },
+            season=season,
+            episode=episode,
+            clear=False,
+        )
+    elif media_type == "movie":
+        ok = await db.delete_movie_quality(tmdb_id, db_index, quality_id)
+    else:
+        if season is None or episode is None:
+            raise HTTPException(status_code=400, detail="season and episode are required for TV takedown delete.")
+        ok = await db.delete_tv_quality(tmdb_id, db_index, int(season), int(episode), quality_id)
+
+    if not ok:
+        raise HTTPException(status_code=404, detail="Quality not found.")
+
+    try:
+        await db.dbs["tracking"]["takedown_log"].insert_one(
+            {
+                "media_type": media_type,
+                "tmdb_id": tmdb_id,
+                "db_index": db_index,
+                "quality_id": quality_id,
+                "season": season,
+                "episode": episode,
+                "action": action,
+                "reason": reason,
+                "created_at": datetime.utcnow(),
+            }
+        )
+    except Exception as exc:
+        LOGGER.debug("takedown_log insert skipped: %s", exc)
+
+    schedule_owner_alert(
+        f"Admin takedown applied: {action} {media_type} tmdb={tmdb_id} quality={str(quality_id)[:12]} reason={reason}",
+        key=f"takedown:{media_type}:{tmdb_id}:{quality_id}:{action}",
+        cooldown_sec=60,
+    )
+    return {"status": "success", "message": f"Takedown {action} applied."}
     
 # --- API Routes for Media Management ---
 
@@ -431,6 +528,7 @@ async def update_token_limits_api(token: str, payload: dict):
     try:
         daily_limit = payload.get("daily_limit_gb")
         monthly_limit = payload.get("monthly_limit_gb")
+        max_active_streams = payload.get("max_active_streams")
         
         def parse_limit(val):
             try:
@@ -442,7 +540,8 @@ async def update_token_limits_api(token: str, payload: dict):
         result = await db.update_api_token_limits(
             token,
             parse_limit(daily_limit),
-            parse_limit(monthly_limit)
+            parse_limit(monthly_limit),
+            max_active_streams=max_active_streams,
         )
         
         if result:

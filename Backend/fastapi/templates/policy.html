@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} - TG Stremio{% endblock %}
+
+{% block content %}
+<section class="max-w-4xl mx-auto glass-panel rounded-3xl p-6 sm:p-8 space-y-6">
+  <div>
+    <p class="text-sm text-primary font-bold uppercase tracking-[0.2em]">Private Beta</p>
+    <h1 class="text-3xl sm:text-4xl font-extrabold mt-2">{{ title }}</h1>
+    <p class="text-text-secondary mt-2">Version {{ terms_version }}</p>
+  </div>
+
+  {% if policy == "terms" %}
+  <div class="space-y-4 text-text-secondary leading-relaxed">
+    <p>This private beta provides access to a self-hosted Telegram-Stremio addon and related admin/support tooling.</p>
+    <p>You may use the service only with content you own, are authorized to access, or is otherwise lawful for you to stream.</p>
+    <p>Access is invite-only. Tokens are personal, may not be resold, and may be revoked for abuse, sharing, excessive load, payment issues, or policy violations.</p>
+    <p>The service is provided on a best-effort basis during beta. Streaming speed can vary by Telegram route, source file, client device, and VPS capacity.</p>
+  </div>
+  {% elif policy == "privacy" %}
+  <div class="space-y-4 text-text-secondary leading-relaxed">
+    <p>For troubleshooting and abuse prevention, the service stores full diagnostics during beta.</p>
+    <p>Diagnostics can include Telegram user ID/name, token name, watch requests, stream filename, source type, client IP/host, user-agent, byte range, errors, and usage counters.</p>
+    <p>Detailed stream/watch diagnostics are retained for the configured beta retention window. Billing/access audit records are retained longer for account and payment support.</p>
+    <p>Do not use the service if you do not want these diagnostics recorded.</p>
+  </div>
+  {% elif policy == "acceptable-use" %}
+  <div class="space-y-4 text-text-secondary leading-relaxed">
+    <p>Do not upload, index, request, or distribute content you are not allowed to access.</p>
+    <p>Do not share your addon token, bypass limits, scrape the service, attack the VPS, or use the system as a public proxy.</p>
+    <p>Do not add sources intended for abuse, malware, harassment, or illegal distribution.</p>
+    <p>Violations may lead to immediate token revocation without refund during beta.</p>
+  </div>
+  {% elif policy == "takedown" %}
+  <div class="space-y-4 text-text-secondary leading-relaxed">
+    <p>If a title or stream should be removed, contact the admin with the title, source message/link if known, and reason.</p>
+    <p>The admin can hide a stream immediately while reviewing the request, then remove the DB entry if required.</p>
+    <p>This addon does not host Telegram, torrent, or IPTV source services. Removing an addon entry does not remove content from the original source.</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

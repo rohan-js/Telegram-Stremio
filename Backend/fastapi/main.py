@@ -13,7 +13,8 @@ from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page, public_status_page, stremio_guide_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, vlc_redirect,
-    custom_catalogs_page, watch_requests_page, live_tv_page, settings_page, tools_page
+    custom_catalogs_page, watch_requests_page, live_tv_page, settings_page, tools_page,
+    launch_readiness_page, policy_page
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
@@ -42,7 +43,8 @@ from Backend.fastapi.routes.api_routes import (
     get_tools_channels_api, start_tools_scan_api, cancel_tools_scan_api,
     get_tools_scan_status_api, start_tools_dbcheck_api, cancel_tools_dbcheck_api,
     get_tools_dbcheck_status_api, purge_tools_dead_links_api,
-    get_warp_status_api, apply_warp_api
+    get_warp_status_api, apply_warp_api,
+    get_launch_readiness_api, run_backup_api, admin_takedown_api
 )
 
 app = FastAPI(
@@ -109,6 +111,22 @@ async def stremio_guide(request: Request):
 async def vlc(request: Request, token: str, id: str):
     return await vlc_redirect(request, token, id)
 
+@app.get("/terms", response_class=HTMLResponse)
+async def terms(request: Request):
+    return await policy_page(request, "terms")
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy(request: Request):
+    return await policy_page(request, "privacy")
+
+@app.get("/acceptable-use", response_class=HTMLResponse)
+async def acceptable_use(request: Request):
+    return await policy_page(request, "acceptable-use")
+
+@app.get("/takedown", response_class=HTMLResponse)
+async def takedown(request: Request):
+    return await policy_page(request, "takedown")
+
 # --- Protected Routes (Authentication Required) ---
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request, _: bool = Depends(require_auth)):
@@ -145,6 +163,10 @@ async def admin_settings(request: Request, _: bool = Depends(require_auth)):
 @app.get("/admin/tools", response_class=HTMLResponse)
 async def admin_tools(request: Request, _: bool = Depends(require_auth)):
     return await tools_page(request, _)
+
+@app.get("/admin/launch-readiness", response_class=HTMLResponse)
+async def admin_launch_readiness(request: Request, _: bool = Depends(require_auth)):
+    return await launch_readiness_page(request, _)
 
 @app.get("/media/edit", response_class=HTMLResponse)
 async def edit_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
@@ -306,6 +328,18 @@ async def admin_warp_status(_: bool = Depends(require_auth)):
 @app.post("/api/admin/warp/apply")
 async def admin_warp_apply(payload: dict, _: bool = Depends(require_auth)):
     return await apply_warp_api(payload)
+
+@app.get("/api/admin/launch-readiness")
+async def admin_launch_readiness_api(_: bool = Depends(require_auth)):
+    return await get_launch_readiness_api()
+
+@app.post("/api/admin/backup/run")
+async def admin_backup_run(payload: dict | None = None, _: bool = Depends(require_auth)):
+    return await run_backup_api(payload)
+
+@app.post("/api/admin/takedown")
+async def admin_takedown(payload: dict, _: bool = Depends(require_auth)):
+    return await admin_takedown_api(payload)
 
 @app.get("/api/system/workloads")
 async def get_workloads(_: bool = Depends(require_auth)):

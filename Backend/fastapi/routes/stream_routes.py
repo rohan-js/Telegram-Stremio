@@ -52,7 +52,7 @@ from Backend.pyrofork.bot import (
 )
 from Backend.config import Telegram
 from Backend.logger import LOGGER
-from Backend.fastapi.security.tokens import verify_token
+from Backend.fastapi.security.tokens import enforce_playback_token, verify_token
 import asyncio
 from pyrogram.file_id import FileId
 
@@ -486,6 +486,7 @@ async def downloaded_torrent_stream_handler(
     name: str,
     token_data: dict = Depends(verify_token),
 ):
+    enforce_playback_token(token_data)
     decoded = await decode_string(id)
     if decoded.get("source_type") != "downloaded_torrent":
         raise HTTPException(status_code=400, detail="Invalid downloaded stream id")
@@ -555,6 +556,7 @@ async def stream_handler(
     name: str,
     token_data: dict = Depends(verify_token),
 ):
+    enforce_playback_token(token_data)
     decoded = await decode_string(id)
     if decoded.get("parts"):
         return await virtual_media_streamer(
@@ -662,6 +664,8 @@ async def virtual_media_streamer(
         "title": final_title,
         "filename": file_name,
         "source_type": "telegram_split",
+        "token": token,
+        "token_user_id": token_data.get("user_id") if token_data else None,
         "split_parts": len(parts),
         "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
         "adaptive_prefetch": {
@@ -823,6 +827,8 @@ async def media_streamer(
         "title": final_title,
         "filename": file_name,
         "source_type": source_type,
+        "token": token,
+        "token_user_id": token_data.get("user_id") if token_data else None,
         "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
         "smart_routing": {
             "target_dc": real_dc,

@@ -17,6 +17,7 @@ from Backend.helper.modal import Episode, MovieSchema, QualityDetail, QualityPar
 from Backend.helper.task_manager import delete_message
 from Backend.helper.torrent_stats import scrape_torrent_trackers
 from Backend.helper.host_outbound import build_vps_outbound_sample
+from Backend.helper.beta_access import default_token_limits
 
 
 def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
@@ -669,13 +670,30 @@ class Database:
             upsert=True
         )
 
+    async def accept_terms(self, user_id: int, terms: dict, first_name: str = None, username: str = None):
+        update = {
+            "terms": terms,
+            "last_interaction": datetime.utcnow(),
+        }
+        if first_name is not None:
+            update["first_name"] = first_name
+        if username is not None:
+            update["username"] = username
+        await self.dbs["tracking"]["users"].update_one(
+            {"_id": int(user_id)},
+            {"$set": update},
+            upsert=True,
+        )
+
     async def set_pending_payment(self, user_id: int, plan_duration: int, msg_id: int, price=0, admin_messages: list = None):
+        now = datetime.utcnow()
         update_data = {
             "pending_payment": {
                 "duration": plan_duration,
                 "price": price,
                 "msg_id": msg_id,
-                "date": datetime.utcnow(),
+                "date": now,
+                "expires_at": now + timedelta(hours=24),
             }
         }
         if admin_messages is not None:
@@ -686,12 +704,13 @@ class Database:
             upsert=True
         )
 
-    async def approve_payment(self, user_id: int) -> Optional[dict]:
+    async def approve_payment(self, user_id: int, approved_by: int = None) -> Optional[dict]:
         user = await self.get_user(user_id)
         if not user or "pending_payment" not in user:
             return None
 
-        duration = user["pending_payment"]["duration"]
+        pending = user["pending_payment"]
+        duration = pending["duration"]
         
         # Calculate new expiry
         current_expiry = user.get("subscription_expiry")
@@ -706,18 +725,87 @@ class Database:
         await self.dbs["tracking"]["users"].update_one(
             {"_id": user_id},
             {
-                "$set": {"subscription_expiry": new_expiry, "subscription_status": "active"},
+                "$set": {
+                    "subscription_expiry": new_expiry,
+                    "subscription_status": "active",
+                    "last_payment_approved_at": now,
+                    "last_payment_approved_by": approved_by,
+                },
                 "$unset": {"pending_payment": ""}
+            }
+        )
+        await self.dbs["tracking"]["payment_audit"].insert_one(
+            {
+                "user_id": int(user_id),
+                "action": "approved",
+                "duration": duration,
+                "price": pending.get("price", 0),
+                "approved_by": approved_by,
+                "created_at": now,
+                "new_expiry": new_expiry,
             }
         )
         return await self.get_user(user_id)
 
-    async def reject_payment(self, user_id: int) -> bool:
+    async def reject_payment(self, user_id: int, rejected_by: int = None, reason: str = None) -> bool:
+        user = await self.get_user(user_id)
+        pending = (user or {}).get("pending_payment") or {}
+        now = datetime.utcnow()
         result = await self.dbs["tracking"]["users"].update_one(
             {"_id": user_id},
-            {"$unset": {"pending_payment": ""}}
+            {
+                "$set": {
+                    "last_payment_rejected_at": now,
+                    "last_payment_rejected_by": rejected_by,
+                    "last_payment_rejected_reason": reason or "",
+                },
+                "$unset": {"pending_payment": ""},
+            }
         )
+        if result.modified_count > 0:
+            await self.dbs["tracking"]["payment_audit"].insert_one(
+                {
+                    "user_id": int(user_id),
+                    "action": "rejected",
+                    "duration": pending.get("duration"),
+                    "price": pending.get("price", 0),
+                    "rejected_by": rejected_by,
+                    "reason": reason or "",
+                    "created_at": now,
+                }
+            )
         return result.modified_count > 0
+
+    async def expire_pending_payments(self) -> int:
+        now = datetime.utcnow()
+        cursor = self.dbs["tracking"]["users"].find(
+            {"pending_payment.expires_at": {"$lt": now}},
+            {"_id": 1, "pending_payment": 1},
+        )
+        expired = await cursor.to_list(None)
+        if not expired:
+            return 0
+        result = await self.dbs["tracking"]["users"].update_many(
+            {"pending_payment.expires_at": {"$lt": now}},
+            {
+                "$set": {"last_payment_expired_at": now},
+                "$unset": {"pending_payment": ""},
+            },
+        )
+        if expired:
+            await self.dbs["tracking"]["payment_audit"].insert_many(
+                [
+                    {
+                        "user_id": int(item["_id"]),
+                        "action": "expired",
+                        "duration": (item.get("pending_payment") or {}).get("duration"),
+                        "price": (item.get("pending_payment") or {}).get("price", 0),
+                        "created_at": now,
+                    }
+                    for item in expired
+                ]
+            )
+        return int(result.modified_count or 0)
 
     async def get_expired_users(self) -> List[dict]:
         cursor = self.dbs["tracking"]["users"].find({
@@ -2206,6 +2294,9 @@ class Database:
 
         alphabet = string.ascii_letters + string.digits
         token = ''.join(secrets.choice(alphabet) for _ in range(32))
+        default_daily, default_monthly, default_active = default_token_limits()
+        daily_limit_gb = default_daily if daily_limit_gb is None else daily_limit_gb
+        monthly_limit_gb = default_monthly if monthly_limit_gb is None else monthly_limit_gb
         
         token_doc = {
             "name": name,
@@ -2214,7 +2305,8 @@ class Database:
             "created_at": datetime.utcnow(),
             "limits": {
                 "daily_limit_gb": daily_limit_gb if daily_limit_gb else 0,
-                "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0
+                "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0,
+                "max_active_streams": default_active,
             },
             "usage": {
                 "total_bytes": 0,
@@ -2228,6 +2320,10 @@ class Database:
 
     async def get_api_token(self, token: str) -> Optional[dict]:
         doc = await self.dbs["tracking"]["api_tokens"].find_one({"token": token})
+        return convert_objectid_to_str(doc) if doc else None
+
+    async def get_api_token_by_user(self, user_id: int) -> Optional[dict]:
+        doc = await self.dbs["tracking"]["api_tokens"].find_one({"user_id": int(user_id)})
         return convert_objectid_to_str(doc) if doc else None
 
     async def get_all_api_tokens(self) -> List[dict]:
@@ -2387,13 +2483,25 @@ class Database:
                     doc[key] = doc[key].isoformat()
         return [convert_objectid_to_str(doc) for doc in docs]
 
-    async def update_api_token_limits(self, token: str, daily_limit_gb: float, monthly_limit_gb: float) -> bool:
+    async def update_api_token_limits(self, token: str, daily_limit_gb: float, monthly_limit_gb: float, max_active_streams: int = None) -> bool:
+        existing = await self.dbs["tracking"]["api_tokens"].find_one({"token": token}) or {}
+        existing_limits = existing.get("limits") or {}
+        _, _, default_active = default_token_limits()
+        try:
+            parsed_active = int(max_active_streams) if max_active_streams is not None else None
+        except (TypeError, ValueError):
+            parsed_active = None
         result = await self.dbs["tracking"]["api_tokens"].update_one(
             {"token": token},
             {"$set": {
                 "limits": {
                     "daily_limit_gb": daily_limit_gb if daily_limit_gb else 0,
-                    "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0
+                    "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0,
+                    "max_active_streams": (
+                        parsed_active
+                        if parsed_active is not None and parsed_active > 0
+                        else int(existing_limits.get("max_active_streams") or default_active)
+                    ),
                 }
             }}
         )

@@ -4,14 +4,55 @@ from Backend.config import Telegram
 from Backend import db
 from datetime import datetime, timedelta
 import asyncio
+from Backend.helper.beta_access import accepted_terms, is_beta_invited, terms_keyboard, terms_links_text, terms_record, waitlist_message
 
 from bson.objectid import ObjectId
+
+
+@Client.on_callback_query(filters.regex(r"^accept_terms$"))
+async def accept_terms_handler(client: Client, callback_query: CallbackQuery):
+    user = callback_query.from_user
+    if not user:
+        return await callback_query.answer("Could not identify this user.", show_alert=True)
+    if not is_beta_invited(user.id):
+        return await callback_query.answer(waitlist_message(), show_alert=True)
+    await db.accept_terms(
+        user.id,
+        terms_record(user.id),
+        first_name=user.first_name,
+        username=user.username,
+    )
+    await callback_query.answer("Terms accepted. Use /start to continue.", show_alert=True)
+    try:
+        await callback_query.message.edit_text(
+            "✅ <b>Terms accepted.</b>\n\nUse /start to continue.",
+        )
+    except Exception:
+        pass
+
 
 @Client.on_callback_query(filters.regex(r"^plan_([a-fA-F0-9]{24})$"))
 async def plan_selection(client: Client, callback_query: CallbackQuery):
     if not Telegram.SUBSCRIPTION:
         return await callback_query.answer("Subscriptions are not enabled.", show_alert=True)
         
+    user_id = callback_query.from_user.id if callback_query.from_user else callback_query.message.chat.id
+    if not is_beta_invited(user_id):
+        return await callback_query.answer(waitlist_message(), show_alert=True)
+
+    user = await db.get_user(user_id)
+    if not accepted_terms(user):
+        try:
+            await callback_query.message.reply_text(
+                "📜 <b>Terms acceptance required</b>\n\n"
+                f"{terms_links_text()}\n\n"
+                "Tap <b>I Accept</b> after reading them, then choose your plan again.",
+                reply_markup=terms_keyboard(),
+            )
+        except Exception:
+            pass
+        return await callback_query.answer("Please accept the terms first.", show_alert=True)
+
     plan_id = callback_query.matches[0].group(1)
     
     plans = await db.get_subscription_plans()
@@ -23,7 +64,6 @@ async def plan_selection(client: Client, callback_query: CallbackQuery):
     duration = plan["days"]
     await callback_query.answer()
     
-    user_id = callback_query.from_user.id if callback_query.from_user else callback_query.message.chat.id
     first_name = callback_query.from_user.first_name if callback_query.from_user else callback_query.message.chat.title
     username = callback_query.from_user.username if callback_query.from_user else callback_query.message.chat.username
 
@@ -125,6 +165,7 @@ async def handle_payment_screenshot(client: Client, message: Message):
              or message.chat.id
 
     try:
+        await db.expire_pending_payments()
         print(f"DEBUG: handle_payment_screenshot triggered by {sender_id}")
         # Check if user has a pending payment request
         user = await db.get_user(sender_id)
@@ -219,7 +260,7 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
     admin_messages = user_pre["pending_payment"].get("admin_messages", [])
 
     if action == "approve":
-        user_data = await db.approve_payment(target_user_id)
+        user_data = await db.approve_payment(target_user_id, approved_by=acting_admin.id)
         if user_data:
             # Generate or retrieve existing API token for this user
             try:
@@ -300,7 +341,7 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
             await callback_query.answer("Could not approve — no pending payment found.", show_alert=True)
 
     elif action == "reject":
-        success = await db.reject_payment(target_user_id)
+        success = await db.reject_payment(target_user_id, rejected_by=acting_admin.id)
         if success:
             await client.send_message(
                 target_user_id,

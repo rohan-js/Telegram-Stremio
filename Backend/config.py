@@ -192,6 +192,66 @@ class Telegram:
     ADMIN_USERNAME = getenv("ADMIN_USERNAME", "fyvio")
     ADMIN_PASSWORD = getenv("ADMIN_PASSWORD", "fyvio")
     DEFAULT_ADDON_TOKEN = getenv("DEFAULT_ADDON_TOKEN", "").strip()
+
+    PUBLIC_BETA_ENABLED = getenv("PUBLIC_BETA_ENABLED", "false").lower() == "true"
+    BETA_INVITE_ONLY = getenv("BETA_INVITE_ONLY", "true").lower() == "true"
+    BETA_ALLOWED_USER_IDS = [
+        int(x.strip())
+        for x in (getenv("BETA_ALLOWED_USER_IDS") or "").split(",")
+        if x.strip().lstrip("-").isdigit()
+    ]
+    BETA_EXEMPT_USER_IDS = [
+        int(x.strip())
+        for x in (getenv("BETA_EXEMPT_USER_IDS") or "").split(",")
+        if x.strip().lstrip("-").isdigit()
+    ]
+    BETA_EXEMPT_TOKEN_NAMES = [
+        x.strip()
+        for x in getenv("BETA_EXEMPT_TOKEN_NAMES", "autotest-temp").split(",")
+        if x.strip()
+    ]
+    BETA_EXEMPT_TOKENS = [
+        x.strip()
+        for x in (getenv("BETA_EXEMPT_TOKENS") or "").split(",")
+        if x.strip()
+    ]
+    BETA_WAITLIST_MESSAGE = getenv(
+        "BETA_WAITLIST_MESSAGE",
+        "This private beta is invite-only right now. Please contact the admin for access.",
+    )
+    REQUIRE_TERMS_ACCEPTANCE = getenv("REQUIRE_TERMS_ACCEPTANCE", "true").lower() == "true"
+    TERMS_VERSION = getenv("TERMS_VERSION", "2026-07-07").strip()
+    try:
+        DEFAULT_TOKEN_DAILY_LIMIT_GB = float(getenv("DEFAULT_TOKEN_DAILY_LIMIT_GB", "25") or 25)
+    except Exception:
+        DEFAULT_TOKEN_DAILY_LIMIT_GB = 25.0
+    try:
+        DEFAULT_TOKEN_MONTHLY_LIMIT_GB = float(getenv("DEFAULT_TOKEN_MONTHLY_LIMIT_GB", "300") or 300)
+    except Exception:
+        DEFAULT_TOKEN_MONTHLY_LIMIT_GB = 300.0
+    try:
+        DEFAULT_TOKEN_MAX_ACTIVE_STREAMS = int(getenv("DEFAULT_TOKEN_MAX_ACTIVE_STREAMS", "2") or 2)
+    except Exception:
+        DEFAULT_TOKEN_MAX_ACTIVE_STREAMS = 2
+    try:
+        MAX_ACTIVE_STREAMS_GLOBAL = int(getenv("MAX_ACTIVE_STREAMS_GLOBAL", "4") or 4)
+    except Exception:
+        MAX_ACTIVE_STREAMS_GLOBAL = 4
+    try:
+        STREAM_LOG_RETENTION_DAYS = int(getenv("STREAM_LOG_RETENTION_DAYS", "30") or 30)
+    except Exception:
+        STREAM_LOG_RETENTION_DAYS = 30
+    try:
+        BILLING_LOG_RETENTION_DAYS = int(getenv("BILLING_LOG_RETENTION_DAYS", "180") or 180)
+    except Exception:
+        BILLING_LOG_RETENTION_DAYS = 180
+    OWNER_ALERTS_ENABLED = getenv("OWNER_ALERTS_ENABLED", "true").lower() == "true"
+    BACKUP_ENABLED = getenv("BACKUP_ENABLED", "true").lower() == "true"
+    BACKUP_DIR = getenv("BACKUP_DIR", "backups/production").strip() or "backups/production"
+    try:
+        BACKUP_INTERVAL_HOURS = max(1, int(getenv("BACKUP_INTERVAL_HOURS", "24") or 24))
+    except Exception:
+        BACKUP_INTERVAL_HOURS = 24
     
     SUBSCRIPTION = getenv("SUBSCRIPTION", "false").lower() == "true"
     SUBSCRIPTION_GROUP_ID = int(getenv("SUBSCRIPTION_GROUP_ID", "0"))

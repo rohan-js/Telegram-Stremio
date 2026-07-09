@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Launch Readiness - TG Stremio{% endblock %}
+
+{% block content %}
+<section class="space-y-6">
+  <div class="glass-panel rounded-3xl p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div>
+      <p class="text-sm text-primary font-bold uppercase tracking-[0.2em]">Private Beta</p>
+      <h1 class="text-3xl font-extrabold mt-2">Launch Readiness</h1>
+      <p class="text-text-secondary mt-2">Operational checks for invite-only paid beta using the existing access-token system.</p>
+    </div>
+    <div class="flex gap-3">
+      <button onclick="loadReadiness()" class="px-4 py-2 rounded-full bg-primary text-background font-bold hover:opacity-90">
+        <i class="fa-solid fa-rotate-right mr-2"></i>Refresh
+      </button>
+      <button onclick="runBackup()" class="px-4 py-2 rounded-full bg-white/10 border border-border font-bold hover:bg-white/15">
+        <i class="fa-solid fa-database mr-2"></i>Run Backup
+      </button>
+    </div>
+  </div>
+
+  <div id="warnings" class="hidden glass-panel rounded-3xl p-5 border-red-500/30"></div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4" id="cards"></div>
+
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+    <div class="glass-panel rounded-3xl p-6">
+      <h2 class="text-xl font-extrabold mb-4">Backup Status</h2>
+      <div id="backup" class="text-sm text-text-secondary space-y-2">Loading...</div>
+    </div>
+
+    <div class="glass-panel rounded-3xl p-6">
+      <h2 class="text-xl font-extrabold mb-4">Quick Takedown</h2>
+      <p class="text-sm text-text-secondary mb-4">Hide a single stream quality immediately while you review a request. Delete is available for confirmed removals.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <select id="td-media-type" class="bg-background border border-border rounded-xl px-3 py-2">
+          <option value="movie">Movie</option>
+          <option value="tv">TV</option>
+        </select>
+        <select id="td-action" class="bg-background border border-border rounded-xl px-3 py-2">
+          <option value="hide">Hide from Stremio</option>
+          <option value="delete">Delete quality</option>
+        </select>
+        <input id="td-tmdb" class="bg-background border border-border rounded-xl px-3 py-2" placeholder="TMDb ID">
+        <input id="td-db" class="bg-background border border-border rounded-xl px-3 py-2" placeholder="DB index">
+        <input id="td-quality" class="sm:col-span-2 bg-background border border-border rounded-xl px-3 py-2" placeholder="Quality ID">
+        <input id="td-season" class="bg-background border border-border rounded-xl px-3 py-2" placeholder="Season (TV only)">
+        <input id="td-episode" class="bg-background border border-border rounded-xl px-3 py-2" placeholder="Episode (TV only)">
+        <input id="td-reason" class="sm:col-span-2 bg-background border border-border rounded-xl px-3 py-2" placeholder="Reason / note">
+      </div>
+      <button onclick="applyTakedown()" class="mt-4 px-4 py-2 rounded-full bg-red-500/90 text-white font-bold hover:bg-red-500">
+        <i class="fa-solid fa-eye-slash mr-2"></i>Apply Takedown
+      </button>
+    </div>
+  </div>
+</section>
+
+<script>
+function fmt(value, suffix = '') {
+  if (value === null || value === undefined || value === '') return 'n/a';
+  return `${value}${suffix}`;
+}
+
+function card(title, value, detail, icon, tone = 'primary') {
+  const color = tone === 'accent' ? 'var(--accent)' : 'var(--primary)';
+  return `
+    <div class="glass-panel rounded-3xl p-5">
+      <div class="flex items-center justify-between gap-3">
+        <div class="w-10 h-10 rounded-full flex items-center justify-center" style="background: color-mix(in srgb, ${color} 18%, transparent); color: ${color};">
+          <i class="fa-solid ${icon}"></i>
+        </div>
+        <span class="text-xs uppercase tracking-[0.18em] text-text-secondary">${escapeHtml(title)}</span>
+      </div>
+      <div class="mt-4 text-2xl font-extrabold">${escapeHtml(value)}</div>
+      <div class="mt-1 text-sm text-text-secondary">${escapeHtml(detail || '')}</div>
+    </div>
+  `;
+}
+
+async function loadReadiness() {
+  const cards = document.getElementById('cards');
+  cards.innerHTML = '<div class="text-text-secondary">Loading...</div>';
+  try {
+    const res = await fetch('/api/admin/launch-readiness');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Readiness check failed');
+    const checks = data.checks || {};
+    cards.innerHTML = [
+      card('Status', data.status || 'unknown', `generated ${new Date(data.generated_at).toLocaleString()}`, 'fa-circle-check', data.status === 'ready' ? 'primary' : 'accent'),
+      card('Tokens', fmt(checks.api_tokens), `global active limit ${fmt(checks.global_stream_limit)}`, 'fa-key'),
+      card('Streams', fmt(checks.active_streams), 'currently active', 'fa-tower-broadcast'),
+      card('Memory', fmt(checks.memory_available_mb, ' MB'), `swap free ${fmt(checks.swap_free_mb, ' MB')}`, 'fa-memory'),
+      card('Disk', fmt(checks.disk_free_gb, ' GB'), 'free space', 'fa-hard-drive'),
+      card('Subscription', checks.subscription_enabled ? 'Enabled' : 'Disabled', checks.public_beta_enabled ? 'public beta mode on' : 'public beta mode off', 'fa-credit-card'),
+      card('Invites', fmt(checks.invited_users), checks.invite_only ? 'invite-only' : 'open access', 'fa-user-check'),
+      card('WARP', (checks.warp || {}).mode || 'unknown', (checks.warp || {}).enabled ? 'Telegram proxy enabled' : 'direct route', 'fa-route')
+    ].join('');
+
+    const warnings = document.getElementById('warnings');
+    if ((data.warnings || []).length) {
+      warnings.classList.remove('hidden');
+      warnings.innerHTML = `
+        <h2 class="text-lg font-extrabold text-red-300 mb-2"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Needs Attention</h2>
+        <ul class="list-disc ml-5 text-sm text-text-secondary space-y-1">
+          ${(data.warnings || []).map(w => `<li>${escapeHtml(w)}</li>`).join('')}
+        </ul>`;
+    } else {
+      warnings.classList.add('hidden');
+    }
+
+    const backup = data.backup || {};
+    document.getElementById('backup').innerHTML = `
+      <div><b class="text-text">Status:</b> ${backup.ok ? 'OK' : 'No successful backup recorded'}</div>
+      <div><b class="text-text">Last run:</b> ${backup.finished_at ? new Date(backup.finished_at).toLocaleString() : 'n/a'}</div>
+      <div><b class="text-text">Path:</b> ${escapeHtml(backup.path || 'n/a')}</div>
+      <div><b class="text-text">Size:</b> ${backup.size_bytes ? Math.round(backup.size_bytes / 1024) + ' KB' : 'n/a'}</div>
+    `;
+  } catch (err) {
+    cards.innerHTML = `<div class="text-red-300">${escapeHtml(err.message)}</div>`;
+    showToast(err.message, 'error', 'Launch');
+  }
+}
+
+async function runBackup() {
+  try {
+    const res = await fetch('/api/admin/backup/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reason: 'manual'})
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Backup failed');
+    showToast('Backup completed.', 'success', 'Backup');
+    await loadReadiness();
+  } catch (err) {
+    showToast(err.message, 'error', 'Backup');
+  }
+}
+
+async function applyTakedown() {
+  const payload = {
+    media_type: document.getElementById('td-media-type').value,
+    action: document.getElementById('td-action').value,
+    tmdb_id: document.getElementById('td-tmdb').value,
+    db_index: document.getElementById('td-db').value,
+    quality_id: document.getElementById('td-quality').value,
+    season: document.getElementById('td-season').value || null,
+    episode: document.getElementById('td-episode').value || null,
+    reason: document.getElementById('td-reason').value || 'Takedown/admin review'
+  };
+  try {
+    const res = await fetch('/api/admin/takedown', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Takedown failed');
+    showToast(data.message || 'Takedown applied.', 'success', 'Takedown');
+  } catch (err) {
+    showToast(err.message, 'error', 'Takedown');
+  }
+}
+
+loadReadiness();
+</script>
+{% endblock %}
