@@ -87,6 +87,7 @@ class Telegram:
         SMART_ROUTING_CHUNK_TIMEOUT_SEC = 15.0
 
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
+    MANUAL_CHANNELS = [channel.strip() for channel in (getenv("MANUAL_CHANNELS") or "").split(",") if channel.strip()]
     ANIME_CHANNELS = [channel.strip() for channel in (getenv("ANIME_CHANNELS") or "").split(",") if channel.strip()]
     GLOBAL_SEARCH = getenv("GLOBAL_SEARCH", "false").lower() == "true"
     GLOBAL_SEARCH_CHANNELS = [channel.strip() for channel in (getenv("GLOBAL_SEARCH_CHANNELS") or "").split(",") if channel.strip()]

@@ -13,7 +13,10 @@ from Backend.config import Telegram
 from Backend.helper.encrypt import encode_string
 from Backend.helper.metadata import metadata, extract_default_id, pop_match_failure
 from Backend.helper.pyro import clean_filename, finalize_media_name, get_readable_file_size, remove_urls
-from Backend.helper.split_files import VIDEO_EXTENSIONS as MEDIA_VIDEO_EXTENSIONS
+from Backend.helper.split_files import VIDEO_EXTENSIONS as MEDIA_VIDEO_EXTENSIONS, parse_split_info
+from Backend.helper.manual_add import resolve_telegram_message
+from Backend.helper.manual_session import manual_session_manager
+from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.task_manager import edit_message
 from Backend.helper.torrent_source import (
     TorrentItem,
@@ -205,12 +208,15 @@ async def _send_metadata_failed_reply(job: dict, reason: str) -> None:
 
 
 async def _metadata_for_job(job: dict) -> dict | None:
+    if job.get("metadata_info"):
+        return dict(job["metadata_info"])
     title = job.get("title") or job.get("file_name") or "unknown"
     return await metadata(
         clean_filename(title),
         int(job["channel"]),
         int(job["msg_id"]),
         override_id=job.get("override_id"),
+        season_hint=job.get("season_hint"),
     )
 
 
@@ -501,9 +507,100 @@ def _is_video_document(message: Message) -> bool:
     return bool(
         message.document and (
             (message.document.mime_type and message.document.mime_type.startswith("video/")) or
-            (message.document.file_name and message.document.file_name.lower().endswith(VIDEO_EXTENSIONS))
+            (message.document.file_name and message.document.file_name.lower().endswith(VIDEO_EXTENSIONS)) or
+            parse_split_info(message.caption or message.document.file_name or "")
         )
     )
+
+
+def _manual_channel(chat_id: int) -> bool:
+    normalized = str(chat_id).replace("-100", "")
+    return normalized in {
+        str(channel).strip().replace("-100", "")
+        for channel in SettingsManager.current().manual_channels
+    }
+
+
+def _metadata_base_from_document(document: dict) -> dict:
+    return {
+        "tmdb_id": document.get("tmdb_id"),
+        "imdb_id": document.get("imdb_id"),
+        "title": document.get("title") or "",
+        "year": document.get("release_year") or 0,
+        "rate": document.get("rating") or 0,
+        "description": document.get("description") or "",
+        "poster": document.get("poster") or "",
+        "backdrop": document.get("backdrop") or "",
+        "logo": document.get("logo") or "",
+        "genres": document.get("genres") or [],
+        "cast": document.get("cast") or [],
+        "runtime": str(document.get("runtime") or ""),
+        "original_language": document.get("original_language"),
+        "origin_country": document.get("origin_country") or [],
+    }
+
+
+async def _enqueue_personal_session(client: Client, message: Message, session: dict) -> None:
+    resolved = await resolve_telegram_message(
+        client,
+        chat_id=str(message.chat.id).replace("-100", ""),
+        msg_id=message.id,
+    )
+    document = await db.get_document(
+        session["media_type"],
+        int(session["tmdb_id"]),
+        int(session["db_index"]),
+    )
+    if not document:
+        raise ValueError("The active Manual Upload Session title no longer exists.")
+
+    quality = resolved.get("quality") or session.get("quality") or "HD"
+    split_key = resolved.get("split_key")
+    metadata_info = _metadata_base_from_document(document)
+    metadata_info.update({
+        "media_type": session["media_type"],
+        "quality": quality,
+        "encoded_string": await encode_string({
+            "chat_id": int(resolved["chat_id"]),
+            "msg_id": int(resolved["msg_id"]),
+        }),
+        "group_key": f"manual:{resolved['chat_id']}:{quality}:{split_key}" if split_key else None,
+        "part_number": resolved.get("part_number"),
+        "is_anime": bool(document.get("is_anime")),
+    })
+
+    if session["media_type"] == "tv":
+        season_number = int(session["season"])
+        episode_number = await manual_session_manager.assign_episode(
+            document,
+            season_number,
+            explicit_episode=session.get("episode"),
+            split_key=split_key,
+        )
+        metadata_info.update({
+            "season_number": season_number,
+            "episode_number": episode_number,
+            "episode_title": f"S{season_number:02d}E{episode_number:02d}",
+            "episode_backdrop": metadata_info.get("backdrop") or "",
+            "episode_overview": "",
+            "episode_released": "",
+        })
+
+    await _enqueue_ingest_job(message, {
+        "source_type": "telegram",
+        "source_key": f"telegram:{message.chat.id}:{message.id}",
+        "channel": int(resolved["chat_id"]),
+        "chat_id": int(message.chat.id),
+        "msg_id": int(message.id),
+        "original_msg_id": int(message.id),
+        "title": resolved["name"],
+        "file_name": resolved["name"],
+        "display_name": resolved["name"],
+        "size": resolved["size"],
+        "file_size": int(resolved.get("raw_size") or 0),
+        "metadata_info": metadata_info,
+        "message": message,
+    })
 
 
 def _is_torrent_document(message: Message) -> bool:
@@ -695,7 +792,8 @@ async def _handle_torrent_message(client: Client, message: Message) -> bool:
 
 @Client.on_message(filters.channel & (filters.document | filters.video | filters.text))
 async def file_receive_handler(client: Client, message: Message):
-    if str(message.chat.id) in Telegram.AUTH_CHANNEL:
+    is_manual = _manual_channel(message.chat.id)
+    if str(message.chat.id) in Telegram.AUTH_CHANNEL or is_manual:
         try:
             if _is_subtitle_document(message):
                 name = message.document.file_name or message.caption or "subtitle.srt"
@@ -713,6 +811,17 @@ async def file_receive_handler(client: Client, message: Message):
 
             is_video_doc = _is_video_document(message)
             if message.video or is_video_doc:
+                manual_session = manual_session_manager.current() if is_manual else None
+                if is_manual and not manual_session:
+                    await message.reply_text(
+                        "No Manual Upload Session is active. Start one from Admin → Tools, then resend the file.",
+                        quote=True,
+                    )
+                    return
+                if manual_session and manual_session.get("kind") == "personal":
+                    await _enqueue_personal_session(client, message, manual_session)
+                    return
+
                 file = message.video or message.document
                 file_name = getattr(file, "file_name", None) or ""
                 if file_name and file_name.lower().endswith(VIDEO_EXTENSIONS):
@@ -759,7 +868,12 @@ async def file_receive_handler(client: Client, message: Message):
                     "display_name": title,
                     "size": size,
                     "file_size": int(getattr(file, "file_size", 0) or 0),
-                    "override_id": extract_default_id(message.caption) if message.caption else None,
+                    "override_id": (
+                        manual_session.get("default_id")
+                        if manual_session and manual_session.get("kind") == "real"
+                        else extract_default_id(message.caption) if message.caption else None
+                    ),
+                    "season_hint": manual_session.get("season") if manual_session else None,
                     "message": message,
                 })
             else:

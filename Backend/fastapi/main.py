@@ -30,6 +30,7 @@ from Backend.fastapi.routes.api_routes import (
     get_all_tokens_api, assign_plan_api, link_token_user_api,
     search_media_rescan_api, apply_media_rescan_api,
     resolve_telegram_api, manual_add_media_api,
+    search_manual_add_metadata_api, resolve_manual_add_metadata_api, get_manual_add_catalogs_api,
     list_custom_catalogs_api, create_custom_catalog_api, update_custom_catalog_api,
     delete_custom_catalog_api, get_custom_catalog_items_api, search_catalog_media_api,
     add_custom_catalog_item_api, remove_custom_catalog_item_api,
@@ -43,6 +44,8 @@ from Backend.fastapi.routes.api_routes import (
     get_tools_channels_api, start_tools_scan_api, cancel_tools_scan_api,
     get_tools_scan_status_api, start_tools_dbcheck_api, cancel_tools_dbcheck_api,
     get_tools_dbcheck_status_api, purge_tools_dead_links_api,
+    get_manual_session_api, search_manual_session_api,
+    set_manual_session_api, clear_manual_session_api,
     get_warp_status_api, apply_warp_api,
     get_launch_readiness_api, run_backup_api, admin_takedown_api,
     request_search_api, request_popular_api, request_submit_api,
@@ -187,6 +190,22 @@ async def admin_settings(request: Request, _: bool = Depends(require_auth)):
 async def admin_tools(request: Request, _: bool = Depends(require_auth)):
     return await tools_page(request, _)
 
+@app.get("/api/admin/tools/manual-session")
+async def get_manual_session(_: bool = Depends(require_auth)):
+    return await get_manual_session_api()
+
+@app.get("/api/admin/tools/manual-session/search")
+async def search_manual_session(query: str = Query("", max_length=160), _: bool = Depends(require_auth)):
+    return await search_manual_session_api(query)
+
+@app.post("/api/admin/tools/manual-session")
+async def set_manual_session(payload: dict, _: bool = Depends(require_auth)):
+    return await set_manual_session_api(payload)
+
+@app.delete("/api/admin/tools/manual-session")
+async def clear_manual_session(_: bool = Depends(require_auth)):
+    return await clear_manual_session_api()
+
 @app.get("/admin/launch-readiness", response_class=HTMLResponse)
 async def admin_launch_readiness(request: Request, _: bool = Depends(require_auth)):
     return await launch_readiness_page(request, _)
@@ -243,6 +262,27 @@ async def resolve_telegram_message_route(payload: dict, _: bool = Depends(requir
 @app.post("/api/media/manual-add")
 async def manual_add_media_route(payload: dict, _: bool = Depends(require_auth)):
     return await manual_add_media_api(payload)
+
+@app.get("/api/media/manual-add/search")
+async def search_manual_add_metadata(
+    media_type: str = Query(..., regex="^(movie|tv)$"),
+    query: str = Query(..., min_length=1, max_length=160),
+    year: int | None = Query(None),
+    _: bool = Depends(require_auth),
+):
+    return await search_manual_add_metadata_api(media_type, query, year)
+
+@app.get("/api/media/manual-add/metadata")
+async def resolve_manual_add_metadata(
+    media_type: str = Query(..., regex="^(movie|tv)$"),
+    selected_id: str = Query(..., min_length=1, max_length=80),
+    _: bool = Depends(require_auth),
+):
+    return await resolve_manual_add_metadata_api(media_type, selected_id)
+
+@app.get("/api/media/manual-add/catalogs")
+async def get_manual_add_catalogs(_: bool = Depends(require_auth)):
+    return await get_manual_add_catalogs_api()
 
 @app.delete("/api/media/delete-quality")
 async def delete_movie_quality(tmdb_id: int, db_index: int, id: str, _: bool = Depends(require_auth)):

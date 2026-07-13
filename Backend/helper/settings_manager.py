@@ -11,6 +11,7 @@ DEFAULTS: Dict[str, Any] = {
     "replace_mode": True,
     "hide_catalog": False,
     "auth_channels": [],
+    "manual_channels": [],
     "admin_username": "",
     "admin_password": "",
     "session_secret": "",
@@ -39,6 +40,7 @@ def _seed_from_env() -> Dict[str, Any]:
             "replace_mode": bool(Telegram.REPLACE_MODE),
             "hide_catalog": bool(Telegram.HIDE_CATALOG),
             "auth_channels": list(Telegram.AUTH_CHANNEL),
+            "manual_channels": list(getattr(Telegram, "MANUAL_CHANNELS", []) or []),
             "admin_username": Telegram.ADMIN_USERNAME,
             "admin_password": hash_password(Telegram.ADMIN_PASSWORD),
             "session_secret": Telegram.SESSION_SECRET,
@@ -83,6 +85,10 @@ class Settings:
     @property
     def auth_channels(self) -> List[str]:
         return [str(x).strip() for x in (self._data.get("auth_channels") or []) if str(x).strip()]
+
+    @property
+    def manual_channels(self) -> List[str]:
+        return [str(x).strip() for x in (self._data.get("manual_channels") or []) if str(x).strip()]
 
     @property
     def anime_channels(self) -> List[str]:
@@ -164,6 +170,7 @@ class SettingsManager:
         Telegram.ADMIN_USERNAME = str(data.get("admin_username") or Telegram.ADMIN_USERNAME)
         Telegram.SESSION_SECRET = str(data.get("session_secret") or Telegram.SESSION_SECRET)
         Telegram.AUTH_CHANNEL = [str(x).strip() for x in (data.get("auth_channels") or []) if str(x).strip()]
+        Telegram.MANUAL_CHANNELS = [str(x).strip() for x in (data.get("manual_channels") or []) if str(x).strip()]
         Telegram.SUBSCRIPTION = bool(data.get("subscription", Telegram.SUBSCRIPTION))
         Telegram.SUBSCRIPTION_GROUP_ID = int(data.get("subscription_group_id") or 0)
         Telegram.APPROVER_IDS = [int(x) for x in (data.get("approver_ids") or []) if str(x).strip().lstrip("-").isdigit()]
@@ -197,7 +204,7 @@ class SettingsManager:
                 incoming.pop("session_secret", None)
         merged.update(incoming)
 
-        for key in ("auth_channels", "anime_channels", "global_search_channels"):
+        for key in ("auth_channels", "manual_channels", "anime_channels", "global_search_channels"):
             merged[key] = [str(x).strip() for x in (merged.get(key) or []) if str(x).strip()]
         merged["approver_ids"] = [
             int(x) for x in (merged.get("approver_ids") or [])

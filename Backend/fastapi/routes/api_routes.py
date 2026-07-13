@@ -20,6 +20,7 @@ from Backend.helper.auto_catalog import (
 )
 from Backend.helper.encrypt import encode_string
 from Backend.helper.manual_add import resolve_telegram_message
+from Backend.helper.manual_session import is_personal_media, manual_session_manager
 from Backend.helper.iptv import (
     get_iptv_settings,
     get_iptv_sync_status,
@@ -46,6 +47,7 @@ from Backend.helper.requests_manager import (
     submit_request,
 )
 from Backend.helper.metadata import (
+    extract_default_id,
     fetch_selected_movie_metadata,
     fetch_selected_tv_metadata,
     search_movie_candidates,
@@ -282,6 +284,142 @@ async def get_tools_channels_api():
     return {
         "channels": [{"id": channel, "label": str(channel)} for channel in Telegram.AUTH_CHANNEL],
     }
+
+
+def _manual_session_result(document: dict) -> dict:
+    media_type = "tv" if str(document.get("media_type") or document.get("type")).lower() in {"tv", "series"} else "movie"
+    return {
+        "tmdb_id": document.get("tmdb_id"),
+        "db_index": document.get("db_index"),
+        "media_type": media_type,
+        "title": document.get("title") or "",
+        "year": document.get("release_year") or "",
+        "poster": document.get("poster") or "",
+        "imdb_id": document.get("imdb_id") or "",
+        "is_personal": is_personal_media(document.get("tmdb_id")),
+    }
+
+
+async def search_manual_session_api(query: str) -> dict:
+    query = (query or "").strip()
+    if not query:
+        return {"results": []}
+
+    results, seen = [], set()
+
+    def add(document: dict, *, db_index: int | None = None, media_type: str | None = None) -> None:
+        item = dict(document)
+        if db_index is not None:
+            item["db_index"] = db_index
+        if media_type is not None:
+            item["media_type"] = media_type
+        entry = _manual_session_result(item)
+        key = (entry["tmdb_id"], entry["db_index"], entry["media_type"])
+        if entry["tmdb_id"] is None or key in seen:
+            return
+        seen.add(key)
+        results.append(entry)
+
+    selected_id = extract_default_id(query)
+    if not selected_id and (query.startswith("tt") and query[2:].isdigit() or query.lstrip("-").isdigit()):
+        selected_id = query
+    if selected_id:
+        try:
+            if str(selected_id).startswith("tt"):
+                document = await db.get_media_details(str(selected_id))
+                if document:
+                    add(document)
+            else:
+                tmdb_id = int(selected_id)
+                storage_keys = sorted((key for key in db.dbs if key.startswith("storage_")), reverse=True)
+                for db_key in storage_keys:
+                    db_index = int(db_key.split("_", 1)[1])
+                    for media_type in ("movie", "tv"):
+                        document = await db.dbs[db_key][media_type].find_one({"tmdb_id": tmdb_id})
+                        if document:
+                            add(document, db_index=db_index, media_type=media_type)
+        except Exception as e:
+            LOGGER.warning(f"Manual session ID lookup failed for {query}: {e}")
+
+    if not results:
+        data = await db.search_documents(query, 1, 20)
+        for document in data.get("results", []):
+            add(document)
+    return {"results": results}
+
+
+async def get_manual_session_api() -> dict:
+    return {
+        "session": manual_session_manager.current(),
+        "manual_channels": SettingsManager.current().manual_channels,
+    }
+
+
+async def set_manual_session_api(payload: dict) -> dict:
+    try:
+        tmdb_id = int(payload.get("tmdb_id"))
+        db_index = int(payload.get("db_index"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="tmdb_id and db_index are required.")
+
+    media_type = "tv" if payload.get("media_type") in {"tv", "series"} else "movie"
+    document = await db.get_document(media_type, tmdb_id, db_index)
+    if not document:
+        raise HTTPException(status_code=404, detail="That title was not found in the library.")
+    if not SettingsManager.current().manual_channels:
+        raise HTTPException(status_code=400, detail="Configure at least one Manual Channel in Settings first.")
+
+    personal = is_personal_media(tmdb_id)
+    session = {
+        "tmdb_id": tmdb_id,
+        "db_index": db_index,
+        "media_type": media_type,
+        "title": document.get("title") or "",
+        "year": document.get("release_year") or "",
+        "is_personal": personal,
+        "kind": "personal" if personal else "real",
+    }
+    season = payload.get("season")
+    if season not in (None, ""):
+        try:
+            season = int(season)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Season must be a number.")
+    else:
+        season = None
+
+    if personal:
+        if media_type == "tv" and season is None:
+            raise HTTPException(status_code=400, detail="A season is required for personal TV titles.")
+        episode = payload.get("episode")
+        if episode not in (None, ""):
+            try:
+                episode = int(episode)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Episode must be a number.")
+        else:
+            episode = None
+        session.update({
+            "season": season,
+            "episode": episode,
+            "quality": str(payload.get("quality") or "").strip() or None,
+            "default_id": None,
+        })
+    else:
+        imdb_id = str(document.get("imdb_id") or "")
+        session.update({
+            "season": season if media_type == "tv" else None,
+            "episode": None,
+            "quality": None,
+            "default_id": imdb_id if imdb_id.startswith("tt") else str(tmdb_id),
+        })
+
+    return {"status": "success", "session": await manual_session_manager.activate(session)}
+
+
+async def clear_manual_session_api() -> dict:
+    await manual_session_manager.clear()
+    return {"status": "success"}
 
 
 async def start_tools_scan_api(payload: dict):
@@ -1261,6 +1399,49 @@ async def resolve_telegram_api(payload: dict) -> dict:
     return {"status": "success", "data": data}
 
 
+async def search_manual_add_metadata_api(media_type: str, query: str, year: int | None = None) -> dict:
+    query = (query or "").strip()
+    if not query:
+        return {"results": []}
+    if media_type == "movie":
+        return {"results": await search_movie_candidates(query=query, year=year)}
+    if media_type == "tv":
+        return {"results": await search_tv_candidates(query=query)}
+    raise HTTPException(status_code=400, detail="media_type must be movie or tv.")
+
+
+async def resolve_manual_add_metadata_api(media_type: str, selected_id: str) -> dict:
+    selected_id = str(selected_id or "").strip()
+    if not selected_id:
+        raise HTTPException(status_code=400, detail="selected_id is required.")
+    if media_type == "movie":
+        result = await fetch_selected_movie_metadata(selected_id)
+    elif media_type == "tv":
+        result = await fetch_selected_tv_metadata(selected_id)
+    else:
+        raise HTTPException(status_code=400, detail="media_type must be movie or tv.")
+    if not result:
+        raise HTTPException(status_code=404, detail="Metadata could not be loaded for that result.")
+    return {"metadata": result}
+
+
+async def get_manual_add_catalogs_api() -> dict:
+    catalogs = await db.get_custom_catalogs()
+    return {
+        "catalogs": [
+            {
+                "id": catalog.get("_id"),
+                "name": catalog.get("name") or "Untitled",
+                "visibility": catalog.get("visibility") or "public",
+                "exclusive": bool(catalog.get("exclusive")),
+                "searchable": bool(catalog.get("searchable")),
+            }
+            for catalog in catalogs
+            if not catalog.get("auto")
+        ]
+    }
+
+
 def _metadata_base(source: dict, from_doc: bool = False) -> dict:
     genres = source.get("genres")
     if isinstance(genres, str):
@@ -1320,6 +1501,20 @@ async def manual_add_media_api(payload: dict) -> dict:
     media_type = payload.get("media_type")
     if media_type not in ("movie", "tv"):
         raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'tv'.")
+
+    raw_catalog_ids = payload.get("catalog_ids") or []
+    if isinstance(raw_catalog_ids, str):
+        raw_catalog_ids = [item.strip() for item in raw_catalog_ids.split(",")]
+    catalog_ids = list(dict.fromkeys(str(item).strip() for item in raw_catalog_ids if str(item).strip()))
+    selected_catalogs = []
+    for catalog_id in catalog_ids:
+        catalog = await db.get_custom_catalog(catalog_id)
+        if not catalog:
+            raise HTTPException(status_code=400, detail=f"Catalog {catalog_id} was not found.")
+        selected_catalogs.append(catalog)
+    exclusive_catalogs = [catalog for catalog in selected_catalogs if catalog.get("exclusive")]
+    if exclusive_catalogs and len(selected_catalogs) > 1:
+        raise HTTPException(status_code=400, detail="An exclusive catalog must be selected by itself.")
 
     stream = payload.get("stream") or {}
     quality = str(stream.get("quality") or "").strip()
@@ -1436,12 +1631,18 @@ async def manual_add_media_api(payload: dict) -> dict:
 
     result_tmdb_id = int(base["tmdb_id"])
     result_db_index = await _find_media_db_index(media_type, result_tmdb_id)
+    added_catalogs = []
+    for catalog in selected_catalogs:
+        catalog_id = str(catalog.get("_id"))
+        if await db.add_item_to_custom_catalog(catalog_id, result_tmdb_id, result_db_index, media_type):
+            added_catalogs.append(catalog_id)
     return {
         "status": "success",
         "message": f"Split stream added ({len(resolved_parts)} parts)." if is_split else "Stream added successfully.",
         "tmdb_id": result_tmdb_id,
         "db_index": result_db_index,
         "media_type": media_type,
+        "catalog_ids": added_catalogs,
     }
 
 

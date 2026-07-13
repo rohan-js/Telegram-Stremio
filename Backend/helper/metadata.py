@@ -524,7 +524,13 @@ def _tmdb_movie_fallback(search_result, title, encoded_string, year, quality) ->
     }
 
 # ----------------- Main Metadata -----------------
-async def metadata(filename: str, channel: int, msg_id, override_id: str = None) -> dict | None:
+async def metadata(
+    filename: str,
+    channel: int,
+    msg_id,
+    override_id: str = None,
+    season_hint: int | None = None,
+) -> dict | None:
     try:
         parsed = PTN.parse(filename)
     except Exception as e:
@@ -543,6 +549,11 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
     title = parsed.get("title")
     season = parsed.get("season")
     episode = parsed.get("episode")
+    if not season and episode and season_hint is not None:
+        try:
+            season = int(season_hint)
+        except (TypeError, ValueError):
+            pass
     year = parsed.get("year")
     quality = parsed.get("resolution") or infer_resolution_from_filename(filename, parsed)
     if isinstance(season, list) or isinstance(episode, list):

@@ -124,6 +124,7 @@ class UpstreamBackportHelperTests(unittest.TestCase):
         self._admin_username = Telegram.ADMIN_USERNAME
         self._session_secret = Telegram.SESSION_SECRET
         self._auth_channels = list(Telegram.AUTH_CHANNEL)
+        self._manual_channels = list(getattr(Telegram, "MANUAL_CHANNELS", []))
         self._requests_enabled = getattr(Telegram, "CONTENT_REQUESTS_ENABLED", False)
         self._announce_enabled = getattr(Telegram, "ANNOUNCE_NEW_CONTENT", False)
         self._global_search_userbot = global_search.Userbot
@@ -135,6 +136,7 @@ class UpstreamBackportHelperTests(unittest.TestCase):
         Telegram.ADMIN_USERNAME = self._admin_username
         Telegram.SESSION_SECRET = self._session_secret
         Telegram.AUTH_CHANNEL = self._auth_channels
+        Telegram.MANUAL_CHANNELS = self._manual_channels
         Telegram.CONTENT_REQUESTS_ENABLED = self._requests_enabled
         Telegram.ANNOUNCE_NEW_CONTENT = self._announce_enabled
         global_search.Userbot = self._global_search_userbot
@@ -216,6 +218,11 @@ class UpstreamBackportHelperTests(unittest.TestCase):
         self.assertFalse(Telegram.CONTENT_REQUESTS_BETA_ONLY)
         self.assertTrue(Telegram.ANNOUNCE_NEW_CONTENT)
         self.assertEqual(Telegram.ANNOUNCEMENT_CHANNEL, "-100123")
+
+    def test_settings_apply_manual_channels(self):
+        SettingsManager.apply_to_runtime(Settings({"manual_channels": ["123", "456"]}))
+        self.assertEqual(Telegram.MANUAL_CHANNELS, ["123", "456"])
+        self.assertEqual(SettingsManager.current().manual_channels, ["123", "456"])
 
     def test_subtitle_helpers_detect_extension_and_language(self):
         self.assertTrue(is_subtitle_file("Movie.2024.Hindi.srt"))

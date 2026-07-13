@@ -41,6 +41,11 @@
         <span class="text-sm font-bold">Anime Channels</span>
         <textarea id="anime_channels" rows="3" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">{{ (settings.anime_channels or []) | join('\n') }}</textarea>
       </label>
+      <label class="block">
+        <span class="text-sm font-bold">Manual Upload Channels</span>
+        <textarea id="manual_channels" rows="3" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">{{ (settings.manual_channels or []) | join('\n') }}</textarea>
+        <span class="text-xs text-text-secondary">Files from these channels are assigned only while a Manual Upload Session is active.</span>
+      </label>
     </div>
 
     <div class="glass-panel rounded-3xl p-6 space-y-5">
@@ -165,6 +170,7 @@ document.getElementById('save-btn').addEventListener('click', async () => {
     admin_password: document.getElementById('admin_password').value,
     session_secret: document.getElementById('session_secret').value,
     auth_channels: lines('auth_channels'),
+    manual_channels: lines('manual_channels'),
     anime_channels: lines('anime_channels'),
     subscription: document.getElementById('subscription').checked,
     subscription_group_id: Number(document.getElementById('subscription_group_id').value || 0),

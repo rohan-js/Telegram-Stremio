@@ -15,6 +15,82 @@
     </div>
   </div>
 
+  <div class="glass-panel rounded-3xl p-6 space-y-5">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div>
+        <h2 class="text-xl font-black">Manual Upload Session</h2>
+        <p class="text-sm text-text-secondary mt-1">Temporarily assign files from configured manual channels to one library title.</p>
+      </div>
+      <button id="manual-stop" onclick="stopManualSession()" class="hidden border border-red-500/40 text-red-300 px-5 py-2 rounded-full font-bold hover:bg-red-500/10">End Session</button>
+    </div>
+
+    <div id="manual-active" class="hidden rounded-2xl border border-primary/30 bg-primary/10 p-4 text-sm"></div>
+    <div id="manual-form" class="space-y-4">
+      <div class="flex flex-col md:flex-row gap-3">
+        <input id="manual-query" class="flex-1 rounded-2xl bg-background border border-border px-4 py-3" placeholder="Search title, IMDb ID, or TMDb ID" onkeydown="if(event.key==='Enter'){event.preventDefault();searchManualTitles();}">
+        <button onclick="searchManualTitles()" class="bg-primary text-background px-5 py-2.5 rounded-full font-bold">Search</button>
+      </div>
+      <div id="manual-results" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+      <div id="manual-options" class="hidden grid grid-cols-1 md:grid-cols-3 gap-3">
+        <label class="text-sm text-text-secondary">Fallback season
+          <input id="manual-season" type="number" min="0" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="Optional for real TV">
+        </label>
+        <label class="text-sm text-text-secondary">Starting episode
+          <input id="manual-episode" type="number" min="1" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="Personal TV only">
+        </label>
+        <label class="text-sm text-text-secondary">Fallback quality
+          <input id="manual-quality" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="Personal media, e.g. 1080p">
+        </label>
+      </div>
+      <button id="manual-start" onclick="startManualSession()" class="hidden bg-primary text-background px-5 py-2.5 rounded-full font-bold">Start Session</button>
+      <p id="manual-channels" class="text-xs text-text-secondary"></p>
+    </div>
+  </div>
+
+  <div class="glass-panel rounded-3xl p-6 space-y-5">
+    <div>
+      <h2 class="text-xl font-black">Manual Add</h2>
+      <p class="text-sm text-text-secondary mt-1">Resolve Telegram posts, select authoritative metadata, and optionally place the title in catalogs.</p>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-[10rem_1fr_8rem_auto] gap-3">
+      <select id="add-media-type" class="rounded-2xl bg-background border border-border px-4 py-3">
+        <option value="movie">Movie</option><option value="tv">Series</option>
+      </select>
+      <input id="add-meta-query" class="rounded-2xl bg-background border border-border px-4 py-3" placeholder="Title, IMDb ID, or TMDb ID">
+      <input id="add-meta-year" type="number" class="rounded-2xl bg-background border border-border px-4 py-3" placeholder="Year">
+      <button onclick="searchManualAddMetadata()" class="bg-primary text-background px-5 py-2.5 rounded-full font-bold">Find</button>
+    </div>
+    <div id="add-meta-results" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+    <div id="add-selected" class="hidden rounded-2xl border border-primary/30 bg-primary/10 p-4 text-sm"></div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <label class="text-sm text-text-secondary md:col-span-2">Telegram message links, one per split part
+        <textarea id="add-links" rows="4" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="https://t.me/c/.../...\nhttps://t.me/c/.../..."></textarea>
+      </label>
+      <div class="space-y-3">
+        <label class="text-sm text-text-secondary block">Quality
+          <input id="add-quality" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="1080p">
+        </label>
+        <label class="text-sm text-text-secondary block">Display filename
+          <input id="add-name" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="Optional">
+        </label>
+      </div>
+    </div>
+    <div id="add-tv-fields" class="hidden grid grid-cols-1 md:grid-cols-2 gap-3">
+      <label class="text-sm text-text-secondary">Season
+        <input id="add-season" type="number" min="0" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3">
+      </label>
+      <label class="text-sm text-text-secondary">Episode
+        <input id="add-episode" type="number" min="1" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3">
+      </label>
+    </div>
+    <div>
+      <p class="text-sm font-bold mb-2">Add to catalogs</p>
+      <div id="add-catalogs" class="flex flex-wrap gap-2 text-sm text-text-secondary">Loading catalogs...</div>
+    </div>
+    <button onclick="submitManualAdd()" class="bg-primary text-background px-5 py-2.5 rounded-full font-bold">Add Stream</button>
+  </div>
+
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <div class="glass-panel rounded-3xl p-6 space-y-5">
       <h2 class="text-xl font-black">Channel Scan</h2>
@@ -41,6 +117,11 @@
 
 <script>
 let channels = [];
+let manualResults = [];
+let selectedManualResult = null;
+let manualAddResults = [];
+let selectedManualAdd = null;
+let manualAddCatalogs = [];
 
 async function api(path, options = {}) {
   const res = await fetch(path, options);
@@ -113,11 +194,195 @@ async function refreshDbCheck() {
   document.getElementById('dbcheck-status').textContent = JSON.stringify(data.status, null, 2);
 }
 
+async function searchManualTitles() {
+  const query = document.getElementById('manual-query').value.trim();
+  if (!query) return;
+  try {
+    const data = await api('/api/admin/tools/manual-session/search?query=' + encodeURIComponent(query));
+    manualResults = data.results || [];
+    selectedManualResult = null;
+    document.getElementById('manual-options').classList.add('hidden');
+    document.getElementById('manual-start').classList.add('hidden');
+    document.getElementById('manual-results').innerHTML = manualResults.length ? manualResults.map((item, index) => `
+      <button type="button" onclick="selectManualTitle(${index})" class="text-left rounded-2xl border border-border p-4 hover:border-primary/60">
+        <span class="font-bold block">${escapeHtml(item.title || 'Untitled')}</span>
+        <span class="text-xs text-text-secondary">${escapeHtml(item.media_type)} · ${escapeHtml(String(item.year || 'Year unknown'))}${item.is_personal ? ' · Personal' : ''}</span>
+      </button>
+    `).join('') : '<p class="text-sm text-text-secondary">No matching library titles.</p>';
+  } catch (err) {
+    showToast(err.message, 'error', 'Manual Session');
+  }
+}
+
+function selectManualTitle(index) {
+  selectedManualResult = manualResults[index] || null;
+  if (!selectedManualResult) return;
+  document.getElementById('manual-options').classList.remove('hidden');
+  document.getElementById('manual-start').classList.remove('hidden');
+  document.querySelectorAll('#manual-results button').forEach((button, i) => {
+    button.classList.toggle('border-primary', i === index);
+    button.classList.toggle('bg-primary/10', i === index);
+  });
+}
+
+async function startManualSession() {
+  if (!selectedManualResult) return;
+  const payload = {
+    tmdb_id: selectedManualResult.tmdb_id,
+    db_index: selectedManualResult.db_index,
+    media_type: selectedManualResult.media_type,
+    season: document.getElementById('manual-season').value || null,
+    episode: document.getElementById('manual-episode').value || null,
+    quality: document.getElementById('manual-quality').value.trim() || null,
+  };
+  try {
+    await api('/api/admin/tools/manual-session', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+    });
+    showToast('Manual upload session started', 'success', 'Manual Session');
+    await loadManualSession();
+  } catch (err) {
+    showToast(err.message, 'error', 'Manual Session');
+  }
+}
+
+async function stopManualSession() {
+  try {
+    await api('/api/admin/tools/manual-session', {method: 'DELETE'});
+    showToast('Manual upload session ended', 'success', 'Manual Session');
+    await loadManualSession();
+  } catch (err) {
+    showToast(err.message, 'error', 'Manual Session');
+  }
+}
+
+async function loadManualSession() {
+  const data = await api('/api/admin/tools/manual-session');
+  const session = data.session;
+  const channels = data.manual_channels || [];
+  document.getElementById('manual-channels').textContent = channels.length
+    ? 'Manual channels: ' + channels.join(', ')
+    : 'No manual channels configured. Add them in Settings before starting a session.';
+  document.getElementById('manual-active').classList.toggle('hidden', !session);
+  document.getElementById('manual-stop').classList.toggle('hidden', !session);
+  document.getElementById('manual-form').classList.toggle('hidden', !!session);
+  if (session) {
+    document.getElementById('manual-active').innerHTML = `
+      <span class="font-bold">${escapeHtml(session.title || 'Untitled')}</span>
+      <span class="text-text-secondary"> · ${escapeHtml(session.media_type)} · ${escapeHtml(session.kind)}</span>
+      ${session.season !== null && session.season !== undefined ? `<span class="block mt-1 text-text-secondary">Season ${escapeHtml(String(session.season))}</span>` : ''}
+    `;
+  }
+}
+
+document.getElementById('add-media-type').addEventListener('change', event => {
+  document.getElementById('add-tv-fields').classList.toggle('hidden', event.target.value !== 'tv');
+  selectedManualAdd = null;
+  document.getElementById('add-selected').classList.add('hidden');
+});
+
+async function searchManualAddMetadata() {
+  const mediaType = document.getElementById('add-media-type').value;
+  const query = document.getElementById('add-meta-query').value.trim();
+  const year = document.getElementById('add-meta-year').value;
+  if (!query) return;
+  try {
+    const suffix = year ? '&year=' + encodeURIComponent(year) : '';
+    const data = await api(`/api/media/manual-add/search?media_type=${mediaType}&query=${encodeURIComponent(query)}${suffix}`);
+    manualAddResults = data.results || [];
+    document.getElementById('add-meta-results').innerHTML = manualAddResults.length ? manualAddResults.map((item, index) => `
+      <button type="button" onclick="selectManualAddMetadata(${index})" class="text-left rounded-2xl border border-border p-4 hover:border-primary/60">
+        <span class="font-bold block">${escapeHtml(item.title || item.name || 'Untitled')}</span>
+        <span class="text-xs text-text-secondary">${escapeHtml(String(item.year || item.release_year || 'Year unknown'))} · ${escapeHtml(String(item.imdb_id || item.tmdb_id || item.id || ''))}</span>
+      </button>
+    `).join('') : '<p class="text-sm text-text-secondary">No metadata results.</p>';
+  } catch (err) {
+    showToast(err.message, 'error', 'Manual Add');
+  }
+}
+
+async function selectManualAddMetadata(index) {
+  const candidate = manualAddResults[index];
+  if (!candidate) return;
+  const mediaType = document.getElementById('add-media-type').value;
+  const selectedId = candidate.imdb_id || candidate.tmdb_id || candidate.id;
+  try {
+    const data = await api(`/api/media/manual-add/metadata?media_type=${mediaType}&selected_id=${encodeURIComponent(selectedId)}`);
+    selectedManualAdd = {selected_id: String(selectedId), metadata: data.metadata};
+    const meta = data.metadata || {};
+    const box = document.getElementById('add-selected');
+    box.classList.remove('hidden');
+    box.innerHTML = `<span class="font-bold">${escapeHtml(meta.title || meta.name || 'Untitled')}</span><span class="text-text-secondary"> · ${escapeHtml(String(meta.release_year || meta.year || ''))}</span>`;
+  } catch (err) {
+    showToast(err.message, 'error', 'Manual Add');
+  }
+}
+
+async function loadManualAddCatalogs() {
+  try {
+    const data = await api('/api/media/manual-add/catalogs');
+    manualAddCatalogs = data.catalogs || [];
+    document.getElementById('add-catalogs').innerHTML = manualAddCatalogs.length ? manualAddCatalogs.map(item => `
+      <label class="rounded-full border border-border px-4 py-2 cursor-pointer">
+        <input type="checkbox" class="add-catalog mr-2" value="${escapeHtml(item.id)}" data-exclusive="${item.exclusive ? 'true' : 'false'}" onchange="enforceExclusiveCatalog(this)">
+        ${escapeHtml(item.name)}${item.exclusive ? ' · Exclusive' : ''}
+      </label>
+    `).join('') : 'No custom catalogs available.';
+  } catch (err) {
+    document.getElementById('add-catalogs').textContent = err.message;
+  }
+}
+
+function enforceExclusiveCatalog(changed) {
+  const boxes = Array.from(document.querySelectorAll('.add-catalog'));
+  if (changed.checked && changed.dataset.exclusive === 'true') {
+    boxes.forEach(box => { if (box !== changed) { box.checked = false; box.disabled = true; } });
+  } else if (!boxes.some(box => box.checked && box.dataset.exclusive === 'true')) {
+    boxes.forEach(box => { box.disabled = false; });
+    if (changed.checked) boxes.filter(box => box.dataset.exclusive === 'true').forEach(box => { box.disabled = true; });
+  }
+}
+
+async function submitManualAdd() {
+  if (!selectedManualAdd) {
+    showToast('Select metadata first', 'error', 'Manual Add'); return;
+  }
+  const links = document.getElementById('add-links').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  const quality = document.getElementById('add-quality').value.trim();
+  if (!links.length || !quality) {
+    showToast('Telegram link and quality are required', 'error', 'Manual Add'); return;
+  }
+  const mediaType = document.getElementById('add-media-type').value;
+  const payload = {
+    media_type: mediaType,
+    selected_id: selectedManualAdd.selected_id,
+    stream: {
+      quality,
+      name: document.getElementById('add-name').value.trim() || null,
+      parts: links.map(url => ({url})),
+    },
+    catalog_ids: Array.from(document.querySelectorAll('.add-catalog:checked')).map(box => box.value),
+  };
+  if (mediaType === 'tv') {
+    payload.season_number = document.getElementById('add-season').value;
+    payload.episode_number = document.getElementById('add-episode').value;
+  }
+  try {
+    const data = await api('/api/media/manual-add', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+    });
+    showToast(data.message || 'Stream added', 'success', 'Manual Add');
+  } catch (err) {
+    showToast(err.message, 'error', 'Manual Add');
+  }
+}
+
 async function refreshAll() {
-  await Promise.allSettled([loadChannels(), refreshScan(), refreshDbCheck()]);
+  await Promise.allSettled([loadChannels(), refreshScan(), refreshDbCheck(), loadManualSession()]);
 }
 
 refreshAll();
+loadManualAddCatalogs();
 setInterval(refreshAll, 15000);
 </script>
 {% endblock %}
