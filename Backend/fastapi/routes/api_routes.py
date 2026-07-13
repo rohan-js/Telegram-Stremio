@@ -76,6 +76,7 @@ def _public_settings(data: dict) -> dict:
         "SESSION_SECRET",
         "WARP_PRIVATE_KEYS",
     ]
+    public["secret_statuses"] = SettingsManager.secret_statuses()
     return public
 
 
@@ -194,6 +195,8 @@ async def update_settings_api(payload: dict):
             "settings": _public_settings(SettingsManager.current().to_dict()),
             "results": results,
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         LOGGER.error(f"update_settings_api failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

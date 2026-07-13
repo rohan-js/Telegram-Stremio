@@ -232,6 +232,7 @@ async def settings_page(request: Request, _: bool = Depends(require_auth)):
     settings["session_secret_set"] = bool(settings.get("session_secret"))
     settings["session_secret"] = ""
     settings["multi_token_count"] = len([k for k in __import__("os").environ if k.startswith("MULTI_TOKEN")])
+    settings["secret_statuses"] = SettingsManager.secret_statuses()
 
     return templates.TemplateResponse("settings.html", {
         "request": request,

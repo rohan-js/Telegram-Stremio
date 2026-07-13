@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 from Backend.config import Telegram
 from Backend.helper.passwords import hash_password, is_hashed
@@ -185,6 +187,52 @@ class SettingsManager:
         Telegram.ANNOUNCEMENT_CHANNEL = str(data.get("announcement_channel") or "")
 
     @classmethod
+    def secret_statuses(cls) -> List[Dict[str, Any]]:
+        multi_tokens = [
+            value for key, value in os.environ.items()
+            if key.startswith("MULTI_TOKEN") and str(value).strip()
+        ]
+        warp_configured = bool(
+            getattr(Telegram, "WARP_CONTROL_COMMAND", "")
+            or (
+                getattr(Telegram, "WARP_CONTROL_URL", "")
+                and getattr(Telegram, "WARP_CONTROL_SECRET", "")
+            )
+        )
+        return [
+            {"key": "bot_token", "label": "Bot token", "configured": bool(Telegram.BOT_TOKEN)},
+            {"key": "helper_bot", "label": "Helper bot token", "configured": bool(Telegram.HELPER_BOT_TOKEN)},
+            {"key": "multi_tokens", "label": "Multi-client tokens", "configured": bool(multi_tokens), "count": len(multi_tokens)},
+            {"key": "telegram_api", "label": "Telegram API credentials", "configured": bool(Telegram.API_ID and Telegram.API_HASH)},
+            {"key": "database", "label": "MongoDB storage", "configured": bool(Telegram.DATABASE)},
+            {"key": "tmdb", "label": "TMDb API", "configured": bool(Telegram.TMDB_API)},
+            {"key": "gemini", "label": "Gemini API", "configured": bool(Telegram.GEMINI_API_KEY)},
+            {"key": "groq", "label": "Groq API", "configured": bool(Telegram.GROQ_API_KEY)},
+            {"key": "user_session", "label": "Global Search session", "configured": bool(Telegram.USER_SESSION_STRING)},
+            {"key": "warp", "label": "WARP control helper", "configured": warp_configured},
+        ]
+
+    @staticmethod
+    def _validate_channel_values(values: List[Any], field_name: str) -> None:
+        invalid = [
+            str(value).strip() for value in values
+            if str(value).strip()
+            and not str(value).strip().lstrip("-").isdigit()
+            and not str(value).strip().startswith("@")
+        ]
+        if invalid:
+            raise ValueError(f"{field_name} contains invalid channel values: {', '.join(invalid[:3])}")
+
+    @staticmethod
+    def _validate_optional_url(value: Any, field_name: str) -> None:
+        value = str(value or "").strip()
+        if not value:
+            return
+        parsed = urlparse(value)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(f"{field_name} must be a valid http:// or https:// URL.")
+
+    @classmethod
     async def update(cls, db, payload: Dict[str, Any]) -> Dict[str, Any]:
         current = cls.current().to_dict()
         allowed = set(DEFAULTS)
@@ -206,11 +254,25 @@ class SettingsManager:
 
         for key in ("auth_channels", "manual_channels", "anime_channels", "global_search_channels"):
             merged[key] = [str(x).strip() for x in (merged.get(key) or []) if str(x).strip()]
+            cls._validate_channel_values(merged[key], key.replace("_", " ").title())
+        raw_approvers = merged.get("approver_ids") or []
+        invalid_approvers = [str(x) for x in raw_approvers if not str(x).strip().lstrip("-").isdigit()]
+        if invalid_approvers:
+            raise ValueError("Approver IDs must contain only Telegram numeric user IDs.")
         merged["approver_ids"] = [
-            int(x) for x in (merged.get("approver_ids") or [])
-            if str(x).strip().lstrip("-").isdigit()
+            int(x) for x in raw_approvers if str(x).strip()
         ]
-        merged["subscription_group_id"] = int(merged.get("subscription_group_id") or 0)
+        try:
+            merged["subscription_group_id"] = int(merged.get("subscription_group_id") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Subscription Group ID must be numeric.") from exc
+        cls._validate_optional_url(merged.get("payment_qr_url"), "Payment QR URL")
+        cls._validate_optional_url(merged.get("http_proxy_url"), "HTTP Proxy URL")
+        if not str(merged.get("admin_username") or "").strip():
+            raise ValueError("Admin username cannot be empty.")
+        announcement_channel = str(merged.get("announcement_channel") or "").strip()
+        if announcement_channel:
+            cls._validate_channel_values([announcement_channel], "Announcement Channel")
         if merged.get("global_search") and not getattr(Telegram, "USER_SESSION_STRING", ""):
             merged["global_search"] = False
 
@@ -222,4 +284,6 @@ class SettingsManager:
             "auth_channels": f"{len(Telegram.AUTH_CHANNEL)} channel(s) active",
             "restart_required": [],
         }
+        if bool(incoming.get("global_search")) and not getattr(Telegram, "USER_SESSION_STRING", ""):
+            results["global_search"] = "Disabled because USER_SESSION_STRING is not configured."
         return results

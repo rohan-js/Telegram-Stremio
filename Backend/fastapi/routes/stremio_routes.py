@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
+from fastapi.templating import Jinja2Templates
 from typing import Optional
 from urllib.parse import unquote, quote
 from Backend.config import Telegram
@@ -34,6 +35,7 @@ ADDON_VERSION = __version__
 PAGE_SIZE = 15
 
 router = APIRouter(prefix="/stremio", tags=["Stremio Addon"])
+templates = Jinja2Templates(directory="Backend/fastapi/templates")
 
 # Define available genres
 GENRES = [
@@ -503,14 +505,12 @@ async def get_manifest_head(token: str, token_data: dict = Depends(verify_token)
 
 
 @router.get("/{token}/configure")
-async def configure_addon(token: str):
+async def configure_addon(request: Request, token: str):
     """
     Configure/update page for the Stremio addon.
     Uses the correct stremio://addon_install?manifest= deep-link so Stremio
     actually shows the Install/Update dialog when the button is clicked.
     """
-    from urllib.parse import quote
-    from fastapi.responses import HTMLResponse
     from Backend import db as _db
 
     manifest_url = f"{Telegram.BASE_URL}/stremio/{token}/manifest.json"
@@ -521,10 +521,32 @@ async def configure_addon(token: str):
     token_doc = await _db.get_api_token(token)
     user_name = "Unknown"
     expiry_str = "N/A"
-    status_color = "#ef4444"
+    status_kind = "danger"
     status_text = "Unknown"
 
     if token_doc:
+        status_text = "Active"
+        status_kind = "success"
+        if token_doc.get("revoked"):
+            status_text = "Revoked"
+            status_kind = "danger"
+        elif token_doc.get("subscription_exempt") or token_doc.get("is_admin"):
+            status_text = "Lifetime"
+            status_kind = "success"
+            expiry_str = "Lifetime"
+        elif token_doc.get("expires_at"):
+            token_expiry = token_doc.get("expires_at")
+            if isinstance(token_expiry, str):
+                try:
+                    token_expiry = datetime.fromisoformat(token_expiry.replace("Z", "+00:00"))
+                except ValueError:
+                    token_expiry = None
+            if token_expiry:
+                expiry_str = token_expiry.strftime("%d %b %Y").lstrip("0")
+                compare_now = datetime.now(timezone.utc) if token_expiry.tzinfo else datetime.utcnow()
+                if token_expiry <= compare_now:
+                    status_text = "Expired"
+                    status_kind = "danger"
         uid = token_doc.get("user_id")
         if uid:
             try:
@@ -534,129 +556,25 @@ async def configure_addon(token: str):
                     sub_status = user.get("subscription_status", "")
                     expiry = user.get("subscription_expiry")
                     if expiry:
-                        expiry_str = expiry.strftime("%d %b %Y").lstrip("0")
-                    if sub_status == "active":
-                        status_color = "#22c55e"
-                        status_text = "✅ Active"
-                    else:
-                        status_color = "#ef4444"
-                        status_text = "🔴 Expired"
+                        if expiry_str == "N/A":
+                            expiry_str = expiry.strftime("%d %b %Y").lstrip("0")
+                    if not token_doc.get("subscription_exempt") and not token_doc.get("is_admin") and not token_doc.get("expires_at"):
+                        if sub_status == "active":
+                            status_text = "Active"
+                            status_kind = "success"
+                        elif Telegram.SUBSCRIPTION:
+                            status_text = "Expired"
+                            status_kind = "danger"
             except Exception:
                 pass
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Update Telegram Stremio Addon</title>
-  <style>
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #0f0f1a; color: #e2e8f0;
-      min-height: 100vh; display: flex; align-items: center; justify-content: center;
-      padding: 24px;
-    }}
-    .card {{
-      background: #1e1e2e; border: 1px solid #2d2d44; border-radius: 16px;
-      padding: 40px 32px; max-width: 480px; width: 100%; text-align: center;
-    }}
-    .logo {{ font-size: 48px; margin-bottom: 12px; }}
-    h1 {{ font-size: 1.5rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px; }}
-    .sub-title {{ color: #94a3b8; font-size: 0.9rem; margin-bottom: 28px; }}
-    .info-row {{
-      display: flex; justify-content: space-between; align-items: center;
-      background: #2a2a3e; border-radius: 10px; padding: 12px 16px;
-      margin-bottom: 12px; font-size: 0.9rem;
-    }}
-    .info-label {{ color: #94a3b8; }}
-    .info-val {{ font-weight: 600; color: #f1f5f9; }}
-    .status-badge {{
-      display: inline-block; padding: 2px 10px; border-radius: 999px;
-      font-size: 0.8rem; font-weight: 700;
-      background: {status_color}22; color: {status_color};
-    }}
-    .btn-update {{
-      display: block; width: 100%;
-      background: linear-gradient(135deg, #7c3aed, #4f46e5);
-      color: white; font-weight: 700; font-size: 1rem;
-      padding: 14px 24px; border-radius: 12px; border: none;
-      cursor: pointer; text-decoration: none; margin: 28px 0 12px;
-      transition: opacity 0.2s;
-    }}
-    .btn-update:hover {{ opacity: 0.85; }}
-    .btn-web {{
-      display: block; color: #6366f1; font-size: 0.85rem;
-      text-decoration: underline; margin-bottom: 20px;
-    }}
-    .steps {{
-      background: #2a2a3e; border-radius: 10px; padding: 14px 18px;
-      margin: 16px 0; text-align: left; font-size: 0.85rem; color: #cbd5e1;
-    }}
-    .steps b {{ color: #f1f5f9; }}
-    .steps ol {{ margin-top: 8px; margin-left: 18px; line-height: 1.8; }}
-    .url-box {{
-      background: #111827; border: 1px solid #374151; border-radius: 8px;
-      padding: 10px 14px; font-family: monospace; font-size: 0.75rem;
-      color: #94a3b8; word-break: break-all; text-align: left; margin-top: 16px;
-    }}
-    .btn-copy {{
-      margin-top: 10px; width: 100%; padding: 10px;
-      background: #1e293b; border: 1px solid #374151; color: #94a3b8;
-      border-radius: 8px; cursor: pointer; font-size: 0.85rem; transition: all 0.2s;
-    }}
-    .btn-copy:hover {{ background: #334155; color: #f1f5f9; }}
-    .hint {{ color: #64748b; font-size: 0.78rem; margin-top: 6px; }}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="logo">🎬</div>
-    <h1>Telegram Stremio Addon</h1>
-    <p class="sub-title">Click the button below to install or update your addon in Stremio.</p>
-
-    <div class="info-row">
-      <span class="info-label">User</span>
-      <span class="info-val">{user_name}</span>
-    </div>
-    <div class="info-row">
-      <span class="info-label">Status</span>
-      <span class="status-badge">{status_text}</span>
-    </div>
-    <div class="info-row">
-      <span class="info-label">Expires</span>
-      <span class="info-val">{expiry_str}</span>
-    </div>
-
-    <a href="{install_page_url}" class="btn-update" target="_blank">
-      ⚡ Install / Update in Stremio
-    </a>
-
-    <div class="steps">
-      <b>Or install manually:</b>
-      <ol>
-        <li>Open Stremio → <b>Add-ons</b> tab</li>
-        <li>Click the <b>🔍 Search / URL</b> icon</li>
-        <li>Paste the URL below and press Enter</li>
-      </ol>
-    </div>
-
-    <div class="url-box" id="murl">{manifest_url}</div>
-    <button onclick="copyUrl()" class="btn-copy">📋 Copy URL</button>
-    <script>
-      function copyUrl() {{
-        navigator.clipboard.writeText('{manifest_url}').then(() => {{
-          const b = document.querySelector('.btn-copy');
-          b.textContent = '✅ Copied!';
-          setTimeout(() => b.textContent = '📋 Copy URL', 2000);
-        }});
-      }}
-    </script>
-  </div>
-</body>
-</html>"""
-    return HTMLResponse(html)
+    return templates.TemplateResponse(request=request, name="stremio_configure.html", context={
+        "manifest_url": manifest_url,
+        "install_page_url": install_page_url,
+        "user_name": user_name,
+        "expiry_str": expiry_str,
+        "status_kind": status_kind,
+        "status_text": status_text,
+    })
 
 
 
@@ -1241,7 +1159,7 @@ async def stremio_install(request: Request, token: str, token_data: dict = Depen
             }}
 
             if (isAndroid) {{
-                var intentUrl = "intent://" + manifestUrl.replace(/^https?:\/\//, '') + "#Intent;scheme=stremio;package=com.stremio.one;end";
+                var intentUrl = "intent://" + manifestUrl.replace('https://', '').replace('http://', '') + "#Intent;scheme=stremio;package=com.stremio.one;end";
                 window.location.href = intentUrl;
                 setTimeout(showManualInstallHint, 1600);
             }} else {{

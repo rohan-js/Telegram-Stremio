@@ -13,6 +13,7 @@
         <i class="fa-solid fa-floppy-disk mr-2"></i>Save
       </button>
     </div>
+    <p id="save-status" class="mt-3 text-sm text-text-secondary">Runtime-safe settings apply immediately. Process-level settings remain environment controlled.</p>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -107,11 +108,19 @@
     </div>
 
     <div class="glass-panel rounded-3xl p-6 space-y-5">
-      <h2 class="font-black text-xl">Runtime Notes</h2>
-      <div class="rounded-2xl border border-border p-4 text-sm text-text-secondary space-y-2">
-        <p>Secrets stay in <code>config.env</code>: bot tokens, API hash, MongoDB, Gemini/Groq, and WARP keys.</p>
-        <p>Multi-token helper bots are currently env-only. Active helper count is shown in the dashboard.</p>
-        <p>Some settings apply immediately; routing/proxy process changes still require an app restart.</p>
+      <div>
+        <h2 class="font-black text-xl">Runtime And Secrets</h2>
+        <p class="text-sm text-text-secondary mt-1">Secret values remain environment-only. This page reports status without reading them back.</p>
+      </div>
+      <div class="border border-border rounded-2xl overflow-hidden">
+        {% for secret in settings.secret_statuses or [] %}
+        <div class="flex items-center justify-between gap-4 px-4 py-3 border-b border-border last:border-b-0 bg-background/30">
+          <span class="text-sm font-bold">{{ secret.label }}</span>
+          <span class="text-xs font-black {% if secret.configured %}text-emerald-400{% else %}text-amber-400{% endif %}">
+            {% if secret.configured %}Configured{% if secret.count is defined %} ({{ secret.count }}){% endif %}{% else %}Not configured{% endif %}
+          </span>
+        </div>
+        {% endfor %}
       </div>
       <label class="flex items-center justify-between gap-4">
         <span><b>Global Search</b><span class="block text-sm text-text-secondary">Requires a configured user session.</span></span>
@@ -162,22 +171,50 @@ function lines(id) {
   return document.getElementById(id).value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
 }
 
+function validOptionalHttpUrl(value) {
+  if (!value.trim()) return true;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch (_) {
+    return false;
+  }
+}
+
 document.getElementById('save-btn').addEventListener('click', async () => {
+  const button = document.getElementById('save-btn');
+  const status = document.getElementById('save-status');
+  const adminUsername = document.getElementById('admin_username').value.trim();
+  const groupId = document.getElementById('subscription_group_id').value.trim();
+  const paymentQr = document.getElementById('payment_qr_url').value.trim();
+  const proxyUrl = document.getElementById('http_proxy_url').value.trim();
+  if (!adminUsername) {
+    showToast('Admin username cannot be empty.', 'error', 'Validation');
+    return;
+  }
+  if (groupId && !/^-?\d+$/.test(groupId)) {
+    showToast('Subscription Group ID must be numeric.', 'error', 'Validation');
+    return;
+  }
+  if (!validOptionalHttpUrl(paymentQr) || !validOptionalHttpUrl(proxyUrl)) {
+    showToast('Payment QR and HTTP Proxy URLs must use http:// or https://.', 'error', 'Validation');
+    return;
+  }
   const payload = {
     replace_mode: document.getElementById('replace_mode').checked,
     hide_catalog: document.getElementById('hide_catalog').checked,
-    admin_username: document.getElementById('admin_username').value.trim(),
+    admin_username: adminUsername,
     admin_password: document.getElementById('admin_password').value,
     session_secret: document.getElementById('session_secret').value,
     auth_channels: lines('auth_channels'),
     manual_channels: lines('manual_channels'),
     anime_channels: lines('anime_channels'),
     subscription: document.getElementById('subscription').checked,
-    subscription_group_id: Number(document.getElementById('subscription_group_id').value || 0),
-    approver_ids: lines('approver_ids').map(Number).filter(Boolean),
+    subscription_group_id: Number(groupId || 0),
+    approver_ids: lines('approver_ids'),
     payment_instructions: document.getElementById('payment_instructions').value,
-    payment_qr_url: document.getElementById('payment_qr_url').value,
-    http_proxy_url: document.getElementById('http_proxy_url').value,
+    payment_qr_url: paymentQr,
+    http_proxy_url: proxyUrl,
     show_proxy_and_non_proxy_both: document.getElementById('show_proxy_and_non_proxy_both').checked,
     global_search: document.getElementById('global_search').checked,
     global_search_channels: lines('global_search_channels'),
@@ -186,17 +223,29 @@ document.getElementById('save-btn').addEventListener('click', async () => {
     announce_new_content: document.getElementById('announce_new_content').checked,
     announcement_channel: document.getElementById('announcement_channel').value.trim(),
   };
-  const res = await fetch('/api/admin/settings', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    showToast(data.detail || 'Settings save failed', 'error', 'Error');
-    return;
+  button.disabled = true;
+  button.classList.add('opacity-60');
+  status.textContent = 'Saving settings...';
+  try {
+    const res = await fetch('/api/admin/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || 'Settings save failed');
+    }
+    const globalSearchNote = data.results?.global_search;
+    status.textContent = globalSearchNote || 'Settings saved and runtime-safe values applied.';
+    showToast(data.message || 'Settings saved', 'success', 'Saved');
+  } catch (error) {
+    status.textContent = error.message || 'Settings save failed.';
+    showToast(error.message || 'Settings save failed', 'error', 'Error');
+  } finally {
+    button.disabled = false;
+    button.classList.remove('opacity-60');
   }
-  showToast(data.message || 'Settings saved', 'success', 'Saved');
 });
 </script>
 {% endblock %}

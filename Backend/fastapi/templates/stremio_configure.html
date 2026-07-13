@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Configure Telegram Stremio</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07131f;
+      --panel: rgba(20, 36, 53, 0.86);
+      --panel-strong: #17283a;
+      --border: #32465d;
+      --text: #f4f7fb;
+      --muted: #9fb0c4;
+      --primary: #19bfd5;
+      --primary-dark: #083c48;
+      --success: #4ade80;
+      --danger: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(100%, 520px);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+      overflow: hidden;
+      backdrop-filter: blur(18px);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .mark {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #03242b;
+      font-size: 20px;
+      font-weight: 900;
+      flex: none;
+    }
+    h1 { margin: 0; font-size: 21px; line-height: 1.25; letter-spacing: 0; }
+    header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+    .content { padding: 24px; }
+    dl { margin: 0 0 20px; }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 48px;
+      padding: 11px 13px;
+      border: 1px solid var(--border);
+      border-bottom: 0;
+      background: rgba(7, 19, 31, 0.5);
+    }
+    .row:first-child { border-radius: 8px 8px 0 0; }
+    .row:last-child { border-bottom: 1px solid var(--border); border-radius: 0 0 8px 8px; }
+    dt { color: var(--muted); font-size: 13px; }
+    dd { margin: 0; max-width: 65%; text-align: right; font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+    .status { color: var(--success); }
+    .status.danger { color: var(--danger); }
+    .install {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 48px;
+      border-radius: 8px;
+      background: var(--primary);
+      color: #03242b;
+      text-decoration: none;
+      font-weight: 900;
+      transition: filter 160ms ease;
+    }
+    .install:hover { filter: brightness(1.08); }
+    .manual { margin-top: 22px; }
+    .manual h2 { margin: 0 0 9px; font-size: 15px; letter-spacing: 0; }
+    .manual p { margin: 0 0 10px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .manifest {
+      width: 100%;
+      min-height: 68px;
+      resize: none;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #06101a;
+      color: var(--muted);
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+    .copy {
+      width: 100%;
+      min-height: 42px;
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-strong);
+      color: var(--text);
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .copy:hover { border-color: var(--primary); }
+    .copy:focus-visible, .install:focus-visible, .manifest:focus-visible {
+      outline: 3px solid var(--primary-dark);
+      outline-offset: 2px;
+    }
+    @media (max-width: 520px) {
+      body { padding: 12px; }
+      header, .content { padding: 18px; }
+      .row { align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="mark" aria-hidden="true">▶</div>
+      <div>
+        <h1>Telegram Stremio</h1>
+        <p>Install or refresh your private addon.</p>
+      </div>
+    </header>
+    <div class="content">
+      <dl>
+        <div class="row"><dt>User</dt><dd>{{ user_name }}</dd></div>
+        <div class="row"><dt>Status</dt><dd class="status{% if status_kind == 'danger' %} danger{% endif %}">{{ status_text }}</dd></div>
+        <div class="row"><dt>Expires</dt><dd>{{ expiry_str }}</dd></div>
+      </dl>
+
+      <a class="install" href="{{ install_page_url }}" target="_blank" rel="noopener">Install / Update in Stremio</a>
+
+      <section class="manual">
+        <h2>Manual manifest URL</h2>
+        <p>Use this URL in Stremio's addon search when automatic installation is unavailable.</p>
+        <textarea id="manifest-url" class="manifest" readonly aria-label="Manifest URL">{{ manifest_url }}</textarea>
+        <button id="copy-button" type="button" class="copy">Copy manifest URL</button>
+      </section>
+    </div>
+  </main>
+  <script>
+    const copyButton = document.getElementById('copy-button');
+    const manifestInput = document.getElementById('manifest-url');
+    copyButton.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(manifestInput.value);
+        copyButton.textContent = 'Copied';
+      } catch (error) {
+        manifestInput.focus();
+        manifestInput.select();
+        document.execCommand('copy');
+        copyButton.textContent = 'Copied';
+      }
+      setTimeout(() => { copyButton.textContent = 'Copy manifest URL'; }, 1800);
+    });
+  </script>
+</body>
+</html>

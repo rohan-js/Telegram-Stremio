@@ -185,6 +185,23 @@ class UpstreamBackportHelperTests(unittest.TestCase):
         self.assertTrue(is_hashed(fake_db.saved["admin_password"]))
         self.assertTrue(verify_password("new-password", fake_db.saved["admin_password"]))
 
+    def test_settings_reject_invalid_runtime_url(self):
+        SettingsManager._current = Settings({
+            "admin_username": "admin",
+            "admin_password": hash_password("password"),
+            "session_secret": "session-secret",
+        })
+        with self.assertRaisesRegex(ValueError, "HTTP Proxy URL"):
+            asyncio.run(SettingsManager.update(FakeSettingsDB(), {"http_proxy_url": "not-a-url"}))
+
+    def test_secret_statuses_expose_status_not_secret_values(self):
+        statuses = SettingsManager.secret_statuses()
+
+        self.assertTrue(statuses)
+        for item in statuses:
+            self.assertEqual(set(item).difference({"key", "label", "configured", "count"}), set())
+            self.assertIsInstance(item["configured"], bool)
+
     def test_global_search_disabled_without_userbot(self):
         SettingsManager._current = Settings(
             {
