@@ -21,6 +21,8 @@ from Backend.fastapi.routes.api_routes import (
     delete_movie_quality_api, delete_tv_quality_api,
     delete_tv_episode_api, delete_tv_season_api,
     create_token_api, revoke_token_api, update_token_limits_api,
+    set_token_lifetime_api, set_token_expiry_api, subscription_preflight_api,
+    grant_lifetime_api, backfill_token_names_api,
     speed_test_api, speed_test_stream_api,
     get_admin_stats_api, clear_cache_api, get_dead_links_api,
     get_stream_analytics_api, clear_stream_analytics_api,
@@ -546,6 +548,26 @@ async def link_token_to_user(token: str, payload: dict, _: bool = Depends(requir
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="user_id is required.")
     return await link_token_user_api(token, user_id)
+
+@app.patch("/api/admin/access/tokens/{token}/lifetime")
+async def set_access_token_lifetime(token: str, payload: dict, _: bool = Depends(require_auth)):
+    return await set_token_lifetime_api(token, payload)
+
+@app.post("/api/admin/access/tokens/{token}/expiry")
+async def set_access_token_expiry(token: str, payload: dict, _: bool = Depends(require_auth)):
+    return await set_token_expiry_api(token, payload)
+
+@app.get("/api/admin/subscriptions/preflight")
+async def subscription_preflight(_: bool = Depends(require_auth)):
+    return await subscription_preflight_api()
+
+@app.post("/api/admin/access/grant-lifetime")
+async def grant_unlinked_lifetime(_: bool = Depends(require_auth)):
+    return await grant_lifetime_api()
+
+@app.post("/api/admin/access/backfill-names")
+async def backfill_access_names(_: bool = Depends(require_auth)):
+    return await backfill_token_names_api()
 
 @app.get("/api/custom-catalogs")
 async def list_custom_catalogs(

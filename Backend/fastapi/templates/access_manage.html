@@ -396,6 +396,12 @@
             </div>
 
             <div class="flex flex-wrap gap-3">
+                <button onclick="runSubscriptionPreflight()" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold inline-flex items-center gap-2">
+                    <i class="fas fa-list-check"></i>Preflight
+                </button>
+                <button onclick="backfillNames()" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold inline-flex items-center gap-2">
+                    <i class="fas fa-address-card"></i>Names
+                </button>
                 <button onclick="loadTokens()" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold inline-flex items-center gap-2">
                     <i class="fas fa-rotate-right"></i>
                     Refresh
@@ -609,6 +615,9 @@
     }
 
     function getStatusBadge(t) {
+        if (!t.is_expired && (t.lifetime || t.is_beta_exempt)) {
+            return `<span class="status-badge status-active"><i class="fas fa-infinity text-[10px]"></i> Lifetime</span>`;
+        }
         return t.is_expired
             ? `<span class="status-badge status-expired"><i class="fas fa-circle text-[8px]"></i> Expired</span>`
             : `<span class="status-badge status-active"><i class="fas fa-circle text-[8px]"></i> Active</span>`;
@@ -683,6 +692,12 @@
         }
 
         const revokeTokenBtn = t.token ? `
+            <button onclick="toggleLifetime('${escHtml(t.token)}', ${t.lifetime ? 'false' : 'true'})" class="action-chip ${t.lifetime ? 'glass-btn-warning' : 'glass-btn-success'}">
+                ${t.lifetime ? 'Remove Lifetime' : 'Lifetime'}
+            </button>
+            <button onclick="changeTokenExpiry('${escHtml(t.token)}')" class="action-chip glass-btn-purple">
+                Expiry
+            </button>
             <button onclick="revokeToken('${escHtml(t.token)}')" class="action-chip glass-btn">
                 Del Token
             </button>
@@ -718,9 +733,11 @@
                     <td class="px-4 py-4">${buildAddonHtml(t)}</td>
                     <td class="px-4 py-4 text-soft text-xs">${t.created_at ? fmtDate(t.created_at) : '—'}</td>
                     <td class="px-4 py-4 text-xs">
-                        ${t.expires_at
+                        ${t.lifetime || t.is_beta_exempt
+                            ? `<span class="text-green-300 font-semibold">Lifetime</span>`
+                            : t.expires_at
                             ? `<span class="${t.is_expired ? 'text-red-300 font-semibold' : 'section-title'}">${fmtDate(t.expires_at)}</span>`
-                            : `<span class="text-red-300 italic">No expiry</span>`
+                            : `<span class="text-soft italic">${escHtml(t.access_source || 'No expiry')}</span>`
                         }
                     </td>
                     <td class="px-4 py-4">
@@ -773,7 +790,7 @@
                                  style="background: color-mix(in srgb, var(--bg) 55%, transparent); border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);">
                                 <div class="text-[11px] uppercase tracking-[0.14em] text-soft font-bold mb-1">Expires</div>
                                 <div class="text-sm font-semibold ${t.is_expired ? 'text-red-300' : 'section-title'} break-words">
-                                    ${t.expires_at ? fmtDate(t.expires_at) : 'No expiry'}
+                                    ${t.lifetime || t.is_beta_exempt ? 'Lifetime' : (t.expires_at ? fmtDate(t.expires_at) : escHtml(t.access_source || 'No expiry'))}
                                 </div>
                             </div>
                         </div>
@@ -952,6 +969,77 @@
             }
         } catch (err) {
             showToast('Error: ' + err.message, 'error', 'Network Error');
+        }
+    }
+
+    async function toggleLifetime(token, enable) {
+        if (!confirm(enable ? 'Make this token lifetime?' : 'Remove lifetime access from this token?')) return;
+        try {
+            const resp = await fetch(`/api/admin/access/tokens/${encodeURIComponent(token)}/lifetime`, {
+                method: 'PATCH', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({subscription_exempt: enable})
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Lifetime update failed');
+            showToast(enable ? 'Lifetime access enabled.' : 'Lifetime access removed.', 'success', 'Access Updated');
+            loadTokens();
+        } catch (err) {
+            showToast(err.message, 'error', 'Access Update');
+        }
+    }
+
+    async function changeTokenExpiry(token) {
+        const action = (prompt('Action: set, extend, or reduce', 'set') || '').trim().toLowerCase();
+        if (!['set', 'extend', 'reduce'].includes(action)) return;
+        const days = Number(prompt(action === 'set' ? 'Days from now (0 makes lifetime)' : 'Number of days', action === 'set' ? '30' : '7'));
+        if (!Number.isInteger(days) || days < 0) {
+            showToast('Enter a valid whole number of days.', 'error', 'Expiry'); return;
+        }
+        try {
+            const resp = await fetch(`/api/admin/access/tokens/${encodeURIComponent(token)}/expiry`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action, days})
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Expiry update failed');
+            showToast(data.expires_at ? `Expiry updated: ${fmtDate(data.expires_at)}` : 'Token is now lifetime.', 'success', 'Expiry');
+            loadTokens();
+        } catch (err) {
+            showToast(err.message, 'error', 'Expiry');
+        }
+    }
+
+    async function runSubscriptionPreflight() {
+        try {
+            const resp = await fetch('/api/admin/subscriptions/preflight');
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Preflight failed');
+            if (!data.uncovered.length) {
+                showToast('Every current token has an access path.', 'success', 'Preflight'); return;
+            }
+            const names = data.uncovered.slice(0, 8).map(item => item.name).join(', ');
+            const grant = confirm(`${data.uncovered.length} token(s) would be uncovered: ${names}.\n\nMark all unlinked tokens as lifetime now?`);
+            if (grant) {
+                const grantResp = await fetch('/api/admin/access/grant-lifetime', {method: 'POST'});
+                const grantData = await grantResp.json();
+                if (!grantResp.ok) throw new Error(grantData.detail || 'Lifetime grant failed');
+                showToast(grantData.message, 'success', 'Preflight');
+                loadTokens();
+            }
+        } catch (err) {
+            showToast(err.message, 'error', 'Preflight');
+        }
+    }
+
+    async function backfillNames() {
+        try {
+            const resp = await fetch('/api/admin/access/backfill-names', {method: 'POST'});
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Name backfill failed');
+            showToast(data.message, 'success', 'Names');
+            loadTokens();
+        } catch (err) {
+            showToast(err.message, 'error', 'Names');
         }
     }
 

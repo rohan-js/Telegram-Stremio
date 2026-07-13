@@ -17,7 +17,7 @@ from Backend.helper.modal import Episode, MovieSchema, QualityDetail, QualityPar
 from Backend.helper.task_manager import delete_message
 from Backend.helper.torrent_stats import scrape_torrent_trackers
 from Backend.helper.host_outbound import build_vps_outbound_sample
-from Backend.helper.beta_access import default_token_limits
+from Backend.helper.beta_access import default_token_limits, is_exempt_token
 
 
 def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
@@ -2528,7 +2528,15 @@ class Database:
     # API Token Methods
     # -------------------------------
 
-    async def add_api_token(self, name: str, daily_limit_gb: float = None, monthly_limit_gb: float = None, user_id: int = None) -> dict:
+    async def add_api_token(
+        self,
+        name: str,
+        daily_limit_gb: float = None,
+        monthly_limit_gb: float = None,
+        user_id: int = None,
+        subscription_exempt: bool = False,
+        expires_at: datetime | None = None,
+    ) -> dict:
         # If a user_id is provided, return existing token if already created
         if user_id:
             existing = await self.dbs["tracking"]["api_tokens"].find_one({"user_id": user_id})
@@ -2545,6 +2553,9 @@ class Database:
             "name": name,
             "token": token,
             "user_id": user_id,
+            "is_admin": self._is_owner(user_id),
+            "subscription_exempt": bool(subscription_exempt),
+            "expires_at": expires_at,
             "created_at": datetime.utcnow(),
             "limits": {
                 "daily_limit_gb": daily_limit_gb if daily_limit_gb else 0,
@@ -2578,13 +2589,108 @@ class Database:
         result = await self.dbs["tracking"]["api_tokens"].delete_one({"token": token})
         return result.deleted_count > 0
 
-    async def link_token_user(self, token: str, user_id: int) -> bool:
-        """Link an existing token to a Telegram user_id."""
+    @staticmethod
+    def _is_owner(user_id) -> bool:
+        try:
+            return user_id is not None and int(user_id) == int(Telegram.OWNER_ID)
+        except (TypeError, ValueError):
+            return False
+
+    async def set_token_lifetime(self, token: str, exempt: bool) -> bool:
+        update = {"subscription_exempt": bool(exempt)}
+        if exempt:
+            update["expires_at"] = None
         result = await self.dbs["tracking"]["api_tokens"].update_one(
             {"token": token},
-            {"$set": {"user_id": user_id}}
+            {"$set": update},
         )
-        return result.modified_count > 0
+        return bool(result.matched_count)
+
+    async def update_token_expiry(self, token: str, action: str, days: int) -> Optional[dict]:
+        document = await self.dbs["tracking"]["api_tokens"].find_one({"token": token})
+        if not document:
+            return None
+        action = str(action or "set").lower()
+        days = max(0, int(days or 0))
+        now = datetime.utcnow()
+        current = document.get("expires_at")
+        if action == "set":
+            new_expiry = now + timedelta(days=days) if days else None
+        elif action == "extend":
+            if not days:
+                return None
+            base = current if current and current > now else now
+            new_expiry = base + timedelta(days=days)
+        elif action == "reduce":
+            if not days:
+                return None
+            base = current if current else now
+            new_expiry = max(now, base - timedelta(days=days))
+        else:
+            return None
+        await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$set": {
+                "expires_at": new_expiry,
+                "subscription_exempt": new_expiry is None,
+            }},
+        )
+        return await self.get_api_token(token)
+
+    async def grant_lifetime_to_unlinked(self) -> int:
+        result = await self.dbs["tracking"]["api_tokens"].update_many(
+            {"$or": [{"user_id": None}, {"user_id": {"$exists": False}}]},
+            {"$set": {"subscription_exempt": True, "expires_at": None}},
+        )
+        return int(result.modified_count)
+
+    async def count_uncovered_tokens(self) -> dict:
+        now = datetime.utcnow()
+        uncovered = []
+        tokens = await self.get_all_api_tokens()
+        for token_doc in tokens:
+            if is_exempt_token(token_doc) or token_doc.get("is_admin") or token_doc.get("subscription_exempt"):
+                continue
+            expiry = token_doc.get("expires_at")
+            if expiry and expiry > now:
+                continue
+            user_id = token_doc.get("user_id")
+            user = await self.get_user(int(user_id)) if user_id else None
+            subscription_expiry = user.get("subscription_expiry") if user else None
+            if (
+                user
+                and user.get("subscription_status") == "active"
+                and subscription_expiry
+                and subscription_expiry > now
+            ):
+                continue
+            uncovered.append({
+                "name": token_doc.get("name") or "Unnamed",
+                "user_id": user_id,
+                "token_prefix": str(token_doc.get("token") or "")[:8],
+            })
+        return {"total": len(tokens), "uncovered": uncovered}
+
+    async def update_token_name(self, token: str, name: str) -> bool:
+        result = await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$set": {"name": str(name).strip()}},
+        )
+        return bool(result.matched_count)
+
+    async def link_token_user(self, token: str, user_id: int) -> bool:
+        """Link an existing token to a Telegram user_id."""
+        existing = await self.dbs["tracking"]["api_tokens"].find_one({
+            "user_id": int(user_id),
+            "token": {"$ne": token},
+        })
+        if existing:
+            return False
+        result = await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$set": {"user_id": int(user_id), "is_admin": self._is_owner(user_id)}}
+        )
+        return bool(result.matched_count)
 
     async def update_token_usage(self, token: str, bytes_delta: int):
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")

@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from datetime import datetime
+from datetime import datetime, timezone
 from Backend import db
 from Backend.config import Telegram
 from Backend.helper.beta_access import is_exempt_token
@@ -51,10 +51,43 @@ async def verify_token(token: str):
     token_data["is_beta_exempt"] = is_exempt_token(token_data)
 
     if token_data["is_beta_exempt"]:
+        token_data["access_source"] = "internal_exemption"
         return token_data
 
-    # --- Subscription expiry check (only when SUBSCRIPTION feature is enabled) ---
-    if Telegram.SUBSCRIPTION:
+    try:
+        owner_linked = token_data.get("user_id") is not None and int(token_data["user_id"]) == int(Telegram.OWNER_ID)
+    except (TypeError, ValueError):
+        owner_linked = False
+    token_data["is_admin"] = bool(token_data.get("is_admin")) or owner_linked
+
+    def expired(value) -> bool:
+        if not value:
+            return False
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return True
+        now = datetime.now(timezone.utc) if getattr(value, "tzinfo", None) else datetime.utcnow()
+        return value <= now
+
+    access_granted = False
+    if token_data["is_admin"]:
+        token_data["access_source"] = "admin"
+        access_granted = True
+    elif token_data.get("subscription_exempt"):
+        token_data["access_source"] = "lifetime"
+        access_granted = True
+    elif token_data.get("expires_at") is not None:
+        if expired(token_data.get("expires_at")):
+            token_data["subscription_expired"] = True
+            token_data["access_source"] = "expired_token"
+            return token_data
+        token_data["access_source"] = "token_expiry"
+        access_granted = True
+
+    # Tokens without an independent grant follow the linked subscription in paid mode.
+    if not access_granted and Telegram.SUBSCRIPTION:
         user_id = token_data.get("user_id")
         if not user_id:
             # Token has no linked user — treat as expired (unverified token)
@@ -67,21 +100,12 @@ async def verify_token(token: str):
             return token_data
 
         expiry = user.get("subscription_expiry")
-        if not expiry:
+        if not expiry or expired(expiry):
             token_data["subscription_expired"] = True
             return token_data
-
-        # Compare correctly regardless of timezone awareness
-        now = datetime.utcnow()
-        try:
-            if expiry.tzinfo is not None:
-                from datetime import timezone
-                now = datetime.now(timezone.utc)
-        except AttributeError:
-            pass
-        if expiry < now:
-            token_data["subscription_expired"] = True
-            return token_data
+        token_data["access_source"] = "subscription"
+    elif not access_granted:
+        token_data["access_source"] = "open_mode"
 
     if daily_limit := limits.get("daily_limit_gb"):
         if daily_limit > 0:

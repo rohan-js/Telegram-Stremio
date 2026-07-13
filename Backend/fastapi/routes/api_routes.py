@@ -34,6 +34,7 @@ from Backend.helper.scan_manager import dbcheck_manager, scan_manager
 from Backend.config import Telegram
 from Backend.helper.warp_control import apply_warp_mode, get_warp_status
 from Backend.helper.production_ops import create_tracking_backup, get_launch_readiness
+from Backend.helper.beta_access import is_exempt_token
 from Backend.helper.owner_alerts import schedule_owner_alert
 from Backend.helper.backup import export_config, import_config
 from Backend.helper.health import run_health_checks
@@ -746,14 +747,99 @@ async def create_token_api(payload: dict):
             except (ValueError, TypeError):
                 return None
 
+        user_id = payload.get("user_id")
+        if user_id not in (None, "", 0, "0"):
+            try:
+                user_id = int(user_id)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Invalid Telegram user id.")
+            existing = await db.get_api_token_by_user(user_id)
+            if existing:
+                raise HTTPException(status_code=409, detail="That Telegram user already has a token.")
+        else:
+            user_id = None
+
         new_token = await db.add_api_token(
-            token_name, 
-            parse_limit(daily_limit), 
-            parse_limit(monthly_limit)
+            token_name,
+            parse_limit(daily_limit),
+            parse_limit(monthly_limit),
+            user_id=user_id,
+            subscription_exempt=bool(payload.get("subscription_exempt", False)),
         )
         return new_token
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def set_token_lifetime_api(token: str, payload: dict) -> dict:
+    lifetime = bool(payload.get("subscription_exempt"))
+    if not await db.set_token_lifetime(token, lifetime):
+        raise HTTPException(status_code=404, detail="Token not found.")
+    return {"status": "success", "subscription_exempt": lifetime}
+
+
+async def set_token_expiry_api(token: str, payload: dict) -> dict:
+    action = str(payload.get("action") or "set").lower()
+    if action not in {"set", "extend", "reduce"}:
+        raise HTTPException(status_code=400, detail="action must be set, extend, or reduce.")
+    try:
+        days = int(payload.get("days") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="days must be a number.")
+    if days < 0 or (action in {"extend", "reduce"} and days < 1):
+        raise HTTPException(status_code=400, detail="A positive day count is required.")
+
+    user_id = payload.get("user_id")
+    if user_id not in (None, "", 0, "0"):
+        await link_token_user_api(token, int(user_id))
+    result = await db.update_token_expiry(token, action, days)
+    if not result:
+        raise HTTPException(status_code=404, detail="Token not found or expiry update is invalid.")
+    expiry = result.get("expires_at")
+    return {
+        "status": "success",
+        "expires_at": expiry.isoformat() if hasattr(expiry, "isoformat") else expiry,
+        "subscription_exempt": bool(result.get("subscription_exempt")),
+    }
+
+
+async def subscription_preflight_api() -> dict:
+    result = await db.count_uncovered_tokens()
+    return {"status": "success", **result}
+
+
+async def grant_lifetime_api() -> dict:
+    count = await db.grant_lifetime_to_unlinked()
+    return {
+        "status": "success",
+        "updated": count,
+        "message": f"{count} unlinked token(s) marked as lifetime.",
+    }
+
+
+async def _telegram_display_name(user_id: int) -> str | None:
+    try:
+        user = await StreamBot.get_users(int(user_id))
+        name = " ".join(part for part in (user.first_name, user.last_name) if part).strip()
+        return name or (f"@{user.username}" if user.username else None)
+    except Exception as e:
+        LOGGER.debug(f"Could not backfill Telegram name for {user_id}: {e}")
+        return None
+
+
+async def backfill_token_names_api() -> dict:
+    updated = 0
+    for token_doc in await db.get_all_api_tokens():
+        user_id = token_doc.get("user_id")
+        current_name = str(token_doc.get("name") or "")
+        if not user_id or (current_name and current_name != f"User {user_id}" and not current_name.startswith("Token ")):
+            continue
+        name = await _telegram_display_name(int(user_id))
+        if name and await db.update_token_name(str(token_doc.get("token")), name):
+            updated += 1
+    return {"status": "success", "updated": updated, "message": f"{updated} token name(s) updated."}
 
 async def update_token_limits_api(token: str, payload: dict):
     try:
@@ -1156,97 +1242,91 @@ async def manage_subscriber_api(user_id: int, payload: dict) -> dict:
 # --- Access Management API ---
 
 async def get_all_tokens_api() -> dict:
-    from Backend import db
-    from Backend.config import Telegram
-    from datetime import datetime
     try:
         tokens = await db.get_all_api_tokens()
         now = datetime.utcnow()
-        result = []
-
-        # Pre-load all subscribers into a dict keyed by user_id for O(1) lookup
-        subscriber_map = {}       # user_id (str) -> user doc
+        result, subscriber_map = [], {}
         if Telegram.SUBSCRIPTION:
             try:
-                for u in await db.get_all_subscribers():
-                    uid = str(u.get("_id"))
-                    subscriber_map[uid] = u
+                subscriber_map = {
+                    str(user.get("_id")): user
+                    for user in await db.get_all_subscribers()
+                }
             except Exception:
                 pass
 
-        def display_name(user, user_id, token_name=None):
-            """Return a non-empty display name for a user."""
+        def display_name(user, user_id, token_name=None) -> str:
             if user:
-                n = user.get("first_name") or user.get("username")
-                if n:
-                    return n
-            # Fall back to the name stored on the token itself (set at creation time)
+                name = user.get("first_name") or user.get("username")
+                if name:
+                    return name
             if token_name:
                 return token_name
             return f"User {user_id}" if user_id else "Telegram User"
 
         def build_entry(user_id, user, token_doc):
-            """Build a unified access entry from optional user + token records."""
-            expiry = None
-            sub_status = None
-            user_found = bool(user)
-
-            if user:
-                sub_status = user.get("subscription_status")
-                expiry = user.get("subscription_expiry")
-
-            # Token-level expiry as fallback
-            if token_doc:
-                t_expiry = token_doc.get("subscription_expiry") or token_doc.get("expires_at")
-                if t_expiry and not expiry:
-                    expiry = t_expiry
-
-            # Determine status
-            if Telegram.SUBSCRIPTION:
-                if not user_found:
-                    is_expired = True
-                elif sub_status != "active":
-                    is_expired = True
-                elif not expiry:
-                    is_expired = True
-                else:
-                    is_expired = expiry < now
-            else:
-                is_expired = bool(expiry and expiry < now)
-
             token_str = token_doc.get("token") if token_doc else None
             created = token_doc.get("created_at") if token_doc else (user.get("created_at") if user else None)
+            token_expiry = token_doc.get("expires_at") if token_doc else None
+            subscription_expiry = user.get("subscription_expiry") if user else None
+            sub_status = user.get("subscription_status") if user else None
+            lifetime = bool(token_doc and token_doc.get("subscription_exempt"))
+            admin = bool(token_doc and token_doc.get("is_admin"))
+            beta_exempt = bool(token_doc and is_exempt_token(token_doc))
+
+            if beta_exempt:
+                is_expired, access_source = False, "internal_exemption"
+            elif admin:
+                is_expired, access_source = False, "admin"
+            elif lifetime:
+                is_expired, access_source = False, "lifetime"
+            elif token_expiry is not None:
+                is_expired, access_source = token_expiry <= now, "token_expiry"
+            elif Telegram.SUBSCRIPTION:
+                is_expired = not (
+                    user
+                    and sub_status == "active"
+                    and subscription_expiry
+                    and subscription_expiry > now
+                )
+                access_source = "subscription"
+            else:
+                is_expired, access_source = False, "open_mode"
+
+            if not token_str:
+                is_expired, access_source = True, "no_token"
+            expiry = token_expiry if token_expiry is not None else subscription_expiry
 
             return {
                 "token": token_str,
                 "user_id": user_id,
                 "user_name": display_name(user, user_id, token_doc.get("name") if token_doc else None),
-                "user_found": user_found,
+                "user_found": bool(user),
                 "has_token": bool(token_str),
-                "created_at": created.isoformat() if created else None,
-                "expires_at": expiry.isoformat() if expiry else None,
+                "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
+                "expires_at": expiry.isoformat() if hasattr(expiry, "isoformat") else expiry,
                 "is_expired": is_expired,
                 "sub_status": sub_status,
+                "lifetime": lifetime,
+                "subscription_exempt": lifetime,
+                "is_admin": admin,
+                "is_beta_exempt": beta_exempt,
+                "access_source": access_source,
+                "limits": (token_doc or {}).get("limits") or {},
                 "addon_url": (
                     f"{Telegram.BASE_URL}/stremio/{token_str}/manifest.json"
                     if token_str else (f"{Telegram.BASE_URL}/stremio/{Telegram.DEFAULT_ADDON_TOKEN}/manifest.json" if Telegram.DEFAULT_ADDON_TOKEN else None)
                 ),
             }
 
-        # Track user_ids that are already represented via a token row
         seen_user_ids = set()
-
-        # --- 1. Process all existing tokens ---
         for t in tokens:
             token_user_id = t.get("user_id")
-
-            # Try to resolve user from subscriber_map using token's user_id
             user = None
             if token_user_id:
                 uid_str = str(token_user_id)
                 user = subscriber_map.get(uid_str)
                 if not user:
-                    # Fallback: query DB if not in subscriber_map (e.g. non-active subscribers)
                     try:
                         user = await db.get_user(int(token_user_id))
                     except Exception:
@@ -1255,13 +1335,11 @@ async def get_all_tokens_api() -> dict:
 
             result.append(build_entry(token_user_id, user, t))
 
-        # --- 2. Add subscribers who have NO token ---
         for uid_str, u in subscriber_map.items():
             if uid_str in seen_user_ids:
-                continue  # already covered by a token row
+                continue
             result.append(build_entry(u.get("_id"), u, None))
 
-        # Sort: active-with-token first, then active-no-token, expired last
         result.sort(key=lambda x: (x["is_expired"], not x["has_token"]))
         return {"tokens": result}
     except Exception as e:
@@ -1302,7 +1380,7 @@ async def link_token_user_api(token: str, user_id: int) -> dict:
         success = await db.link_token_user(token, user_id)
         if success:
             return {"status": "success", "message": f"Token linked to user {user_id}."}
-        raise HTTPException(status_code=404, detail="Token not found or already linked.")
+        raise HTTPException(status_code=409, detail="Token was not found, or that user already has another token.")
     except HTTPException:
         raise
     except Exception as e:
