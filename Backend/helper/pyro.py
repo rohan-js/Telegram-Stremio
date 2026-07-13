@@ -11,6 +11,7 @@ from Backend.pyrofork.bot import StreamBot
 import re
 from pyrogram.types import BotCommand
 from pyrogram import enums
+from Backend.helper.split_files import VIDEO_EXTENSIONS, strip_part_suffix
 
 
 def is_media(message):
@@ -107,11 +108,35 @@ def remove_urls(text):
     if not text:
         return ""
     
-    url_pattern = r'\b(?:https?|ftp):\/\/[^\s/$.?#].[^\s]*'
+    url_pattern = r'\b(?:(?:https?|ftp):\/\/|www\.)[^\s/$.?#].[^\s]*'
     text_without_urls = re.sub(url_pattern, '', text)
     cleaned_text = re.sub(r'\s+', ' ', text_without_urls).strip()
     
     return cleaned_text
+
+
+_MEDIA_EXTENSION_RE = re.compile(
+    rf"\.(?:{'|'.join(VIDEO_EXTENSIONS)})(?:\.\d{{2,3}})?(?=$|[^A-Za-z0-9])",
+    re.IGNORECASE,
+)
+
+
+def finalize_media_name(title: str, is_split: bool = False) -> str:
+    """Normalize a caption or file name into one stable media filename."""
+    value = remove_urls(title or "video")
+    value = re.sub(r"[\r\n\t]+", " ", value)
+    value = re.sub(r"\s+", " ", value).strip().replace(" .", ".")
+
+    extension = _MEDIA_EXTENSION_RE.search(value)
+    if extension:
+        value = value[:extension.end()].strip()
+
+    if is_split:
+        value = strip_part_suffix(value)
+
+    if not re.search(rf"\.(?:{'|'.join(VIDEO_EXTENSIONS)})(?:\.\d{{2,3}})?$", value, re.IGNORECASE):
+        value += ".mkv"
+    return value
 
 
 
@@ -170,4 +195,3 @@ async def setup_bot_commands(bot: Client):
         LOGGER.info("Bot commands updated successfully.")
     except Exception as e:
         LOGGER.error(f"Error setting up bot commands: {e}")
-

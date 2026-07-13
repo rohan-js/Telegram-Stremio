@@ -12,7 +12,8 @@ from Backend import db
 from Backend.config import Telegram
 from Backend.helper.encrypt import encode_string
 from Backend.helper.metadata import metadata, extract_default_id, pop_match_failure
-from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
+from Backend.helper.pyro import clean_filename, finalize_media_name, get_readable_file_size, remove_urls
+from Backend.helper.split_files import VIDEO_EXTENSIONS as MEDIA_VIDEO_EXTENSIONS
 from Backend.helper.task_manager import edit_message
 from Backend.helper.torrent_source import (
     TorrentItem,
@@ -57,7 +58,7 @@ TORRENT_METADATA_FAILED_TEXT = (
     "<code>Movie Name 2024 1080p</code> / <code>Show.Name.S01E01</code>."
 )
 
-VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".flv", ".wmv")
+VIDEO_EXTENSIONS = tuple(f".{extension}" for extension in MEDIA_VIDEO_EXTENSIONS)
 
 
 def _telegram_user_name(user) -> str:
@@ -227,6 +228,13 @@ async def _process_ingest_job(job: dict) -> None:
         await _finalize_failed_status_or_reply(job, reason)
         LOGGER.warning(f"Metadata failed for queued {job.get('source_type')} item: {title} (ID: {job.get('msg_id')})")
         return
+
+    if job.get("source_type") == "telegram":
+        finalized_name = finalize_media_name(
+            job.get("display_name") or title,
+            is_split=bool(metadata_info.get("group_key")),
+        )
+        job["display_name"] = finalized_name
 
     if job.get("source_type") == "torrent":
         torrent = job.get("torrent") or {}
@@ -733,9 +741,7 @@ async def file_receive_handler(client: Client, message: Message):
                 except Exception as e:
                     LOGGER.debug(f"Precache enqueue failed for msg {msg_id}: {e}")
 
-                title = remove_urls(title)
-                if not title.endswith((".mkv", ".mp4")):
-                    title += ".mkv"
+                title = finalize_media_name(title)
 
                 if Backend.USE_DEFAULT_ID:
                     new_caption = (message.caption + "\n\n" + Backend.USE_DEFAULT_ID) if message.caption else Backend.USE_DEFAULT_ID
@@ -814,9 +820,7 @@ async def file_edited_handler(client: Client, message: Message):
                     LOGGER.info(f"Detected override ID '{override_id}' in edited message {msg_id}")
                     stream_id_hash = await encode_string({"chat_id": int(channel), "msg_id": msg_id})
                     await db.delete_media_by_stream_id(stream_id_hash)
-                    title = remove_urls(title)
-                    if not title.endswith((".mkv", ".mp4")):
-                        title += ".mkv"
+                    title = finalize_media_name(title)
                     await _enqueue_ingest_job(message, {
                         "source_type": "telegram",
                         "source_key": f"telegram:{message.chat.id}:{msg_id}",

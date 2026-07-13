@@ -9,8 +9,8 @@ from pyrogram.errors import ChatAdminRequired, ChannelPrivate, FloodWait
 from Backend.config import Telegram
 from Backend.helper.encrypt import decode_string, encode_string
 from Backend.helper.metadata import extract_default_id, metadata
-from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
-from Backend.helper.split_files import parse_split_info, strip_part_suffix
+from Backend.helper.pyro import clean_filename, finalize_media_name, get_readable_file_size
+from Backend.helper.split_files import parse_split_info
 from Backend.helper.announcer import announce_new_media
 from Backend.helper.requests_manager import mark_uploaded_for_media
 from Backend.helper.subtitles import ingest_subtitle, is_subtitle_file
@@ -265,9 +265,7 @@ class ScanManager:
             self.state["counters"]["skipped_dup"] += 1
             return
 
-        title = remove_urls(name)
-        if not title.lower().endswith((".mkv", ".mp4", ".avi", ".webm", ".mov", ".ts")):
-            title += ".mkv"
+        title = finalize_media_name(name)
 
         metadata_info = await metadata(
             clean_filename(title),
@@ -279,8 +277,7 @@ class ScanManager:
             self.state["counters"]["skipped_meta"] += 1
             return
 
-        if metadata_info.get("group_key"):
-            title = strip_part_suffix(title)
+        title = finalize_media_name(title, is_split=bool(metadata_info.get("group_key")))
 
         updated = await self._db.insert_media(
             metadata_info,

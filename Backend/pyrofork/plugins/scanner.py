@@ -19,7 +19,7 @@ from Backend.helper.custom_filter import CustomFilters
 from Backend.logger import LOGGER
 from Backend import db
 from Backend.config import Telegram
-from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
+from Backend.helper.pyro import clean_filename, finalize_media_name, get_readable_file_size
 from Backend.helper.metadata import metadata, extract_default_id, pop_match_failure
 from Backend.helper.encrypt import encode_string
 
@@ -211,7 +211,7 @@ async def _scan_channel(client: Client, chat_id: int):
             # ── Metadata extraction (same pipeline as receiver) ──
             try:
                 metadata_info = await metadata(
-                    clean_filename(title),
+                    clean_filename(finalize_media_name(title)),
                     channel_int,
                     msg_id,
                     override_id=extract_default_id(message.caption) if message.caption else None,
@@ -227,9 +227,7 @@ async def _scan_channel(client: Client, chat_id: int):
                 await _update_progress()
                 continue
 
-            title_clean = remove_urls(title)
-            if not title_clean.endswith(('.mkv', '.mp4')):
-                title_clean += '.mkv'
+            title_clean = finalize_media_name(title, is_split=bool(metadata_info.get("group_key")))
 
             # ── Insert into DB ───────────────────────────────────
             try:

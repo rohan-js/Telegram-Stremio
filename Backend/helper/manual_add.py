@@ -2,7 +2,7 @@ import re
 from typing import Optional, Tuple
 
 import PTN
-from Backend.helper.pyro import clean_filename, get_readable_file_size, is_media
+from Backend.helper.pyro import clean_filename, finalize_media_name, get_readable_file_size, is_media
 from Backend.helper.split_files import parse_split_info, strip_part_suffix
 
 _PRIVATE_LINK = re.compile(r"t\.me/c/(\d+)(?:/\d+)*/(\d+)")
@@ -37,10 +37,7 @@ def quality_from_height(height: int) -> str:
 
 
 def finalize_manual_name(raw_name: str, is_split: bool = False) -> str:
-    cleaned = clean_filename(raw_name or "video")
-    if is_split:
-        cleaned = strip_part_suffix(cleaned)
-    return cleaned
+    return finalize_media_name(raw_name, is_split=is_split)
 
 
 async def resolve_telegram_message(client, url: str = None, chat_id=None, msg_id=None) -> dict:
@@ -64,7 +61,7 @@ async def resolve_telegram_message(client, url: str = None, chat_id=None, msg_id
 
     caption = (getattr(message, "caption", None) or "").strip()
     raw_name = caption or getattr(media, "file_name", None) or "video"
-    cleaned = clean_filename(raw_name)
+    cleaned = clean_filename(finalize_media_name(raw_name))
     split_info = parse_split_info(cleaned)
     try:
         parsed = PTN.parse(strip_part_suffix(cleaned) if split_info else cleaned)
