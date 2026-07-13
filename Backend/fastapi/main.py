@@ -36,6 +36,7 @@ from Backend.fastapi.routes.api_routes import (
     list_custom_catalogs_api, create_custom_catalog_api, update_custom_catalog_api,
     delete_custom_catalog_api, get_custom_catalog_items_api, search_catalog_media_api,
     add_custom_catalog_item_api, remove_custom_catalog_item_api,
+    get_media_visibility_api, set_media_visibility_api,
     auto_sync_custom_catalogs_api, auto_catalog_sync_status_api,
     get_auto_catalog_settings_api, update_auto_catalog_settings_api,
     get_duplicate_media_api,
@@ -581,6 +582,19 @@ async def list_custom_catalogs(
 @app.post("/api/custom-catalogs")
 async def create_custom_catalog(payload: dict, _: bool = Depends(require_auth)):
     return await create_custom_catalog_api(payload)
+
+@app.get("/api/custom-catalogs/media-visibility")
+async def get_media_visibility(
+    tmdb_id: int,
+    db_index: int,
+    media_type: str,
+    _: bool = Depends(require_auth),
+):
+    return await get_media_visibility_api(tmdb_id, db_index, media_type)
+
+@app.post("/api/custom-catalogs/media-visibility")
+async def set_media_visibility(payload: dict, _: bool = Depends(require_auth)):
+    return await set_media_visibility_api(payload)
 
 @app.put("/api/custom-catalogs/{catalog_id}")
 async def update_custom_catalog(catalog_id: str, payload: dict, _: bool = Depends(require_auth)):

@@ -576,8 +576,6 @@ class Database:
             catalog = await self.get_custom_catalog(catalog_id)
             if catalog:
                 items = catalog.get("items") or []
-                if "visibility" in update_data or "allowed_tokens" in update_data:
-                    await self._apply_visibility_to_docs(items, catalog.get("visibility", "public"), catalog.get("allowed_tokens") or [])
                 if catalog.get("exclusive"):
                     await self._apply_exclusivity_to_docs(items, str(catalog_id), bool(catalog.get("searchable")))
                 else:
@@ -646,9 +644,10 @@ class Database:
         }
         try:
             catalog = await self.get_custom_catalog(catalog_id)
+            media = await self.get_document(media_type, int(tmdb_id), int(db_index))
             if catalog:
-                item["visibility"] = catalog.get("visibility", "public")
-                item["allowed_tokens"] = catalog.get("allowed_tokens") or []
+                item["visibility"] = (media or {}).get("visibility") or "public"
+                item["allowed_tokens"] = (media or {}).get("allowed_tokens") or []
             result = await self.dbs["tracking"]["custom_catalogs"].update_one(
                 {
                     "_id": ObjectId(catalog_id),
@@ -669,7 +668,6 @@ class Database:
                 }
             )
             if catalog:
-                await self._apply_visibility_to_docs([item], item.get("visibility", "public"), item.get("allowed_tokens") or [])
                 if catalog.get("exclusive"):
                     await self._apply_exclusivity_to_docs([item], str(catalog_id), bool(catalog.get("searchable")))
             return result.modified_count > 0
@@ -724,6 +722,7 @@ class Database:
             pass
 
     async def _refresh_media_visibility_from_catalogs(self, tmdb_id: int, db_index: int, media_type: str) -> None:
+        """Refresh exclusivity only; title visibility is stored on the media document."""
         try:
             media_type = "tv" if media_type in ("tv", "series") else "movie"
             cursor = self.dbs["tracking"]["custom_catalogs"].find({
@@ -736,14 +735,6 @@ class Database:
                 }
             })
             catalogs = [self._catalog_with_visibility_defaults(c) async for c in cursor]
-            selected = next((c for c in catalogs if c and c.get("visibility") in ("tokens", "owner")), None)
-            visibility = (selected or {}).get("visibility") or "public"
-            allowed = (selected or {}).get("allowed_tokens") or []
-            await self._apply_visibility_to_docs(
-                [{"tmdb_id": int(tmdb_id), "db_index": int(db_index), "media_type": media_type}],
-                visibility,
-                allowed,
-            )
             exclusive = next((c for c in catalogs if c and c.get("exclusive")), None)
             if exclusive:
                 await self._apply_exclusivity_to_docs(
@@ -753,6 +744,73 @@ class Database:
                 )
         except Exception:
             pass
+
+    async def get_media_visibility(self, tmdb_id: int, db_index: int, media_type: str) -> Optional[dict]:
+        media_type = "tv" if media_type in ("tv", "series") else "movie"
+        media = await self.get_document(media_type, int(tmdb_id), int(db_index))
+        if not media:
+            return None
+        return {
+            "tmdb_id": int(tmdb_id),
+            "db_index": int(db_index),
+            "media_type": media_type,
+            "visibility": self._normalize_visibility(media.get("visibility")),
+            "allowed_tokens": list(media.get("allowed_tokens") or []),
+            "exclusive_catalog_id": media.get("exclusive_catalog_id"),
+            "exclusive_searchable": bool(media.get("exclusive_searchable", False)),
+        }
+
+    async def set_media_visibility(
+        self,
+        tmdb_id: int,
+        db_index: int,
+        media_type: str,
+        visibility: str,
+        allowed_tokens: Optional[List[str]] = None,
+    ) -> Optional[dict]:
+        media_type = "tv" if media_type in ("tv", "series") else "movie"
+        visibility = self._normalize_visibility(visibility)
+        tokens = list(dict.fromkeys(
+            str(token).strip() for token in (allowed_tokens or []) if str(token).strip()
+        )) if visibility == "tokens" else []
+        db_key = f"storage_{int(db_index)}"
+        collection = self.dbs.get(db_key)
+        if collection is None:
+            return None
+        result = await collection[media_type].update_one(
+            {"tmdb_id": int(tmdb_id)},
+            {"$set": {"visibility": visibility, "allowed_tokens": tokens}},
+        )
+        if not result.matched_count:
+            return None
+
+        now = datetime.utcnow()
+        await self.dbs["tracking"]["custom_catalogs"].update_many(
+            {
+                "items": {
+                    "$elemMatch": {
+                        "tmdb_id": int(tmdb_id),
+                        "db_index": int(db_index),
+                        "media_type": media_type,
+                    }
+                }
+            },
+            {
+                "$set": {
+                    "items.$[item].visibility": visibility,
+                    "items.$[item].allowed_tokens": tokens,
+                    "updated_at": now,
+                }
+            },
+            array_filters=[
+                {
+                    "item.tmdb_id": int(tmdb_id),
+                    "item.db_index": int(db_index),
+                    "item.media_type": media_type,
+                }
+            ],
+        )
+        return await self.get_media_visibility(tmdb_id, db_index, media_type)
 
     async def _repair_custom_catalog_item_count(self, catalog_id: str) -> None:
         try:

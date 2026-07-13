@@ -392,6 +392,37 @@
     </div>
     {% endif %}
 
+    {% if media_details %}
+    <div class="glass-card rounded-3xl p-5 sm:p-6 lg:p-8 mb-6 sm:mb-8">
+        <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-5 sm:mb-6">
+            <div>
+                <h3 class="section-title text-xl sm:text-2xl">Title Visibility</h3>
+                <p class="muted mt-1 text-sm sm:text-base">Control which addon tokens can discover metadata and play this title.</p>
+            </div>
+            <span id="media-visibility-badge" class="pill">Loading</span>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,18rem)_1fr_auto] gap-4 lg:items-start">
+            <div>
+                <label class="field-label" for="media-visibility-mode">Visibility</label>
+                <select id="media-visibility-mode" class="field-input" onchange="updateMediaVisibilityControls()">
+                    <option value="public">Public</option>
+                    <option value="tokens">Selected tokens</option>
+                    <option value="owner">Owner only</option>
+                </select>
+            </div>
+            <div id="media-visibility-token-panel" class="hidden">
+                <label class="field-label">Allowed access tokens</label>
+                <div id="media-visibility-tokens" class="glass-card-soft rounded-2xl p-3 max-h-52 overflow-y-auto space-y-2"></div>
+            </div>
+            <button type="button" onclick="saveMediaVisibility()" class="btn-ui btn-primary lg:mt-7">
+                Save Visibility
+            </button>
+        </div>
+        <p id="media-visibility-status" class="muted text-sm mt-3">Public titles are visible to every valid addon token.</p>
+    </div>
+    {% endif %}
+
     <div class="glass-card rounded-3xl p-5 sm:p-6 lg:p-8 mb-6 sm:mb-8">
         <div class="flex items-center justify-between gap-3 mb-5 sm:mb-6">
             <h3 class="section-title text-xl sm:text-2xl">Edit Details</h3>
@@ -1205,10 +1236,120 @@
         }
     }
 
+    function setMediaVisibilityStatus(message, type = 'info') {
+        const status = document.getElementById('media-visibility-status');
+        if (!status) return;
+        status.textContent = message;
+        status.classList.remove('text-emerald-300', 'text-rose-300', 'text-amber-300');
+        if (type === 'success') status.classList.add('text-emerald-300');
+        if (type === 'error') status.classList.add('text-rose-300');
+        if (type === 'warn') status.classList.add('text-amber-300');
+    }
+
+    function updateMediaVisibilityControls() {
+        const mode = document.getElementById('media-visibility-mode')?.value || 'public';
+        const tokenPanel = document.getElementById('media-visibility-token-panel');
+        const badge = document.getElementById('media-visibility-badge');
+        tokenPanel?.classList.toggle('hidden', mode !== 'tokens');
+        if (badge) badge.textContent = mode === 'tokens' ? 'Selected tokens' : mode === 'owner' ? 'Owner only' : 'Public';
+        if (mode === 'tokens') {
+            setMediaVisibilityStatus('Only selected valid addon tokens can discover or stream this title.');
+        } else if (mode === 'owner') {
+            setMediaVisibilityStatus('This title stays available in the admin panel but is hidden from Stremio.');
+        } else {
+            setMediaVisibilityStatus('Public titles are visible to every valid addon token.');
+        }
+    }
+
+    function renderMediaVisibilityTokens(tokens, selectedTokens) {
+        const container = document.getElementById('media-visibility-tokens');
+        if (!container) return;
+        container.replaceChildren();
+        if (!tokens.length) {
+            const empty = document.createElement('p');
+            empty.className = 'muted text-sm';
+            empty.textContent = 'No active access tokens are available.';
+            container.appendChild(empty);
+            return;
+        }
+        tokens.forEach(item => {
+            const label = document.createElement('label');
+            label.className = 'flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 cursor-pointer';
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.name = 'media-visibility-token';
+            input.value = item.token;
+            input.checked = selectedTokens.includes(item.token);
+            input.className = 'h-4 w-4 accent-cyan-400';
+            const textWrap = document.createElement('span');
+            textWrap.className = 'min-w-0';
+            const name = document.createElement('span');
+            name.className = 'block text-sm font-bold text-white';
+            name.textContent = item.name || 'Unnamed token';
+            const token = document.createElement('span');
+            token.className = 'block muted text-xs break-all';
+            token.textContent = item.token;
+            textWrap.append(name, token);
+            label.append(input, textWrap);
+            container.appendChild(label);
+        });
+    }
+
+    async function loadMediaVisibility() {
+        if (!document.getElementById('media-visibility-mode')) return;
+        const params = new URLSearchParams({
+            tmdb_id: String(CURRENT_TMDB_ID),
+            db_index: String(CURRENT_DB_INDEX),
+            media_type: CURRENT_MEDIA_TYPE
+        });
+        try {
+            const response = await fetch(`/api/custom-catalogs/media-visibility?${params.toString()}`);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || 'Failed to load title visibility');
+            document.getElementById('media-visibility-mode').value = data.visibility || 'public';
+            renderMediaVisibilityTokens(data.available_tokens || [], data.allowed_tokens || []);
+            updateMediaVisibilityControls();
+        } catch (error) {
+            setMediaVisibilityStatus(error.message || 'Failed to load title visibility.', 'error');
+        }
+    }
+
+    async function saveMediaVisibility() {
+        const visibility = document.getElementById('media-visibility-mode')?.value || 'public';
+        const allowedTokens = Array.from(document.querySelectorAll('input[name="media-visibility-token"]:checked'))
+            .map(input => input.value);
+        if (visibility === 'tokens' && !allowedTokens.length) {
+            showToast('Select at least one access token.', 'error', 'Visibility');
+            return;
+        }
+        try {
+            const response = await fetch('/api/custom-catalogs/media-visibility', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    tmdb_id: CURRENT_TMDB_ID,
+                    db_index: CURRENT_DB_INDEX,
+                    media_type: CURRENT_MEDIA_TYPE,
+                    visibility,
+                    allowed_tokens: allowedTokens
+                })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || 'Failed to update title visibility');
+            setMediaVisibilityStatus(data.message || 'Title visibility updated.', 'success');
+            showToast(data.message || 'Title visibility updated.', 'success', 'Saved');
+            await loadMediaVisibility();
+        } catch (error) {
+            setMediaVisibilityStatus(error.message || 'Failed to update title visibility.', 'error');
+            showToast(error.message || 'Failed to update title visibility.', 'error', 'Error');
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         const select = document.getElementById('custom-catalog-select');
         if (select) select.addEventListener('change', updateCatalogDropdownStatus);
         loadMediaCatalogDropdown();
+        loadMediaVisibility();
         document.querySelectorAll('.season-content').forEach((content, index) => {
             if (index > 0) {
                 content.classList.add('season-collapsed');

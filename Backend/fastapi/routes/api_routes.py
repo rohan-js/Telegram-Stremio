@@ -1767,6 +1767,54 @@ async def list_custom_catalogs_api(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def get_media_visibility_api(tmdb_id: int, db_index: int, media_type: str):
+    visibility = await db.get_media_visibility(
+        int(tmdb_id), int(db_index), _normalize_media_type(media_type)
+    )
+    if not visibility:
+        raise HTTPException(status_code=404, detail="Media not found.")
+    tokens = await db.get_all_api_tokens()
+    visibility["available_tokens"] = [
+        {
+            "token": item.get("token"),
+            "name": item.get("name") or item.get("telegram_first_name") or item.get("telegram_username") or "Unnamed token",
+            "revoked": bool(item.get("revoked", False)),
+        }
+        for item in tokens
+        if item.get("token") and not item.get("revoked", False)
+    ]
+    return visibility
+
+
+async def set_media_visibility_api(payload: dict):
+    tmdb_id = payload.get("tmdb_id")
+    db_index = payload.get("db_index")
+    media_type = _normalize_media_type(payload.get("media_type", "movie"))
+    visibility, allowed_tokens = _clean_visibility(payload)
+    if not tmdb_id or not db_index:
+        raise HTTPException(status_code=400, detail="tmdb_id and db_index are required.")
+    if visibility not in _VISIBILITY_MODES:
+        raise HTTPException(status_code=400, detail="visibility must be public, tokens, or owner.")
+    if visibility == "tokens" and not allowed_tokens:
+        raise HTTPException(status_code=400, detail="Select at least one access token.")
+
+    known_tokens = {
+        str(item.get("token"))
+        for item in await db.get_all_api_tokens()
+        if item.get("token") and not item.get("revoked", False)
+    }
+    unknown_tokens = [token for token in allowed_tokens if token not in known_tokens]
+    if unknown_tokens:
+        raise HTTPException(status_code=400, detail="One or more selected access tokens are invalid or revoked.")
+
+    result = await db.set_media_visibility(
+        int(tmdb_id), int(db_index), media_type, visibility, allowed_tokens
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Media not found.")
+    return {"message": "Title visibility updated.", "visibility": result}
+
+
 async def create_custom_catalog_api(payload: dict):
     name = (payload.get("name") or "").strip()
     visible = bool(payload.get("visible", True))

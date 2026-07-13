@@ -306,17 +306,20 @@ def _token_can_view(mode: str | None, allowed_tokens: list | None, token_data: d
     return False
 
 
-def _effective_catalog_visibility(catalog: dict, item: dict | None = None) -> tuple[str, list]:
-    item = item or {}
-    if item.get("visibility") in ("public", "tokens", "owner"):
-        return item.get("visibility"), item.get("allowed_tokens") or []
-    return catalog.get("visibility") or ("public" if catalog.get("visible", True) else "owner"), catalog.get("allowed_tokens") or []
-
-
-def _media_visible_to_token(media: dict | None, token_data: dict, *, allow_searchable_exclusive: bool = False) -> bool:
+def _media_visible_to_token(
+    media: dict | None,
+    token_data: dict,
+    *,
+    allow_searchable_exclusive: bool = False,
+    catalog_id: str | None = None,
+) -> bool:
     if not media:
         return False
-    if media.get("exclusive_catalog_id") and not (allow_searchable_exclusive and media.get("exclusive_searchable")):
+    exclusive_catalog_id = str(media.get("exclusive_catalog_id") or "")
+    inside_exclusive_catalog = bool(catalog_id and exclusive_catalog_id == str(catalog_id))
+    if exclusive_catalog_id and not inside_exclusive_catalog and not (
+        allow_searchable_exclusive and media.get("exclusive_searchable")
+    ):
         return False
     return _token_can_view(media.get("visibility") or "public", media.get("allowed_tokens") or [], token_data)
 
@@ -740,22 +743,11 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
                 page=page,
                 page_size=PAGE_SIZE,
             )
-            raw_items = data.get("items", [])
-            visible_items = []
-            raw_catalog_items = catalog.get("items") or []
-            for media_doc in raw_items:
-                matching_item = next(
-                    (
-                        item for item in raw_catalog_items
-                        if int(item.get("tmdb_id", -1)) == int(media_doc.get("tmdb_id", -2))
-                        and int(item.get("db_index", -1)) == int(media_doc.get("db_index", -2))
-                        and item.get("media_type") == media_doc.get("media_type")
-                    ),
-                    {},
-                )
-                if _token_can_view(*_effective_catalog_visibility(catalog, matching_item), token_data):
-                    visible_items.append(media_doc)
-            items = visible_items
+            items = [
+                media_doc
+                for media_doc in data.get("items", [])
+                if _media_visible_to_token(media_doc, token_data, catalog_id=catalog_id)
+            ]
         elif search_query:
             search_results = await db.search_documents(query=search_query, page=page, page_size=PAGE_SIZE)
             all_items = search_results.get("results", [])
