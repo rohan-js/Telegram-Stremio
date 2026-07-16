@@ -2,6 +2,7 @@ import unittest
 
 from Backend.helper.watch_links import (
     callback_data_fits,
+    nuvio_callback_data,
     telegram_user_display_name,
     watch_callback_data,
 )
@@ -16,6 +17,12 @@ class WatchLinkHelperTests(unittest.TestCase):
 
     def test_callback_data_limit_rejects_long_values(self):
         self.assertFalse(callback_data_fits("x" * 65))
+
+    def test_nuvio_callback_data_stays_under_telegram_limit(self):
+        callback_data = nuvio_callback_data("AbCdEf12")
+
+        self.assertEqual(callback_data, "nuvio_AbCdEf12")
+        self.assertTrue(callback_data_fits(callback_data))
 
     def test_telegram_user_display_name_prefers_full_name(self):
         self.assertEqual(

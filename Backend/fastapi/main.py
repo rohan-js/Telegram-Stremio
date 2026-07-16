@@ -9,6 +9,7 @@ from Backend.fastapi.security.credentials import require_auth
 from Backend.fastapi.routes.stream_routes import router as stream_router, decay_client_failures
 from Backend.fastapi.routes.stremio_routes import router as stremio_router
 from Backend.fastapi.routes.iptv_routes import router as iptv_router
+from Backend.fastapi.routes.nuvio_routes import router as nuvio_router
 from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page, public_status_page, stremio_guide_page,
@@ -91,6 +92,7 @@ async def _startup():
 app.include_router(stream_router)
 app.include_router(stremio_router)
 app.include_router(iptv_router)
+app.include_router(nuvio_router)
 
 # --- Public Routes (No Authentication Required) ---
 @app.get("/login", response_class=HTMLResponse)

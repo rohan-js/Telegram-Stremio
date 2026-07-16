@@ -16,6 +16,7 @@ from Backend.helper.pyro import clean_filename, finalize_media_name, get_readabl
 from Backend.helper.split_files import VIDEO_EXTENSIONS as MEDIA_VIDEO_EXTENSIONS, parse_split_info
 from Backend.helper.manual_add import resolve_telegram_message
 from Backend.helper.manual_session import manual_session_manager
+from Backend.helper.nuvio import build_nuvio_bridge_url
 from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.task_manager import edit_message
 from Backend.helper.torrent_source import (
@@ -30,6 +31,7 @@ from Backend.helper.torrent_downloads import (
 )
 from Backend.helper.watch_links import (
     callback_data_fits,
+    nuvio_callback_data,
     telegram_user_display_name,
     watch_callback_data,
 )
@@ -365,6 +367,7 @@ async def send_reply_messages():
             base_url = Telegram.BASE_URL.rstrip("/")
             token = Telegram.DEFAULT_ADDON_TOKEN
             imdb_id = metadata_info.get("imdb_id", "")
+            tmdb_id = metadata_info.get("tmdb_id") or metadata_info.get("moviedb_id")
             media_type = metadata_info.get("media_type", "movie")
             movie_title = metadata_info.get("title", "Unknown")
             year = metadata_info.get("year", "")
@@ -382,6 +385,20 @@ async def send_reply_messages():
                     stremio_link = f"{base_url}/stremio/open/movie/{imdb_id}"
             else:
                 stremio_link = f"{base_url}/stremio/{token}/configure" if token else f"{base_url}/stremio"
+
+            nuvio_link = None
+            if Telegram.NUVIO_WATCH_ENABLED:
+                try:
+                    nuvio_link = build_nuvio_bridge_url(
+                        base_url=base_url,
+                        media_type=media_type,
+                        imdb_id=imdb_id,
+                        tmdb_id=tmdb_id,
+                        season=metadata_info.get("season_number") if media_type in {"tv", "series"} else None,
+                        episode=metadata_info.get("episode_number") if media_type in {"tv", "series"} else None,
+                    )
+                except (TypeError, ValueError) as e:
+                    LOGGER.debug(f"Nuvio watch link unavailable for {movie_title}: {e}")
 
             if source_type == "telegram" and encoded_string and token:
                 direct_stream = f"{base_url}/dl/{token}/{encoded_string}/video.mkv"
@@ -445,9 +462,11 @@ async def send_reply_messages():
             try:
                 watch_request_id = await db.create_watch_link_request({
                     "stremio_link": stremio_link,
+                    "nuvio_link": nuvio_link,
                     "media_title": movie_title,
                     "media_type": media_type,
                     "imdb_id": imdb_id,
+                    "tmdb_id": tmdb_id,
                     "season_number": metadata_info.get("season_number"),
                     "episode_number": metadata_info.get("episode_number"),
                     "source_type": source_type,
@@ -459,13 +478,21 @@ async def send_reply_messages():
                     buttons_row.append(InlineKeyboardButton("▶️ Watch in Stremio", callback_data=watch_data))
                 else:
                     buttons_row.append(InlineKeyboardButton("▶️ Watch in Stremio", url=stremio_link))
+                if nuvio_link:
+                    nuvio_data = nuvio_callback_data(watch_request_id)
+                    if callback_data_fits(nuvio_data):
+                        buttons_row.append(InlineKeyboardButton("▶️ Watch in Nuvio", callback_data=nuvio_data))
+                    else:
+                        buttons_row.append(InlineKeyboardButton("▶️ Watch in Nuvio", url=nuvio_link))
             except Exception as e:
                 LOGGER.warning(f"Could not create watch callback link, falling back to direct URL: {e}")
                 buttons_row.append(InlineKeyboardButton("▶️ Watch in Stremio", url=stremio_link))
+                if nuvio_link:
+                    buttons_row.append(InlineKeyboardButton("▶️ Watch in Nuvio", url=nuvio_link))
 
-            if vlc_page:
-                buttons_row.append(InlineKeyboardButton("🎬 Watch in VLC", url=vlc_page))
             button_rows = [buttons_row]
+            if vlc_page:
+                button_rows.append([InlineKeyboardButton("🎬 Watch in VLC", url=vlc_page)])
             if source_type == "torrent" and metadata_info.get("info_hash"):
                 button_rows.append([
                     InlineKeyboardButton(
@@ -657,14 +684,39 @@ async def torrent_download_callback(client: Client, callback_query: CallbackQuer
 @Client.on_callback_query(filters.regex(r"^watch_([A-Za-z0-9_-]{6,24})$"))
 async def watch_link_callback(client: Client, callback_query: CallbackQuery):
     request_id = callback_query.matches[0].group(1)
+    await _deliver_watch_link_callback(client, callback_query, request_id, "stremio")
+
+
+@Client.on_callback_query(filters.regex(r"^nuvio_([A-Za-z0-9_-]{6,24})$"))
+async def nuvio_link_callback(client: Client, callback_query: CallbackQuery):
+    request_id = callback_query.matches[0].group(1)
+    await _deliver_watch_link_callback(client, callback_query, request_id, "nuvio")
+
+
+async def _deliver_watch_link_callback(
+    client: Client,
+    callback_query: CallbackQuery,
+    request_id: str,
+    platform: str,
+):
     requester = _requester_from_callback(callback_query)
     if not requester.get("user_id"):
         return await callback_query.answer("Could not identify your Telegram account.", show_alert=True)
 
     try:
-        watch_request = await db.mark_watch_link_requested(request_id, requester)
+        watch_request = await db.mark_watch_link_requested(request_id, requester, platform=platform)
         if not watch_request:
             return await callback_query.answer("This watch link expired. Please use a newer post.", show_alert=True)
+
+        platform_name = "Nuvio" if platform == "nuvio" else "Stremio"
+        link_key = "nuvio_link" if platform == "nuvio" else "stremio_link"
+        watch_url = watch_request.get(link_key)
+        if not watch_url:
+            await db.mark_watch_link_delivery(request_id, "failed", "watch link unavailable", platform=platform)
+            return await callback_query.answer(
+                f"{platform_name} link is unavailable for this title.",
+                show_alert=True,
+            )
 
         await db.update_user_interaction(
             int(requester["user_id"]),
@@ -680,32 +732,36 @@ async def watch_link_callback(client: Client, callback_query: CallbackQuery):
         if media_type == "tv" and season and episode:
             episode_text = f"\n📺 S{int(season):02d}E{int(episode):02d}"
 
+        platform_note = f"Tap the button below to open this title in {platform_name}."
+        if platform == "nuvio" and media_type == "tv" and season and episode:
+            platform_note += " Nuvio opens the series page; select the episode there."
+
         message = callback_query.message
         target_chat_id = message.chat.id if message else int(requester["user_id"])
         reply_to_message_id = message.id if message else None
         await client.send_message(
             chat_id=target_chat_id,
             text=(
-                f"▶️ <b>Watch in Stremio</b>\n\n"
+                f"▶️ <b>Watch in {platform_name}</b>\n\n"
                 f"🎬 <b>{escape(str(title))}</b>{episode_text}\n\n"
-                "Tap the button below to open this title in Stremio."
+                f"{platform_note}"
             ),
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("▶️ Watch in Stremio", url=watch_request["stremio_link"])]
+                [InlineKeyboardButton(f"▶️ Watch in {platform_name}", url=watch_url)]
             ]),
             disable_web_page_preview=True,
             reply_to_message_id=reply_to_message_id,
         )
-        await db.mark_watch_link_delivery(request_id, "sent")
-        await callback_query.answer("Watch link posted in the channel.", show_alert=False)
+        await db.mark_watch_link_delivery(request_id, "sent", platform=platform)
+        await callback_query.answer(f"{platform_name} link posted in the channel.", show_alert=False)
     except Exception as e:
-        LOGGER.warning(f"Could not deliver watch link callback {request_id}: {e}")
+        LOGGER.warning(f"Could not deliver {platform} watch link callback {request_id}: {e}")
         try:
-            await db.mark_watch_link_delivery(request_id, "failed", str(e))
+            await db.mark_watch_link_delivery(request_id, "failed", str(e), platform=platform)
         except Exception:
             pass
-        await callback_query.answer("Please start the bot first, then tap Watch again.", show_alert=True)
+        await callback_query.answer("Could not post the watch link. Please try again.", show_alert=True)
 
 
 async def _queue_torrent_item(message: Message, item: TorrentItem, override_id: str | None) -> bool:

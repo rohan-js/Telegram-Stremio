@@ -13,7 +13,7 @@
                 </div>
                 <h1 class="mt-3 text-2xl sm:text-3xl lg:text-4xl font-extrabold text-text">Watch Requests</h1>
                 <p class="mt-2 text-sm text-text-secondary max-w-2xl">
-                    See who clicked the channel Watch in Stremio callback and when the final watch link was posted.
+                    See who requested Stremio or Nuvio links and when each link was posted in Telegram.
                 </p>
             </div>
             <button onclick="loadWatchRequests()" class="px-5 py-3 rounded-2xl bg-primary text-background font-bold hover:brightness-110 transition-all inline-flex items-center justify-center gap-2">
@@ -54,7 +54,7 @@
         <div id="watch-empty" class="hidden p-10 text-center">
             <i class="fa-solid fa-circle-play text-4xl text-white/10 mb-3"></i>
             <p class="text-sm text-text-secondary font-medium">No watch requests yet.</p>
-            <p class="text-xs text-text-secondary mt-1">Clicks will appear here after someone taps Watch in Stremio in Telegram.</p>
+            <p class="text-xs text-text-secondary mt-1">Clicks will appear here after someone requests a Stremio or Nuvio link in Telegram.</p>
         </div>
 
         <div id="watch-error" class="hidden p-10 text-center">
@@ -75,6 +75,7 @@
                         <th class="py-5 px-6">Requester</th>
                         <th class="py-5 px-6">Username</th>
                         <th class="py-5 px-6">User ID</th>
+                        <th class="py-5 px-6">Platform</th>
                         <th class="py-5 px-6">Type</th>
                         <th class="py-5 px-6">Status</th>
                         <th class="py-5 px-6">Clicks</th>
@@ -137,6 +138,16 @@ function statusClass(status) {
     return 'bg-white/10 text-text-secondary';
 }
 
+function platformLabel(item) {
+    return String(item?.last_platform || 'stremio').toLowerCase() === 'nuvio' ? 'Nuvio' : 'Stremio';
+}
+
+function platformClass(item) {
+    return platformLabel(item) === 'Nuvio'
+        ? 'bg-cyan-400/10 text-cyan-300'
+        : 'bg-purple-400/10 text-purple-300';
+}
+
 function renderMobileCard(item) {
     const username = item?.requester_username ? '@' + item.requester_username : 'No username';
     const status = item?.last_delivery_status || 'requested';
@@ -148,12 +159,16 @@ function renderMobileCard(item) {
                     <h3 class="text-sm font-bold text-text truncate">${escapeHtml(item?.media_title || 'Unknown Title')}</h3>
                     <p class="mt-1 text-xs text-text-secondary">${escapeHtml(mediaSubtitle(item))}</p>
                 </div>
-                <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap ${statusClass(status)}">${escapeHtml(status)}</span>
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap ${platformClass(item)}">${escapeHtml(platformLabel(item))}</span>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap ${statusClass(status)}">${escapeHtml(status)}</span>
+                </div>
             </div>
             <div class="mt-4 pt-4 border-t border-white/5 grid grid-cols-1 gap-2 text-xs">
                 <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Requester</span><span class="text-text text-right truncate max-w-[65%]">${escapeHtml(item?.requester_name || 'Telegram User')}</span></div>
                 <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Username</span><span class="text-text text-right truncate max-w-[65%]">${escapeHtml(username)}</span></div>
                 <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">User ID</span><span class="font-mono text-text text-right truncate max-w-[65%]">${escapeHtml(item?.requester_user_id || 'Unknown')}</span></div>
+                <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Platform</span><span class="text-text text-right truncate max-w-[65%]">${escapeHtml(platformLabel(item))}</span></div>
                 <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Source Type</span><span class="text-text text-right truncate max-w-[65%]">${escapeHtml(item?.source_type || 'media')}</span></div>
                 <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Clicks</span><span class="font-mono text-text text-right truncate max-w-[65%]">${escapeHtml(clickCount)}</span></div>
                 <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Clicked</span><span class="text-text text-right truncate max-w-[65%]">${escapeHtml(formatTimestamp(item?.clicked_at))}</span></div>
@@ -178,6 +193,7 @@ function renderTableRow(item) {
             </td>
             <td class="py-5 px-6 text-xs text-text-secondary">${escapeHtml(username)}</td>
             <td class="py-5 px-6 font-mono text-xs text-text">${escapeHtml(item?.requester_user_id || 'Unknown')}</td>
+            <td class="py-5 px-6"><span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase ${platformClass(item)}">${escapeHtml(platformLabel(item))}</span></td>
             <td class="py-5 px-6 text-xs text-text">${escapeHtml(item?.source_type || 'media')}</td>
             <td class="py-5 px-6"><span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase ${statusClass(status)}">${escapeHtml(status)}</span></td>
             <td class="py-5 px-6 font-mono text-xs text-text">${escapeHtml(clickCount)}</td>

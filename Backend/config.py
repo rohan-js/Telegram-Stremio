@@ -197,6 +197,7 @@ class Telegram:
     ADMIN_USERNAME = getenv("ADMIN_USERNAME", "fyvio")
     ADMIN_PASSWORD = getenv("ADMIN_PASSWORD", "fyvio")
     DEFAULT_ADDON_TOKEN = getenv("DEFAULT_ADDON_TOKEN", "").strip()
+    NUVIO_WATCH_ENABLED = getenv("NUVIO_WATCH_ENABLED", "true").lower() == "true"
 
     PUBLIC_BETA_ENABLED = getenv("PUBLIC_BETA_ENABLED", "false").lower() == "true"
     BETA_INVITE_ONLY = getenv("BETA_INVITE_ONLY", "true").lower() == "true"

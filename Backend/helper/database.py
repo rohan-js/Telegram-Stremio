@@ -2814,7 +2814,7 @@ class Database:
     # -------------------------------
 
     async def create_watch_link_request(self, payload: dict, ttl_days: int = 7) -> str:
-        """Create a short callback lookup for channel Watch in Stremio buttons."""
+        """Create a short callback lookup for channel watch buttons."""
         col = self.dbs["tracking"]["watch_link_requests"]
         now = datetime.utcnow()
         expires_at = now + timedelta(days=int(ttl_days or 7))
@@ -2830,9 +2830,11 @@ class Database:
             doc = {
                 "_id": request_id,
                 "stremio_link": payload.get("stremio_link"),
+                "nuvio_link": payload.get("nuvio_link"),
                 "media_title": payload.get("media_title"),
                 "media_type": payload.get("media_type"),
                 "imdb_id": payload.get("imdb_id"),
+                "tmdb_id": payload.get("tmdb_id"),
                 "season_number": payload.get("season_number"),
                 "episode_number": payload.get("episode_number"),
                 "source_type": payload.get("source_type"),
@@ -2841,6 +2843,8 @@ class Database:
                 "created_at": now,
                 "expires_at": expires_at,
                 "click_count": 0,
+                "platform_click_counts": {"stremio": 0, "nuvio": 0},
+                "platform_delivery": {},
             }
             try:
                 await col.insert_one(doc)
@@ -2854,7 +2858,15 @@ class Database:
         doc = await self.dbs["tracking"]["watch_link_requests"].find_one({"_id": str(request_id)})
         return convert_objectid_to_str(doc) if doc else None
 
-    async def mark_watch_link_requested(self, request_id: str, requester: dict) -> Optional[dict]:
+    async def mark_watch_link_requested(
+        self,
+        request_id: str,
+        requester: dict,
+        platform: str = "stremio",
+    ) -> Optional[dict]:
+        platform = str(platform or "stremio").strip().lower()
+        if platform not in {"stremio", "nuvio"}:
+            raise ValueError("Unsupported watch platform")
         now = datetime.utcnow()
         update = {
             "$set": {
@@ -2864,9 +2876,15 @@ class Database:
                 "requester_username": requester.get("username"),
                 "requester_name": requester.get("name"),
                 "clicked_at": now,
+                "last_platform": platform,
                 "last_delivery_status": "pending",
+                f"platform_delivery.{platform}.status": "pending",
+                f"platform_delivery.{platform}.requested_at": now,
             },
-            "$inc": {"click_count": 1},
+            "$inc": {
+                "click_count": 1,
+                f"platform_click_counts.{platform}": 1,
+            },
         }
         doc = await self.dbs["tracking"]["watch_link_requests"].find_one_and_update(
             {"_id": str(request_id), "expires_at": {"$gt": now}},
@@ -2875,15 +2893,34 @@ class Database:
         )
         return convert_objectid_to_str(doc) if doc else None
 
-    async def mark_watch_link_delivery(self, request_id: str, status: str, error: str | None = None) -> None:
+    async def mark_watch_link_delivery(
+        self,
+        request_id: str,
+        status: str,
+        error: str | None = None,
+        platform: str = "stremio",
+    ) -> None:
+        platform = str(platform or "stremio").strip().lower()
+        if platform not in {"stremio", "nuvio"}:
+            raise ValueError("Unsupported watch platform")
+        now = datetime.utcnow()
         update = {
             "$set": {
+                "last_platform": platform,
                 "last_delivery_status": status,
-                "last_delivery_at": datetime.utcnow(),
+                "last_delivery_at": now,
+                f"platform_delivery.{platform}.status": status,
+                f"platform_delivery.{platform}.updated_at": now,
             }
         }
         if error:
             update["$set"]["last_delivery_error"] = str(error)[:240]
+            update["$set"][f"platform_delivery.{platform}.error"] = str(error)[:240]
+        else:
+            update["$unset"] = {
+                "last_delivery_error": "",
+                f"platform_delivery.{platform}.error": "",
+            }
         await self.dbs["tracking"]["watch_link_requests"].update_one({"_id": str(request_id)}, update)
 
     async def get_recent_watch_link_requests(self, limit: int = 20) -> List[dict]:
@@ -2894,6 +2931,7 @@ class Database:
                 "media_title": 1,
                 "media_type": 1,
                 "imdb_id": 1,
+                "tmdb_id": 1,
                 "season_number": 1,
                 "episode_number": 1,
                 "source_type": 1,
@@ -2904,6 +2942,8 @@ class Database:
                 "requester_username": 1,
                 "clicked_at": 1,
                 "click_count": 1,
+                "last_platform": 1,
+                "platform_click_counts": 1,
                 "last_delivery_status": 1,
                 "last_delivery_error": 1,
             },

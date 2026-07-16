@@ -1,9 +1,14 @@
 WATCH_CALLBACK_PREFIX = "watch_"
+NUVIO_CALLBACK_PREFIX = "nuvio_"
 MAX_CALLBACK_DATA_BYTES = 64
 
 
 def watch_callback_data(request_id: str) -> str:
     return f"{WATCH_CALLBACK_PREFIX}{request_id}"
+
+
+def nuvio_callback_data(request_id: str) -> str:
+    return f"{NUVIO_CALLBACK_PREFIX}{request_id}"
 
 
 def callback_data_fits(callback_data: str) -> bool:
