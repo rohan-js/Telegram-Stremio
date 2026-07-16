@@ -5,6 +5,7 @@ from Backend.helper.metadata_matcher import (
     MatchIntent,
     build_title_variants,
     choose_best_candidate,
+    enrich_candidate_identity,
     normalize_title,
 )
 
@@ -50,6 +51,47 @@ class MetadataMatcherTests(unittest.TestCase):
             MatchCandidate("tmdb", "F9", 2021, "movie", tmdb_id=385128),
         ])
         self.assertTrue(decision.accepted)
+
+    def test_equivalent_provider_candidates_share_missing_external_ids(self):
+        selected = MatchCandidate(
+            "tmdb",
+            "Farzi",
+            2023,
+            "tv",
+            tmdb_id=132117,
+        )
+        enriched = enrich_candidate_identity(selected, [
+            selected,
+            MatchCandidate(
+                "imdb",
+                "Farzi",
+                None,
+                "tv",
+                imdb_id="tt15477488",
+            ),
+        ])
+
+        self.assertEqual(enriched.imdb_id, "tt15477488")
+        self.assertEqual(enriched.tmdb_id, 132117)
+
+    def test_external_ids_are_not_shared_across_conflicting_years(self):
+        selected = MatchCandidate("tmdb", "Master", 2021, "movie", tmdb_id=1)
+        enriched = enrich_candidate_identity(selected, [
+            selected,
+            MatchCandidate("imdb", "Master", 1990, "movie", imdb_id="tt0000001"),
+        ])
+
+        self.assertIsNone(enriched.imdb_id)
+        self.assertEqual(enriched.tmdb_id, 1)
+
+    def test_external_ids_are_not_guessed_for_generic_title_with_missing_year(self):
+        selected = MatchCandidate("tmdb", "Master", 2021, "movie", tmdb_id=1)
+        enriched = enrich_candidate_identity(selected, [
+            selected,
+            MatchCandidate("imdb", "Master", None, "movie", imdb_id="tt0000001"),
+        ])
+
+        self.assertIsNone(enriched.imdb_id)
 
     def test_generic_title_without_year_accepts_highest_score(self):
         intent = MatchIntent(

@@ -88,6 +88,52 @@ class DatabaseQualityDedupeTests(unittest.TestCase):
         self.assertEqual(updated[0]["name"], "New.mkv")
         self.assertTrue(updated[0]["hidden_from_stremio"])
 
+    def test_partial_media_record_backfills_missing_identity_and_metadata(self):
+        existing = {
+            "title": "Farzi",
+            "imdb_id": None,
+            "tmdb_id": 132117,
+            "release_year": 0,
+            "description": "",
+            "poster": "",
+        }
+        incoming = {
+            "title": "Farzi",
+            "imdb_id": "tt15477488",
+            "tmdb_id": 132117,
+            "release_year": 2023,
+            "description": "An artist is pulled into counterfeiting.",
+            "poster": "https://example.invalid/farzi.jpg",
+        }
+
+        self.database._backfill_missing_media_metadata(existing, incoming)
+
+        self.assertEqual(existing["imdb_id"], "tt15477488")
+        self.assertEqual(existing["release_year"], 2023)
+        self.assertEqual(existing["description"], incoming["description"])
+        self.assertEqual(existing["poster"], incoming["poster"])
+
+    def test_backfill_does_not_overwrite_existing_manual_metadata(self):
+        existing = {
+            "imdb_id": "tt15477488",
+            "tmdb_id": 132117,
+            "release_year": 2023,
+            "description": "Manual description",
+        }
+        incoming = {
+            "imdb_id": "tt99999999",
+            "tmdb_id": 999,
+            "release_year": 2024,
+            "description": "Provider description",
+        }
+
+        self.database._backfill_missing_media_metadata(existing, incoming)
+
+        self.assertEqual(existing["imdb_id"], "tt15477488")
+        self.assertEqual(existing["tmdb_id"], 132117)
+        self.assertEqual(existing["release_year"], 2023)
+        self.assertEqual(existing["description"], "Manual description")
+
 
 if __name__ == "__main__":
     unittest.main()

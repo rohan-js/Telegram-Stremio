@@ -115,6 +115,30 @@ class Database:
             client.close()
         LOGGER.info("All database connections closed.")
 
+    @staticmethod
+    def _backfill_missing_media_metadata(existing: dict, incoming: dict) -> None:
+        """Heal partial records without overwriting established/manual metadata."""
+        fields = (
+            "imdb_id",
+            "tmdb_id",
+            "release_year",
+            "rating",
+            "description",
+            "poster",
+            "backdrop",
+            "logo",
+            "genres",
+            "cast",
+            "runtime",
+            "original_language",
+            "origin_country",
+            "production_countries",
+            "watch_providers",
+        )
+        for field in fields:
+            if not existing.get(field) and incoming.get(field):
+                existing[field] = incoming[field]
+
     async def update_current_db_index(self):
         await self.dbs["tracking"]["state"].update_one(
             {"_id": "db_index"},
@@ -1643,6 +1667,7 @@ class Database:
 
         # ---------------- UPDATE MOVIE ----------------
         movie_id = existing_movie["_id"]
+        self._backfill_missing_media_metadata(existing_movie, movie_dict)
         existing_qualities = existing_movie.get("telegram", [])
 
         if quality_to_update.get("group_key"):
@@ -1748,6 +1773,7 @@ class Database:
 
         # ---------------- UPDATE TV ----------------
         tv_id = existing_tv["_id"]
+        self._backfill_missing_media_metadata(existing_tv, tv_show_dict)
 
         for season in tv_show_dict["seasons"]:
             existing_season = next(

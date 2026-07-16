@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -75,6 +75,38 @@ class MatchDecision:
     reason: str
     candidates: list[dict]
     extra: dict | None = None
+
+
+def enrich_candidate_identity(
+    selected: MatchCandidate | None,
+    candidates: list[MatchCandidate],
+) -> MatchCandidate | None:
+    """Fill missing external IDs from equivalent provider candidates."""
+    if selected is None or (selected.imdb_id and selected.tmdb_id):
+        return selected
+
+    selected_title = normalize_title(selected.title)
+    equivalents: list[MatchCandidate] = []
+
+    for candidate in candidates:
+        if candidate is selected or candidate.media_type != selected.media_type:
+            continue
+        if normalize_title(candidate.title) != selected_title:
+            continue
+        if selected.year and candidate.year and abs(int(selected.year) - int(candidate.year)) > 1:
+            continue
+        if selected.year and not candidate.year and selected_title in GENERIC_TITLES:
+            continue
+        equivalents.append(candidate)
+
+    imdb_ids = {candidate.imdb_id for candidate in equivalents if candidate.imdb_id}
+    tmdb_ids = {candidate.tmdb_id for candidate in equivalents if candidate.tmdb_id}
+    imdb_id = selected.imdb_id or (next(iter(imdb_ids)) if len(imdb_ids) == 1 else None)
+    tmdb_id = selected.tmdb_id or (next(iter(tmdb_ids)) if len(tmdb_ids) == 1 else None)
+
+    if imdb_id == selected.imdb_id and tmdb_id == selected.tmdb_id:
+        return selected
+    return replace(selected, imdb_id=imdb_id, tmdb_id=tmdb_id)
 
 
 def normalize_title(value: str | None) -> str:

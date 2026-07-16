@@ -17,6 +17,7 @@ from Backend.helper.metadata_matcher import (
     build_title_variants,
     choose_best_candidate,
     decision_metadata,
+    enrich_candidate_identity,
     normalize_title,
 )
 from Backend.helper.gemini_matcher import maybe_rerank_with_gemini
@@ -199,6 +200,18 @@ def _attach_match_details(metadata_info: dict | None, match_details: dict | None
     return metadata_info
 
 
+def _preserve_candidate_identity(
+    metadata_info: dict | None,
+    candidate: MatchCandidate | None,
+) -> dict | None:
+    """Keep known IDs when a downstream metadata provider returns partial data."""
+    if not metadata_info or not candidate:
+        return metadata_info
+    metadata_info["imdb_id"] = metadata_info.get("imdb_id") or candidate.imdb_id
+    metadata_info["tmdb_id"] = metadata_info.get("tmdb_id") or candidate.tmdb_id
+    return metadata_info
+
+
 def _safe_year(value) -> int | None:
     try:
         value = int(value)
@@ -369,7 +382,8 @@ async def resolve_movie_match(title: str, year=None, raw_title: str | None = Non
     candidates = await _movie_candidates(variants, year)
     decision = choose_best_candidate(intent, candidates)
     decision = await maybe_rerank_with_gemini(intent, decision, candidates)
-    return decision.candidate if decision.accepted else None, decision_metadata(decision, intent)
+    candidate = enrich_candidate_identity(decision.candidate, candidates) if decision.accepted else None
+    return candidate, decision_metadata(decision, intent)
 
 
 async def resolve_tv_match(title: str, season=None, episode=None, year=None, season_pack: bool = False, raw_title: str | None = None, parsed: dict | None = None) -> tuple[MatchCandidate | None, dict]:
@@ -393,7 +407,8 @@ async def resolve_tv_match(title: str, season=None, episode=None, year=None, sea
     candidates = await _tv_candidates(variants, year)
     decision = choose_best_candidate(intent, candidates)
     decision = await maybe_rerank_with_gemini(intent, decision, candidates)
-    return decision.candidate if decision.accepted else None, decision_metadata(decision, intent)
+    candidate = enrich_candidate_identity(decision.candidate, candidates) if decision.accepted else None
+    return candidate, decision_metadata(decision, intent)
 
 
 async def _retry_api_call(label: str, func, attempts: int = 3, base_delay: float = 0.8):
@@ -607,6 +622,7 @@ async def metadata(
         if season and episode:
             LOGGER.info(f"Fetching TV metadata: {title} S{season}E{episode}")
             match_details = None
+            candidate = None
             if anime_channel and not explicit_default_id:
                 anime_result = await fetch_anime_metadata(title, season, episode, encoded_string, year, quality)
                 if anime_result:
@@ -621,10 +637,16 @@ async def metadata(
                     LOGGER.warning(f"TV metadata match failed for {filename}: {match_details.get('match_rejection_reason')}")
                     return None
                 default_id = candidate.imdb_id or candidate.tmdb_id
-            result = _attach_match_details(await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id), match_details, filename)
+            fetched = await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id)
+            result = _attach_match_details(
+                _preserve_candidate_identity(fetched, candidate),
+                match_details,
+                filename,
+            )
         elif season:
             LOGGER.info(f"Fetching TV season-pack metadata: {title} S{season}")
             match_details = None
+            candidate = None
             if not explicit_default_id and not default_id:
                 candidate, match_details = await resolve_tv_match(title, season, None, year, season_pack=True, raw_title=filename, parsed=parsed)
                 if not candidate:
@@ -632,10 +654,16 @@ async def metadata(
                     LOGGER.warning(f"TV season-pack metadata match failed for {filename}: {match_details.get('match_rejection_reason')}")
                     return None
                 default_id = candidate.imdb_id or candidate.tmdb_id
-            result = _attach_match_details(await fetch_tv_season_pack_metadata(title, season, encoded_string, year, quality, default_id), match_details, filename)
+            fetched = await fetch_tv_season_pack_metadata(title, season, encoded_string, year, quality, default_id)
+            result = _attach_match_details(
+                _preserve_candidate_identity(fetched, candidate),
+                match_details,
+                filename,
+            )
         else:
             LOGGER.info(f"Fetching Movie metadata: {title} ({year})")
             match_details = None
+            candidate = None
             if anime_channel and not explicit_default_id:
                 anime_result = await fetch_anime_movie_metadata(title, encoded_string, year, quality)
                 if anime_result:
@@ -650,7 +678,12 @@ async def metadata(
                     LOGGER.warning(f"Movie metadata match failed for {filename}: {match_details.get('match_rejection_reason')}")
                     return None
                 default_id = candidate.imdb_id or candidate.tmdb_id
-            result = _attach_match_details(await fetch_movie_metadata(title, encoded_string, year, quality, default_id), match_details, filename)
+            fetched = await fetch_movie_metadata(title, encoded_string, year, quality, default_id)
+            result = _attach_match_details(
+                _preserve_candidate_identity(fetched, candidate),
+                match_details,
+                filename,
+            )
         if result is not None:
             result["group_key"] = group_key
             result["part_number"] = part_number
