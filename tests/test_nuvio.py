@@ -19,13 +19,25 @@ from Backend.helper.nuvio import (
 
 class NuvioLinkTests(unittest.TestCase):
     def test_builds_imdb_movie_and_series_links(self):
-        self.assertEqual(build_nuvio_deep_link("movie", "tt1234567"), "nuvio://movie/tt1234567")
-        self.assertEqual(build_nuvio_deep_link("tv", "tt7654321"), "nuvio://series/tt7654321")
+        self.assertEqual(
+            build_nuvio_deep_link("movie", "tt1234567"),
+            "nuvio://meta?type=movie&id=tt1234567",
+        )
+        self.assertEqual(
+            build_nuvio_deep_link("tv", "tt7654321"),
+            "nuvio://meta?type=series&id=tt7654321",
+        )
 
     def test_builds_tmdb_fallback_links(self):
         self.assertEqual(select_nuvio_media_id(None, 1399), "tmdb:1399")
-        self.assertEqual(build_nuvio_deep_link("series", "tmdb:1399"), "nuvio://tmdb/tv/1399")
-        self.assertEqual(build_nuvio_deep_link("movie", "tmdb:550"), "nuvio://tmdb/movie/550")
+        self.assertEqual(
+            build_nuvio_deep_link("series", "tmdb:1399"),
+            "nuvio://meta?type=series&id=tmdb%3A1399",
+        )
+        self.assertEqual(
+            build_nuvio_deep_link("movie", "tmdb:550"),
+            "nuvio://meta?type=movie&id=tmdb%3A550",
+        )
 
     def test_bridge_url_prefers_imdb_and_keeps_episode_context(self):
         url = build_nuvio_bridge_url(
@@ -49,8 +61,8 @@ class NuvioLinkTests(unittest.TestCase):
 
     def test_android_and_install_links_do_not_lock_to_package(self):
         self.assertEqual(
-            build_nuvio_android_intent("nuvio://movie/tt1234567"),
-            "intent://movie/tt1234567#Intent;scheme=nuvio;end",
+            build_nuvio_android_intent("nuvio://meta?type=movie&id=tt1234567"),
+            "intent://meta?type=movie&id=tt1234567#Intent;scheme=nuvio;end",
         )
         self.assertEqual(
             build_nuvio_install_link("https://addon.test/stremio/token/manifest.json"),
@@ -91,9 +103,10 @@ class NuvioRouteTests(unittest.IsolatedAsyncioTestCase):
 
         body = response.body.decode("utf-8")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("nuvio://series/tt0944947", body)
+        self.assertIn(r"nuvio://meta?type=series\u0026id=tt0944947", body)
         self.assertIn("S01E08", body)
         self.assertIn("https://addon.test/stremio/token123/manifest.json", body)
+        self.assertIn("https://github.com/NuvioMedia/NuvioDesktop/releases/latest", body)
         self.assertEqual(response.headers.get("cache-control"), "no-store")
 
     async def test_bridge_rejects_invalid_media_id(self):

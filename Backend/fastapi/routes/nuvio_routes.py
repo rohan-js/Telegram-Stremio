@@ -14,6 +14,7 @@ from Backend.helper.nuvio import (
 
 router = APIRouter(prefix="/nuvio", tags=["Nuvio"])
 templates = Jinja2Templates(directory="Backend/fastapi/templates")
+NUVIO_DESKTOP_RELEASES_URL = "https://github.com/NuvioMedia/NuvioDesktop/releases/latest"
 
 
 @router.get("/open/{media_type}/{media_id}", response_class=HTMLResponse)
@@ -49,6 +50,7 @@ async def nuvio_open(
             "manifest_url": manifest_url,
             "install_link": install_link,
             "episode_label": episode_label,
+            "desktop_releases_url": NUVIO_DESKTOP_RELEASES_URL,
         },
         headers={
             "Cache-Control": "no-store",

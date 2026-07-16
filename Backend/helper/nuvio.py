@@ -43,10 +43,10 @@ def select_nuvio_media_id(imdb_id=None, tmdb_id=None) -> str | None:
 def build_nuvio_deep_link(media_type: str, media_id: str) -> str:
     normalized_type = normalize_nuvio_media_type(media_type)
     normalized_id = normalize_nuvio_media_id(media_id)
-    if normalized_id.startswith("tmdb:"):
-        provider_type = "tv" if normalized_type == "series" else "movie"
-        return f"nuvio://tmdb/{provider_type}/{normalized_id.split(':', 1)[1]}"
-    return f"nuvio://{normalized_type}/{quote(normalized_id, safe='')}"
+    # Nuvio itself uses the meta query form for notifications. It is the
+    # canonical format and works across more client versions than shorthand
+    # links such as nuvio://movie/<id>.
+    return f"nuvio://meta?{urlencode({'type': normalized_type, 'id': normalized_id})}"
 
 
 def build_nuvio_android_intent(deep_link: str) -> str:

@@ -86,6 +86,7 @@
             <button type="button" class="secondary" onclick="copyManifest()">Copy Manifest URL</button>
             <div id="manifest" class="manifest">{{ manifest_url }}</div>
             {% endif %}
+            <a id="windows-update" class="secondary" href="{{ desktop_releases_url }}" hidden>Update Nuvio Desktop</a>
         </div>
     </main>
 
@@ -114,6 +115,9 @@
         }
 
         window.addEventListener('load', () => {
+            if (/windows/i.test(navigator.userAgent)) {
+                document.getElementById('windows-update').hidden = false;
+            }
             setTimeout(openNuvio, 100);
             setTimeout(() => {
                 document.getElementById('actions').classList.add('visible');
