@@ -12,7 +12,7 @@ os.environ.setdefault("DATABASE", "mongodb://tracking,mongodb://storage")
 
 from Backend.fastapi.routes import stream_routes
 from Backend.config import Telegram
-from Backend.fastapi.routes.stremio_routes import build_downloaded_torrent_stream
+from Backend.fastapi.routes.stremio_routes import build_downloaded_torrent_stream, build_local_vps_stream
 from Backend.helper.torrent_downloads import (
     QBitTorrentClient,
     TorrentDownloadManager,
@@ -222,6 +222,37 @@ class StremioDownloadedStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Downloaded to VPS", stream["title"])
         self.assertIn("/downloaded/token/", stream["url"])
 
+    async def test_build_local_vps_stream_uses_existing_protected_route(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            local_file = root / "manual" / "Movie.mkv"
+            local_file.parent.mkdir()
+            local_file.write_bytes(b"video")
+            quality = {
+                "source_type": "local_vps",
+                "local_rel_path": "manual/Movie.mkv",
+                "filename": "Movie.mkv",
+                "size": "5 B",
+            }
+            with patch("Backend.fastapi.routes.stremio_routes.download_root_dir", lambda: root):
+                stream = await build_local_vps_stream("token", quality, "Telegram 1080p")
+
+        self.assertEqual(stream["name"], "VPS Local 1080p")
+        self.assertIn("Stored on VPS", stream["title"])
+        self.assertIn("/downloaded/token/", stream["url"])
+        self.assertEqual(stream["behaviorHints"]["videoSize"], 5)
+
+    async def test_build_local_vps_stream_skips_missing_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            quality = {
+                "source_type": "local_vps",
+                "local_rel_path": "manual/missing.mkv",
+            }
+            with patch("Backend.fastapi.routes.stremio_routes.download_root_dir", lambda: Path(tmp)):
+                stream = await build_local_vps_stream("token", quality, "Telegram 1080p")
+
+        self.assertIsNone(stream)
+
 
 class DownloadedUsageAccountingTests(unittest.IsolatedAsyncioTestCase):
     async def test_file_range_stream_counts_only_yielded_bytes(self):
@@ -291,6 +322,35 @@ class DownloadedUsageAccountingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("content-range", response.headers)
         self.assertNotEqual(response.headers.get("content-length"), "10")
         self.assertEqual(fake_db.calls, [])
+
+    async def test_local_vps_nginx_offload_uses_same_protected_handler(self):
+        class FakeRequest:
+            method = "GET"
+            headers = {"Range": "bytes=0-"}
+
+        async def fake_decode(_encoded):
+            return {"source_type": "local_vps", "rel_path": "manual/video.mkv", "name": "video.mkv"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            local_file = root / "manual" / "video.mkv"
+            local_file.parent.mkdir()
+            local_file.write_bytes(b"0123456789")
+            with (
+                patch.object(stream_routes, "decode_string", fake_decode),
+                patch.object(stream_routes, "download_root_dir", lambda: root),
+                patch.object(stream_routes.Telegram, "NGINX_DOWNLOAD_ACCEL_REDIRECT_ENABLED", True),
+            ):
+                response = await stream_routes.downloaded_torrent_stream_handler(
+                    FakeRequest(),
+                    token="token",
+                    id="encoded",
+                    name="video.mkv",
+                    token_data={"name": "test"},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-accel-redirect"], "/_downloads/manual/video.mkv")
 
 
 if __name__ == "__main__":

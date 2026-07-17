@@ -31,6 +31,8 @@ class QualityDetail(BaseModel):
     torrent_source_uri: Optional[str] = None
     torrent_file_chat_id: Optional[int] = None
     torrent_file_msg_id: Optional[int] = None
+    local_rel_path: Optional[str] = None
+    local_size: Optional[int] = None
     hidden_from_stremio: bool = False
     recommended: bool = False
     quality_note: Optional[str] = None

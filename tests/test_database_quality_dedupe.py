@@ -88,6 +88,30 @@ class DatabaseQualityDedupeTests(unittest.TestCase):
         self.assertEqual(updated[0]["name"], "New.mkv")
         self.assertTrue(updated[0]["hidden_from_stremio"])
 
+    def test_exact_local_vps_path_replaces_existing_entry(self):
+        existing = [
+            {
+                "source_type": "local_vps",
+                "local_rel_path": "manual/Pizza/movie.mkv",
+                "quality": "1080p",
+                "name": "Old.mkv",
+                "recommended": True,
+            }
+        ]
+        incoming = {
+            "source_type": "local_vps",
+            "local_rel_path": "manual/Pizza/movie.mkv",
+            "quality": "1080p",
+            "name": "Pizza.mkv",
+        }
+
+        updated, replaced = self.database._replace_exact_source_quality(existing, incoming)
+
+        self.assertTrue(replaced)
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0]["name"], "Pizza.mkv")
+        self.assertTrue(updated[0]["recommended"])
+
     def test_partial_media_record_backfills_missing_identity_and_metadata(self):
         existing = {
             "title": "Farzi",

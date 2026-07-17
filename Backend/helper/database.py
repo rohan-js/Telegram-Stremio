@@ -1458,6 +1458,8 @@ class Database:
             torrent_source_uri=metadata_info.get("torrent_source_uri"),
             torrent_file_chat_id=metadata_info.get("torrent_file_chat_id"),
             torrent_file_msg_id=metadata_info.get("torrent_file_msg_id"),
+            local_rel_path=metadata_info.get("local_rel_path"),
+            local_size=metadata_info.get("local_size"),
             hidden_from_stremio=bool(metadata_info.get("hidden_from_stremio", False)),
             recommended=bool(metadata_info.get("recommended", False)),
             quality_note=metadata_info.get("quality_note"),
@@ -1511,6 +1513,11 @@ class Database:
             if info_hash:
                 return f"torrent:{info_hash}:{quality.get('file_idx')}"
 
+        if source_type == "local_vps":
+            rel_path = str(quality.get("local_rel_path") or "").replace("\\", "/").lstrip("/")
+            if rel_path:
+                return f"local_vps:{rel_path}"
+
         if source_type == "telegram":
             encoded_id = quality.get("id")
             if encoded_id:
@@ -1520,6 +1527,104 @@ class Database:
             return f"{source_type}:origin:{quality.get('origin_chat_id')}:{quality.get('origin_msg_id')}"
 
         return None
+
+    async def upsert_local_vps_quality(
+        self,
+        *,
+        media_type: str,
+        rel_path: str,
+        filename: str,
+        quality: str,
+        size_bytes: int,
+        imdb_id: Optional[str] = None,
+        tmdb_id: Optional[int] = None,
+        season_number: Optional[int] = None,
+        episode_number: Optional[int] = None,
+        recommended: bool = False,
+        quality_note: Optional[str] = None,
+    ) -> dict:
+        """Attach a file already present under the configured download root."""
+        normalized_type = "tv" if media_type in {"tv", "series"} else "movie"
+        clean_rel = str(rel_path or "").replace("\\", "/").lstrip("/")
+        if not clean_rel or "\x00" in clean_rel or ".." in clean_rel.split("/"):
+            raise ValueError("Invalid local VPS relative path")
+
+        try:
+            size_bytes = int(size_bytes)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Invalid local VPS file size") from exc
+        if size_bytes <= 0:
+            raise ValueError("Local VPS file size must be positive")
+
+        from Backend.helper.pyro import get_readable_file_size
+
+        local_quality = QualityDetail(
+            quality=str(quality or "HD"),
+            id=f"local:{clean_rel}",
+            name=str(filename or clean_rel.rsplit("/", 1)[-1]),
+            size=get_readable_file_size(size_bytes),
+            source_type="local_vps",
+            filename=str(filename or clean_rel.rsplit("/", 1)[-1]),
+            video_size=size_bytes,
+            local_rel_path=clean_rel,
+            local_size=size_bytes,
+            recommended=bool(recommended),
+            quality_note=quality_note,
+        ).dict()
+
+        collection_name = "tv" if normalized_type == "tv" else "movie"
+        query = {}
+        if imdb_id:
+            query["imdb_id"] = str(imdb_id)
+        elif tmdb_id is not None:
+            query["tmdb_id"] = int(tmdb_id)
+        else:
+            raise ValueError("IMDb ID or TMDb ID is required")
+
+        for db_key in sorted(key for key in self.dbs if key.startswith("storage_")):
+            collection = self.dbs[db_key][collection_name]
+            document = await collection.find_one(query)
+            if not document:
+                continue
+
+            if normalized_type == "movie":
+                qualities = list(document.get("telegram") or [])
+                qualities, replaced = self._replace_exact_source_quality(qualities, local_quality)
+                if not replaced:
+                    qualities.append(local_quality)
+                document["telegram"] = qualities
+            else:
+                if season_number is None or episode_number is None:
+                    raise ValueError("Season and episode are required for a TV local file")
+                target_episode = None
+                for season in document.get("seasons") or []:
+                    if int(season.get("season_number") or 0) != int(season_number):
+                        continue
+                    for episode in season.get("episodes") or []:
+                        if int(episode.get("episode_number") or 0) == int(episode_number):
+                            target_episode = episode
+                            break
+                if target_episode is None:
+                    raise ValueError("Target TV episode was not found")
+                qualities = list(target_episode.get("telegram") or [])
+                qualities, replaced = self._replace_exact_source_quality(qualities, local_quality)
+                if not replaced:
+                    qualities.append(local_quality)
+                target_episode["telegram"] = qualities
+
+            document["updated_on"] = datetime.utcnow()
+            await collection.replace_one({"_id": document["_id"]}, document)
+            return {
+                "db_key": db_key,
+                "db_index": int(db_key.split("_", 1)[1]),
+                "media_type": normalized_type,
+                "tmdb_id": document.get("tmdb_id"),
+                "imdb_id": document.get("imdb_id"),
+                "title": document.get("title"),
+                "quality": local_quality,
+            }
+
+        raise ValueError("Target media was not found")
 
     def _same_source_identity(self, existing_quality: dict, new_quality: dict) -> bool:
         existing_key = self._source_identity_key(existing_quality)

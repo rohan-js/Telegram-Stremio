@@ -543,7 +543,7 @@ async def downloaded_torrent_stream_handler(
 ):
     enforce_playback_token(token_data)
     decoded = await decode_string(id)
-    if decoded.get("source_type") != "downloaded_torrent":
+    if decoded.get("source_type") not in {"downloaded_torrent", "local_vps"}:
         raise HTTPException(status_code=400, detail="Invalid downloaded stream id")
 
     rel_path = decoded.get("rel_path")

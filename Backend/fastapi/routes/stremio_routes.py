@@ -10,7 +10,11 @@ from Backend.fastapi.security.tokens import verify_token
 from Backend.helper.encrypt import encode_string
 from Backend.helper.global_search import global_search, is_global_search_enabled
 from Backend.logger import LOGGER
-from Backend.helper.torrent_downloads import select_completed_torrent_file
+from Backend.helper.torrent_downloads import (
+    download_root_dir,
+    safe_download_file_path,
+    select_completed_torrent_file,
+)
 from Backend.helper.subtitles import get_subtitles_for, stremio_subtitle_entries
 from Backend.helper.iptv import (
     IPTV_ALL_CATALOG_ID,
@@ -274,6 +278,43 @@ async def build_downloaded_torrent_stream(
             if part
         ),
         "url": f"{BASE_URL}/downloaded/{token}/{encoded}/video.mkv",
+    }
+
+
+async def build_local_vps_stream(token: str, quality: dict, stream_name: str) -> Optional[dict]:
+    rel_path = str(quality.get("local_rel_path") or "").replace("\\", "/").lstrip("/")
+    if not rel_path:
+        return None
+    try:
+        file_path = safe_download_file_path(download_root_dir(), rel_path)
+    except ValueError:
+        LOGGER.warning("Ignoring local VPS quality with invalid path")
+        return None
+    if not file_path.is_file():
+        LOGGER.warning(f"Ignoring missing local VPS file: {rel_path}")
+        return None
+
+    file_size = file_path.stat().st_size
+    filename = str(quality.get("filename") or file_path.name)
+    payload = {
+        "source_type": "local_vps",
+        "rel_path": rel_path,
+        "name": filename,
+        "size": file_size,
+    }
+    encoded = await encode_string(payload)
+    local_name = stream_name.replace("Telegram", "VPS Local", 1)
+    if local_name == stream_name:
+        local_name = f"VPS Local {stream_name}".strip()
+    size_text = quality.get("size") or f"{file_size / (1024 ** 3):.2f} GB"
+    return {
+        "name": local_name,
+        "title": f"📁 {filename}\n💾 {size_text}\n✅ Stored on VPS",
+        "url": f"{BASE_URL}/downloaded/{token}/{encoded}/video.mkv",
+        "behaviorHints": {
+            "filename": filename,
+            "videoSize": file_size,
+        },
     }
 
 
@@ -947,7 +988,15 @@ async def get_streams(
         if badges:
             stream_name = f"{' | '.join(badges)} | {stream_name}"
 
-        if (quality.get("source_type") or "telegram") == "torrent":
+        source_type = quality.get("source_type") or "telegram"
+        if source_type == "local_vps":
+            local_stream = await build_local_vps_stream(token, quality, stream_name)
+            if local_stream:
+                local_stream["_recommended"] = bool(quality.get("recommended"))
+                streams.append(local_stream)
+            continue
+
+        if source_type == "torrent":
             info_hash = quality.get("info_hash")
             torrent_stats = await db.get_torrent_stats(info_hash) if info_hash else None
             download_job = await db.get_torrent_download(info_hash) if info_hash else None
