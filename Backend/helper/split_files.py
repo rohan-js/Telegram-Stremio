@@ -3,9 +3,21 @@ from typing import Optional, Tuple
 
 VIDEO_EXTENSIONS = ("mkv", "mp4", "avi", "ts", "m4v", "mov", "wmv", "webm", "flv", "m2ts", "mpg", "mpeg")
 _VIDEO_EXTENSIONS = "|".join(VIDEO_EXTENSIONS)
-_TRAILING_NUMERIC_PATTERN = re.compile(rf"(?i)\.({_VIDEO_EXTENSIONS})\.(\d{{2,3}})(?=$|\D)")
+_ARCHIVE_EXTENSIONS = r"zip"
+_TRAILING_NUMERIC_PATTERN = re.compile(rf"(?i)\.({_VIDEO_EXTENSIONS}|{_ARCHIVE_EXTENSIONS})\.(\d{{2,3}})(?=$|\D)")
 _NUMERIC_PATTERN = re.compile(r"(?i)[\.\-_](\d{2,3})(?=[\.\-_][a-z0-9]{2,4}$)")
 _NORMALIZE_RE = re.compile(r"[\.\-_ ]+")
+_ARCHIVE_SET = {"zip"}
+
+
+#----- Return the archive extension ('zip') if the name is a split archive part, else None
+def split_archive_ext(filename: str) -> Optional[str]:
+    if not filename:
+        return None
+    match = _find_split_match(filename.strip())
+    if match and match[3] and match[3].lower() in _ARCHIVE_SET:
+        return match[3].lower()
+    return None
 
 
 def _normalize(base: str) -> str:

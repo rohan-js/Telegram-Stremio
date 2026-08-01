@@ -124,6 +124,79 @@
       outline: 3px solid var(--primary-dark);
       outline-offset: 2px;
     }
+    .settings { margin-top: 22px; }
+    .settings h2 { margin: 0 0 9px; font-size: 15px; letter-spacing: 0; }
+    .settings p.hint { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 800; color: var(--text); }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: rgba(7, 19, 31, 0.5);
+      font-size: 13px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .chip input { accent-color: var(--primary); }
+    .chip.on { border-color: var(--primary); color: var(--primary); }
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-strong);
+      color: var(--text);
+      font-size: 14px;
+    }
+    .catalog-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px;
+      border: 1px solid var(--border);
+      border-bottom: 0;
+      background: rgba(7, 19, 31, 0.5);
+      font-size: 13px;
+    }
+    .catalog-row:first-of-type { border-radius: 8px 8px 0 0; }
+    .catalog-row:last-of-type { border-bottom: 1px solid var(--border); border-radius: 0 0 8px 8px; }
+    .catalog-row .name { flex: 1; overflow-wrap: anywhere; }
+    .catalog-row .tag { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .catalog-row button {
+      width: 30px;
+      height: 30px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-strong);
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .catalog-row button:hover:not(:disabled) { border-color: var(--primary); }
+    .catalog-row button:disabled { opacity: 0.35; cursor: not-allowed; }
+    .save {
+      width: 100%;
+      min-height: 46px;
+      margin-top: 16px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--primary);
+      color: #03242b;
+      font-weight: 900;
+      cursor: pointer;
+      transition: filter 160ms ease;
+    }
+    .save:hover { filter: brightness(1.08); }
+    .save:disabled { opacity: 0.6; cursor: wait; }
+    #save-note { margin: 10px 0 0; min-height: 18px; font-size: 13px; text-align: center; }
+    #save-note.ok { color: var(--success); }
+    #save-note.err { color: var(--danger); }
     @media (max-width: 520px) {
       body { padding: 12px; }
       header, .content { padding: 18px; }
@@ -155,22 +228,187 @@
         <textarea id="manifest-url" class="manifest" readonly aria-label="Manifest URL">{{ manifest_url }}</textarea>
         <button id="copy-button" type="button" class="copy">Copy manifest URL</button>
       </section>
+
+      <section class="settings">
+        <h2>Addon preferences</h2>
+        <p class="hint">These apply to your addon only. Save, then refresh the addon in Stremio.</p>
+
+        <div class="field">
+          <label>Show only these qualities</label>
+          <div class="chips" id="quality-chips"></div>
+        </div>
+
+        <div class="field">
+          <label for="quality-sort">Sort streams</label>
+          <select id="quality-sort">
+            <option value="desc">Best quality first</option>
+            <option value="asc">Best quality last</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Catalog order (highest = top)</label>
+          <div id="catalog-list"></div>
+        </div>
+
+        <div class="field">
+          <label>Hidden catalogs</label>
+          <div class="chips" id="hidden-chips"></div>
+        </div>
+
+        <button id="save-config" type="button" class="save">Save preferences</button>
+        <p id="save-note" aria-live="polite"></p>
+      </section>
     </div>
   </main>
   <script>
-    const copyButton = document.getElementById('copy-button');
-    const manifestInput = document.getElementById('manifest-url');
-    copyButton.addEventListener('click', async () => {
+    const TOKEN = '{{ token }}';
+    const configApi = `/stremio/${TOKEN}/addon-config`;
+    const QUALITY_OPTIONS = ['4K', '1080p', '720p', '480p', '360p', 'other'];
+
+    let catalogs = [];
+    let config = {};
+
+    function makeChip(value, label, selected) {
+      const el = document.createElement('label');
+      el.className = 'chip' + (selected ? ' on' : '');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !!selected;
+      box.value = value;
+      el.appendChild(box);
+      el.appendChild(document.createTextNode(label));
+      return el;
+    }
+
+    function renderQuality() {
+      const wrap = document.getElementById('quality-chips');
+      wrap.innerHTML = '';
+      const selected = new Set(config.quality_filter || []);
+      QUALITY_OPTIONS.forEach((opt) => {
+        wrap.appendChild(makeChip(opt, opt, selected.has(opt)));
+      });
+      wrap.querySelectorAll('.chip input').forEach((box) => {
+        box.addEventListener('change', () => {
+          box.closest('.chip').classList.toggle('on', box.checked);
+        });
+      });
+    }
+
+    function renderSort() {
+      document.getElementById('quality-sort').value = config.quality_sort === 'asc' ? 'asc' : 'desc';
+    }
+
+    function renderCatalogOrder() {
+      const wrap = document.getElementById('catalog-list');
+      wrap.innerHTML = '';
+      const order = config.catalog_order && config.catalog_order.length ? config.catalog_order : catalogs.map((c) => c.id);
+      order.forEach((cid, idx) => {
+        const meta = catalogs.find((c) => c.id === cid);
+        if (!meta) return;
+        const row = document.createElement('div');
+        row.className = 'catalog-row';
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = meta.name;
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = meta.type;
+        const up = document.createElement('button');
+        up.type = 'button';
+        up.textContent = '↑';
+        up.disabled = idx === 0;
+        up.addEventListener('click', () => {
+          const arr = [...order];
+          [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
+          config.catalog_order = arr;
+          renderCatalogOrder();
+        });
+        const down = document.createElement('button');
+        down.type = 'button';
+        down.textContent = '↓';
+        down.disabled = idx === order.length - 1;
+        down.addEventListener('click', () => {
+          const arr = [...order];
+          [arr[idx + 1], arr[idx]] = [arr[idx], arr[idx + 1]];
+          config.catalog_order = arr;
+          renderCatalogOrder();
+        });
+        row.appendChild(name);
+        row.appendChild(tag);
+        row.appendChild(up);
+        row.appendChild(down);
+        wrap.appendChild(row);
+      });
+    }
+
+    function renderHidden() {
+      const wrap = document.getElementById('hidden-chips');
+      wrap.innerHTML = '';
+      const hidden = new Set(config.hidden_catalogs || []);
+      catalogs.forEach((c) => {
+        wrap.appendChild(makeChip(c.id, c.name, hidden.has(c.id)));
+      });
+      wrap.querySelectorAll('.chip input').forEach((box) => {
+        box.addEventListener('change', () => {
+          box.closest('.chip').classList.toggle('on', box.checked);
+        });
+      });
+    }
+
+    function renderAll() {
+      renderQuality();
+      renderSort();
+      renderCatalogOrder();
+      renderHidden();
+    }
+
+    async function loadConfig() {
+      const res = await fetch(configApi);
+      const data = await res.json();
+      config = data.config || {};
+      catalogs = data.catalogs || [];
+      renderAll();
+    }
+
+    async function saveConfig() {
+      const btn = document.getElementById('save-config');
+      const note = document.getElementById('save-note');
+      btn.disabled = true;
+      note.textContent = 'Saving...';
+      note.className = '';
       try {
-        await navigator.clipboard.writeText(manifestInput.value);
-        copyButton.textContent = 'Copied';
+        const qualityFilter = [...document.querySelectorAll('#quality-chips input:checked')].map((i) => i.value);
+        const hiddenCatalogs = [...document.querySelectorAll('#hidden-chips input:checked')].map((i) => i.value);
+        const payload = {
+          quality_filter: qualityFilter,
+          quality_sort: document.getElementById('quality-sort').value,
+          hidden_catalogs: hiddenCatalogs,
+          catalog_order: config.catalog_order || [],
+        };
+        const res = await fetch(configApi, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Save failed');
+        config = data.config || {};
+        note.textContent = 'Saved. Refresh the addon in Stremio to apply.';
+        note.className = 'ok';
       } catch (error) {
-        manifestInput.focus();
-        manifestInput.select();
-        document.execCommand('copy');
-        copyButton.textContent = 'Copied';
+        note.textContent = error.message;
+        note.className = 'err';
+      } finally {
+        btn.disabled = false;
       }
-      setTimeout(() => { copyButton.textContent = 'Copy manifest URL'; }, 1800);
+    }
+
+    document.getElementById('save-config').addEventListener('click', saveConfig);
+    loadConfig().catch(() => {
+      const note = document.getElementById('save-note');
+      note.textContent = 'Could not load preferences.';
+      note.className = 'err';
     });
   </script>
 </body>

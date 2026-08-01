@@ -10,11 +10,12 @@ from Backend.config import Telegram
 from Backend.fastapi import server
 from Backend.helper.pyro import restart_notification, setup_bot_commands
 from Backend.helper.settings_manager import SettingsManager
-from Backend.pyrofork.bot import Helper, StreamBot, USERBOT_CLIENT_INDEX, Userbot, client_dc_map, client_failures, client_avg_mbps, work_loads
+from Backend.pyrofork.bot import Helper, StreamBot, USERBOT_CLIENT_INDEX, Userbot, build_userbot, client_dc_map, client_failures, client_avg_mbps, work_loads
 from Backend.pyrofork.clients import initialize_clients
 from Backend.pyrofork.plugins.channels import _load_channels_from_db
 from Backend.helper.subscription_checker import subscription_checker_loop
 from Backend.helper.link_checker import DeadLinkChecker
+from Backend.helper.session_auth import get_active_session_string
 from Backend.helper.torrent_downloads import TORRENT_DOWNLOAD_MANAGER
 from Backend.helper.auto_catalog import (
     AUTO_CATALOG_FULL_REBUILD_ON_STARTUP,
@@ -48,6 +49,12 @@ async def start_telegram_services():
             LOGGER.info(f"Helper Bot Client : [@{Helper.username}]")
             await asleep(1.2)
 
+            #----- Stored session (in-app login) takes precedence over the env fallback
+            stored_session = await get_active_session_string()
+            if stored_session:
+                build_userbot(stored_session)
+                LOGGER.info("Loaded Userbot session from encrypted storage.")
+
             if Userbot is not None:
                 await asyncio.wait_for(Userbot.start(), timeout=Telegram.TELEGRAM_CLIENT_START_TIMEOUT_SEC)
                 Userbot.username = Userbot.me.username
@@ -60,7 +67,7 @@ async def start_telegram_services():
                 client_avg_mbps[USERBOT_CLIENT_INDEX] = 0.0
                 LOGGER.info(f"Userbot Client : [@{Userbot.username}]")
             else:
-                LOGGER.info("Userbot not configured (USER_SESSION_STRING empty); Global Search disabled.")
+                LOGGER.info("Userbot not configured; Global Search disabled.")
             await asleep(1.2)
 
             LOGGER.info("Initializing Multi Clients...")

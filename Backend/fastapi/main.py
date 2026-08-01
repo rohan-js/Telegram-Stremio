@@ -45,6 +45,8 @@ from Backend.fastapi.routes.api_routes import (
     get_iptv_status_api, sync_iptv_api, list_iptv_channels_api,
     update_iptv_channel_api, get_iptv_settings_api, update_iptv_settings_api,
     get_settings_api, update_settings_api,
+    session_send_code_api, session_verify_code_api, session_verify_password_api,
+    session_status_api, session_disconnect_api, session_reconnect_api, session_remove_api,
     get_tools_channels_api, start_tools_scan_api, cancel_tools_scan_api,
     get_tools_scan_status_api, start_tools_dbcheck_api, cancel_tools_dbcheck_api,
     get_tools_dbcheck_status_api, purge_tools_dead_links_api,
@@ -395,6 +397,36 @@ async def get_settings(_: bool = Depends(require_auth)):
 @app.put("/api/admin/settings")
 async def update_settings(payload: dict, _: bool = Depends(require_auth)):
     return await update_settings_api(payload)
+
+
+#----- Telegram user session login (replaces manual USER_SESSION_STRING)
+@app.get("/api/admin/settings/session")
+async def session_status(_: bool = Depends(require_auth)):
+    return await session_status_api()
+
+@app.post("/api/admin/settings/session/send-code")
+async def session_send_code(payload: dict, _: bool = Depends(require_auth)):
+    return await session_send_code_api(payload)
+
+@app.post("/api/admin/settings/session/verify-code")
+async def session_verify_code(payload: dict, _: bool = Depends(require_auth)):
+    return await session_verify_code_api(payload)
+
+@app.post("/api/admin/settings/session/verify-password")
+async def session_verify_password(payload: dict, _: bool = Depends(require_auth)):
+    return await session_verify_password_api(payload)
+
+@app.post("/api/admin/settings/session/disconnect")
+async def session_disconnect(_: bool = Depends(require_auth)):
+    return await session_disconnect_api()
+
+@app.post("/api/admin/settings/session/reconnect")
+async def session_reconnect(_: bool = Depends(require_auth)):
+    return await session_reconnect_api()
+
+@app.delete("/api/admin/settings/session")
+async def session_remove(_: bool = Depends(require_auth)):
+    return await session_remove_api()
 
 @app.get("/api/admin/tools/channels")
 async def admin_tools_channels(_: bool = Depends(require_auth)):

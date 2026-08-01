@@ -275,6 +275,18 @@ class SettingsManager:
             {"key": "warp", "label": "WARP control helper", "configured": warp_configured},
         ]
 
+    @classmethod
+    async def _session_configured(cls) -> bool:
+        """True when a userbot session is available via env fallback OR stored in-app login."""
+        if getattr(Telegram, "USER_SESSION_STRING", ""):
+            return True
+        try:
+            from Backend.helper import session_auth
+
+            return bool(await session_auth.get_active_session_string())
+        except Exception:
+            return False
+
     @staticmethod
     def _validate_channel_values(values: List[Any], field_name: str) -> None:
         invalid = [
@@ -343,7 +355,7 @@ class SettingsManager:
             merged["fanart_shuffle_interval"] = max(0, int(merged.get("fanart_shuffle_interval") or 0))
         except (TypeError, ValueError) as exc:
             raise ValueError("Fanart Shuffle Interval must be a non-negative number of minutes.") from exc
-        if merged.get("global_search") and not getattr(Telegram, "USER_SESSION_STRING", ""):
+        if merged.get("global_search") and not await cls._session_configured():
             merged["global_search"] = False
 
         await db.save_settings(merged)
@@ -354,6 +366,6 @@ class SettingsManager:
             "auth_channels": f"{len(Telegram.AUTH_CHANNEL)} channel(s) active",
             "restart_required": [],
         }
-        if bool(incoming.get("global_search")) and not getattr(Telegram, "USER_SESSION_STRING", ""):
-            results["global_search"] = "Disabled because USER_SESSION_STRING is not configured."
+        if bool(incoming.get("global_search")) and not await cls._session_configured():
+            results["global_search"] = "Disabled because no user session is configured (env or in-app login)."
         return results

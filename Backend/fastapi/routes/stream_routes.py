@@ -26,6 +26,7 @@ from Backend.helper.custom_dl import (
     record_route_failure,
 )
 from Backend.helper.virtual_dl import resolve_virtual_parts, virtual_stream_generator
+from Backend.helper.zip_stream import resolve_zip_entry
 from Backend.helper.disk_cache import (
     disk_cache_enabled,
     cache_abspath,
@@ -626,6 +627,22 @@ async def stream_handler(
         request.headers.get("user-agent"),
     ))
     decoded = await decode_string(id)
+    if decoded.get("zip"):
+        if decoded.get("global"):
+            return await global_zip_media_streamer(
+                request=request,
+                parts_payload=decoded["parts"],
+                token=token,
+                token_data=token_data,
+                stream_id_hash=id,
+            )
+        return await db_zip_media_streamer(
+            request=request,
+            parts_payload=decoded["parts"],
+            token=token,
+            token_data=token_data,
+            stream_id_hash=id,
+        )
     if decoded.get("parts"):
         return await virtual_media_streamer(
             request=request,
@@ -792,6 +809,143 @@ async def virtual_media_streamer(
         headers=headers,
         status_code=status,
         media_type=mime_type,
+    )
+
+#----- Read a byte range from the concatenated virtual parts into memory
+async def _read_virtual_range(parts, start, length, streamer, request, client_index=USERBOT_CLIENT_INDEX, parallelism=1, prefetch_count=1):
+    buf = bytearray()
+    gen = virtual_stream_generator(
+        parts=parts, start=start, end=start + length - 1, chunk_size=1024 * 1024,
+        streamer=streamer, client_index=client_index, request=request,
+        meta={"title": "zip-index", "user_name": "system", "token": ""},
+        stream_id=secrets.token_hex(6), parallelism=parallelism, prefetch_count=prefetch_count,
+    )
+    try:
+        async for chunk in gen:
+            buf.extend(chunk)
+            if len(buf) >= length:
+                break
+    finally:
+        await gen.aclose()
+    return bytes(buf[:length])
+
+
+#----- Stream a split ZIP archive (.zip.001/.002 ...) as its inner video, with seeking.
+#----- Only STORED (uncompressed) archives are seekable; the inner file bytes are served
+#----- directly at their offset inside the concatenated zip (no stream-unzip needed).
+async def _zip_media_streamer(request, parts_payload, token, token_data, stream_id_hash, streamer, client_index, parallelism=None, prefetch_count=None):
+    if streamer is None:
+        raise HTTPException(status_code=503, detail="ZIP streaming is unavailable (no client/session)")
+
+    parts, zip_size = await resolve_virtual_parts(parts_payload, streamer)
+    if not parts or zip_size <= 0:
+        raise HTTPException(status_code=404, detail="Split archive parts not accessible")
+
+    async def _read(off, length):
+        return await _read_virtual_range(parts, off, length, streamer, request, client_index, parallelism or 1, prefetch_count or 1)
+
+    entry = await resolve_zip_entry(_read, zip_size)
+    if not entry:
+        raise HTTPException(status_code=415, detail="Unreadable or incomplete split archive")
+    if entry["method"] != 0:
+        raise HTTPException(
+            status_code=415,
+            detail="This archive is compressed; only stored (uncompressed) ZIP archives can be seek-streamed.",
+        )
+
+    inner_size = entry["size"]
+    data_offset = entry["data_offset"]
+    if inner_size <= 0 or data_offset + inner_size > zip_size:
+        raise HTTPException(status_code=415, detail="Split archive has an unexpected layout")
+
+    range_header = request.headers.get("Range", "")
+    start, end = parse_range_header(range_header, inner_size)
+    req_length = end - start + 1
+    stream_id = secrets.token_hex(8)
+
+    if parallelism is None or prefetch_count is None:
+        configured_prefetch, configured_parallelism = get_configured_stream_concurrency()
+        active_streams = count_active_telegram_streams()
+        mem_available_mb = get_mem_available_mb()
+        prefetch_count, parallelism, _prefetch_reason = choose_effective_prefetch(
+            configured_prefetch,
+            configured_parallelism,
+            file_size=inner_size,
+            request_length=req_length,
+            active_streams=active_streams,
+            mem_available_mb=mem_available_mb,
+        )
+
+    from urllib.parse import unquote
+
+    inner_name = (entry.get("name") or "").split("/")[-1] or unquote(request.path_params.get("name", "")) or "video.mkv"
+    mime_type = resolve_video_mime_type(inner_name) or "video/x-matroska"
+
+    db_title = await db.get_title_by_stream_id(stream_id_hash) if stream_id_hash else None
+    final_title = db_title if db_title else inner_name
+
+    meta = {
+        "request_path": str(request.url.path),
+        "request_range": range_header or None,
+        "request_start": start,
+        "request_end": end,
+        "request_length": req_length,
+        "client_host": request.client.host if request.client else None,
+        "title": final_title,
+        "filename": inner_name,
+        "source_type": "zip_parts",
+        "token": token,
+        "token_user_id": token_data.get("user_id") if token_data else None,
+        "zip_parts": len(parts),
+        "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
+    }
+
+    from fastapi.responses import Response as PlainResponse
+
+    headers = {
+        "Content-Type": mime_type,
+        "Content-Disposition": _content_disposition(inner_name),
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=3600",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+    }
+    if range_header:
+        headers["Content-Range"] = f"bytes {start}-{end}/{inner_size}"
+        status = 206
+    else:
+        status = 200
+
+    if request.method == "HEAD":
+        headers["Content-Length"] = str(req_length)
+        return PlainResponse(status_code=status, headers=headers)
+
+    body_gen = virtual_stream_generator(
+        parts=parts, start=data_offset + start, end=data_offset + end, chunk_size=select_telegram_chunk_size(range_header),
+        streamer=streamer, client_index=client_index, request=request, meta=meta,
+        stream_id=stream_id, parallelism=parallelism, prefetch_count=prefetch_count,
+    )
+    asyncio.create_task(track_usage_from_stats(stream_id, token, token_data))
+    return StreamingResponse(body_gen, headers=headers, status_code=status, media_type=mime_type)
+
+
+#----- ZIP split from Global Search (streamed via the Userbot session)
+async def global_zip_media_streamer(request: Request, parts_payload: list, token: str, token_data: dict = None, stream_id_hash: str = None):
+    if Userbot is None:
+        raise HTTPException(status_code=503, detail="Global Search streaming is unavailable (no Userbot connected)")
+    return await _zip_media_streamer(
+        request, parts_payload, token, token_data, stream_id_hash,
+        get_streamer(USERBOT_CLIENT_INDEX), USERBOT_CLIENT_INDEX, 1, 1,
+    )
+
+
+#----- ZIP split from the indexed library (streamed via the multi-bot pool)
+async def db_zip_media_streamer(request: Request, parts_payload: list, token: str, token_data: dict = None, stream_id_hash: str = None):
+    index = select_best_client(0)
+    streamer = get_streamer(index)
+    return await _zip_media_streamer(
+        request, parts_payload, token, token_data, stream_id_hash,
+        streamer, index, None, None,
     )
 
 async def media_streamer(

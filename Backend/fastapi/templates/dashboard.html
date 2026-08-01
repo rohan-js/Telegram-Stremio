@@ -365,6 +365,9 @@
                                     <span class="text-[10px] text-text-secondary uppercase">
                                         Monthly Limit: {{ token.limits.monthly_limit_gb or '∞' }} GB
                                     </span>
+                                    <span class="text-[10px] text-text-secondary uppercase">
+                                        Active Streams: {{ token.limits.max_active_streams|default(2) }}
+                                    </span>
                                 </div>
                             </td>
 
@@ -377,7 +380,7 @@
 
                             <td class="py-6 px-8 text-right">
                                 <div class="flex justify-end gap-2">
-                                    <button onclick='openEditModal({{ token.token|tojson }}, {{ token.limits.daily_limit_gb|default(0)|tojson }}, {{ token.limits.monthly_limit_gb|default(0)|tojson }})'
+                                    <button onclick='openEditModal({{ token.token|tojson }}, {{ token.limits.daily_limit_gb|default(0)|tojson }}, {{ token.limits.monthly_limit_gb|default(0)|tojson }}, {{ token.limits.max_active_streams|default(2)|tojson }})'
                                         class="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-text-secondary hover:bg-blue-500 hover:text-white transition-all token-action-btn">
                                         <i class="fa-solid fa-pen-to-square text-xs"></i>
                                     </button>
@@ -420,6 +423,12 @@
                 <label class="text-[10px] font-bold uppercase text-text-secondary tracking-widest ml-1 mb-1 block">Monthly Limit (GB)</label>
                 <input type="number" id="edit-monthly" step="0.1" min="0"
                     class="w-full px-4 py-3 rounded-xl border border-white/10 focus:border-primary outline-none text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
+            </div>
+            <div>
+                <label class="text-[10px] font-bold uppercase text-text-secondary tracking-widest ml-1 mb-1 block">Max Active Streams</label>
+                <input type="number" id="edit-active" min="1" step="1"
+                    class="w-full px-4 py-3 rounded-xl border border-white/10 focus:border-primary outline-none text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
+                <p class="text-[10px] text-text-secondary ml-1 mt-1">Maximum concurrent streams allowed for this user. (Applies from next stream start.)</p>
             </div>
         </div>
 
@@ -516,12 +525,13 @@
         }
     }
 
-    function openEditModal(token, daily, monthly) {
+    function openEditModal(token, daily, monthly, active) {
     const tokenStr = String(token || '');
     streamState.currentEditToken = tokenStr;
     document.getElementById('edit-token-id').value = tokenStr;
     document.getElementById('edit-daily').value = (daily === null || daily === undefined) ? 0 : daily;
     document.getElementById('edit-monthly').value = (monthly === null || monthly === undefined) ? 0 : monthly;
+    document.getElementById('edit-active').value = (active === null || active === undefined) ? 2 : active;
     const modal = document.getElementById('edit-modal');
     modal.classList.remove('hidden');
     }
@@ -536,6 +546,7 @@
 
         const daily = Number(document.getElementById('edit-daily').value || 0);
         const monthly = Number(document.getElementById('edit-monthly').value || 0);
+        const active = Number(document.getElementById('edit-active').value || 2);
 
         try {
             const response = await fetch('/api/tokens/' + encodeURIComponent(streamState.currentEditToken), {
@@ -543,7 +554,8 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     daily_limit_gb: daily,
-                    monthly_limit_gb: monthly
+                    monthly_limit_gb: monthly,
+                    max_active_streams: active > 0 ? active : 2
                 })
             });
 

@@ -1403,7 +1403,7 @@ class Database:
             )
             return await self.update_tv_show(tv_show, status=status)
 
-    async def _build_part_id_and_size(self, parts: List[dict]) -> Tuple[str, str]:
+    async def _build_part_id_and_size(self, parts: List[dict], archive: Optional[str] = None) -> Tuple[str, str]:
         sorted_parts = sorted(parts or [], key=lambda p: int(p.get("part_number") or 0))
         payload = {
             "parts": [
@@ -1414,6 +1414,8 @@ class Database:
                 for p in sorted_parts
             ]
         }
+        if archive == "zip":
+            payload["zip"] = True
         encoded = await encode_string(payload)
         total_bytes = sum(int(p.get("size_bytes") or 0) for p in sorted_parts)
         from Backend.helper.pyro import get_readable_file_size
@@ -1439,7 +1441,8 @@ class Database:
                 "msg_id": int(msg_id),
                 "size_bytes": int(raw_size or metadata_info.get("video_size") or 0),
             }
-            encoded_id, effective_size = await self._build_part_id_and_size([part])
+            archive = "zip" if str(group_key).endswith(".zip") else None
+            encoded_id, effective_size = await self._build_part_id_and_size([part], archive)
             parts = [QualityPart(**part)]
 
         return QualityDetail(
@@ -1669,7 +1672,8 @@ class Database:
                 if int(p.get("part_number") or 0) != int(new_part.get("part_number") or 0)
             ]
             existing_parts.append(new_part)
-            encoded_id, size_text = await self._build_part_id_and_size(existing_parts)
+            archive = "zip" if str(group_key).endswith(".zip") else None
+            encoded_id, size_text = await self._build_part_id_and_size(existing_parts, archive)
             merged_quality = dict(quality)
             merged_quality.update(
                 {
@@ -2793,6 +2797,17 @@ class Database:
     async def get_api_token(self, token: str) -> Optional[dict]:
         doc = await self.dbs["tracking"]["api_tokens"].find_one({"token": token})
         return convert_objectid_to_str(doc) if doc else None
+
+    async def get_token_config(self, token: str) -> dict:
+        doc = await self.dbs["tracking"]["api_tokens"].find_one({"token": token}, {"config": 1})
+        return dict((doc or {}).get("config") or {})
+
+    async def set_token_config(self, token: str, config: dict) -> bool:
+        result = await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$set": {"config": dict(config or {})}},
+        )
+        return bool(result.matched_count)
 
     async def get_api_token_by_user(self, user_id: int) -> Optional[dict]:
         doc = await self.dbs["tracking"]["api_tokens"].find_one({"user_id": int(user_id)})

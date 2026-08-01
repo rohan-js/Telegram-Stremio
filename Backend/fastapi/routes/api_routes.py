@@ -69,6 +69,15 @@ from Backend.helper.metadata import (
     search_tv_candidates,
 )
 from Backend.helper.split_files import strip_part_suffix
+from Backend.helper.session_auth import (
+    disconnect_session,
+    get_session_status,
+    reconnect_session,
+    remove_session,
+    start_login,
+    submit_code,
+    submit_password,
+)
 from time import time
 
 
@@ -214,6 +223,54 @@ async def update_settings_api(payload: dict):
     except Exception as e:
         LOGGER.error(f"update_settings_api failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Telegram user session login ---
+
+async def session_send_code_api(payload: dict):
+    try:
+        return await start_login(payload.get("phone"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def session_verify_code_api(payload: dict):
+    try:
+        return await submit_code(payload.get("login_id"), payload.get("code"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def session_verify_password_api(payload: dict):
+    try:
+        return await submit_password(payload.get("login_id"), payload.get("password"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def session_status_api():
+    return await get_session_status()
+
+
+async def session_disconnect_api():
+    return await disconnect_session()
+
+
+async def session_reconnect_api():
+    try:
+        return await reconnect_session()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+async def session_remove_api():
+    return await remove_session()
 
 
 # --- Public content requests ---

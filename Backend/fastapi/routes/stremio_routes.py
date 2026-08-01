@@ -1,4 +1,5 @@
 import asyncio
+import re
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from fastapi.templating import Jinja2Templates
 from typing import Optional
@@ -19,6 +20,7 @@ from Backend.helper.torrent_downloads import (
 )
 from Backend.helper.subtitles import get_subtitles_for, stremio_subtitle_entries
 from Backend.helper.fanart import fanart_artwork
+from Backend.helper.imdb import get_detail, get_season
 from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.iptv import (
     IPTV_ALL_CATALOG_ID,
@@ -382,6 +384,24 @@ def get_resolution_priority(stream_name: str) -> int:
     return 1
 
 
+def parse_size_to_bytes(size_str: str) -> int:
+    if not size_str:
+        return 0
+    match = re.match(r"([\d.]+)\s*([A-Za-z]+)", size_str.strip())
+    if not match:
+        return 0
+    value, unit = float(match.group(1)), match.group(2).upper()
+    multipliers = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
+    return int(value * multipliers.get(unit, 1))
+
+
+#----- Canonical quality label used by per-token quality filtering
+def stream_res_label(stream_name: str) -> str:
+    return {2160: "4K", 1080: "1080p", 720: "720p", 480: "480p", 360: "360p"}.get(
+        get_resolution_priority(stream_name), "other"
+    )
+
+
 def apply_stremio_no_cache(response: Response) -> None:
     # Encourage clients/proxies to fetch fresh addon data after new uploads.
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0, s-maxage=0"
@@ -535,6 +555,16 @@ async def get_manifest(request: Request, token: str, response: Response, token_d
         except Exception:
             pass
 
+    #----- Per-token addon config: hide catalogs and reorder the manifest list
+    _token_config = token_data.get("config") or {}
+    _hidden_catalogs = set(_token_config.get("hidden_catalogs") or [])
+    _catalog_order = _token_config.get("catalog_order") or []
+    if _hidden_catalogs:
+        catalogs = [c for c in catalogs if c["id"] not in _hidden_catalogs]
+    if _catalog_order:
+        rank = {cid: i for i, cid in enumerate(_catalog_order)}
+        catalogs.sort(key=lambda c: rank.get(c["id"], len(_catalog_order) + 1))
+
     # Build dynamic name/description/version with subscription info
     addon_name = ADDON_NAME
     addon_desc = "Streams movies, series, torrents, and live TV."
@@ -671,7 +701,58 @@ async def configure_addon(request: Request, token: str):
         "expiry_str": expiry_str,
         "status_kind": status_kind,
         "status_text": status_text,
+        "token": token,
     })
+
+
+#----- Per-token addon configuration (quality filter/sort, hidden catalogs, catalog order)
+@router.get("/{token}/addon-config")
+async def get_addon_config(token: str, token_data: dict = Depends(verify_token)):
+    config = await db.get_token_config(token)
+    catalogs = [
+        {"id": "latest_movies", "name": "Latest Movies", "type": "movie"},
+        {"id": "latest_series", "name": "Latest Series", "type": "series"},
+        {"id": "top_movies", "name": "Popular Movies", "type": "movie"},
+        {"id": "top_series", "name": "Popular Series", "type": "series"},
+    ]
+    try:
+        for catalog in await db.get_custom_catalogs(visible_only=True):
+            if not _token_can_view(catalog.get("visibility") or "public", catalog.get("allowed_tokens") or [], token_data):
+                continue
+            cid = str(catalog.get("_id"))
+            cname = catalog.get("name") or "Custom Catalog"
+            catalogs.append({"id": f"custom_{cid}", "name": f"{cname} (Movies)", "type": "movie"})
+            catalogs.append({"id": f"custom_{cid}", "name": f"{cname} (Series)", "type": "series"})
+    except Exception:
+        pass
+    try:
+        iptv_settings = await get_iptv_settings(db)
+        if iptv_settings.get("enabled"):
+            catalogs.append({"id": IPTV_ALL_CATALOG_ID, "name": "Live TV - All", "type": "tv"})
+    except Exception:
+        pass
+    return {
+        "config": config,
+        "catalogs": catalogs,
+        "quality_options": ["4K", "1080p", "720p", "480p", "360p", "other"],
+    }
+
+
+@router.post("/{token}/addon-config")
+async def save_addon_config(token: str, payload: dict, token_data: dict = Depends(verify_token)):
+    allowed_keys = {"quality_filter", "quality_sort", "hidden_catalogs", "catalog_order"}
+    config = {k: payload.get(k) for k in allowed_keys if k in payload}
+    if "quality_filter" in config:
+        qf = config["quality_filter"]
+        config["quality_filter"] = [str(x) for x in (qf if isinstance(qf, list) else [qf])]
+    if "quality_sort" in config and config["quality_sort"] not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="quality_sort must be 'asc' or 'desc'")
+    for key in ("hidden_catalogs", "catalog_order"):
+        if key in config:
+            val = config[key]
+            config[key] = [str(x) for x in (val if isinstance(val, list) else [val])]
+    await db.set_token_config(token, config)
+    return {"ok": True, "config": config}
 
 
 
@@ -685,6 +766,16 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
 
     if media_type not in ["movie", "series", "tv"]:
         raise HTTPException(status_code=404, detail="Invalid catalog type")
+
+    #----- Per-token config: hidden catalogs are served as empty
+    _token_config = token_data.get("config") or {}
+    if id in set(_token_config.get("hidden_catalogs") or []):
+        return {
+            "metas": [],
+            "cacheMaxAge": 0,
+            "staleRevalidate": 0,
+            "staleError": 0,
+        }
 
     genre_filter = None
     search_query = None
@@ -924,6 +1015,58 @@ async def get_subtitles(
     subtitles = await get_subtitles_for(imdb_id, db_media_type, season_num, episode_num)
     return {"subtitles": stremio_subtitle_entries(subtitles, token, BASE_URL)}
 
+#----- Collect Global Search streams for a title/episode via IMDb lookup
+async def _global_streams_for(token: str, imdb_id: str, media_type: str, season_num: Optional[int], episode_num: Optional[int]) -> list:
+    imdb_media_type = "tvSeries" if media_type == "series" else "movie"
+
+    detail = await get_detail(imdb_id=imdb_id, media_type=imdb_media_type)
+    if not detail or not detail.get("title"):
+        return []
+
+    expected_title = detail["title"]
+    year = (detail.get("releaseDetailed") or {}).get("year") or None
+
+    if season_num is not None and episode_num is not None:
+        try:
+            await get_season(imdb_id=imdb_id, season_id=season_num, episode_id=episode_num)
+        except Exception:
+            pass
+
+    try:
+        global_results = await global_search(
+            expected_title,
+            Telegram.AUTH_CHANNEL,
+            year=year,
+            season=season_num,
+            episode=episode_num,
+        )
+    except Exception as e:
+        LOGGER.error(f"[GLOBAL SEARCH] search failed for '{expected_title}': {e}")
+        return []
+
+    streams = []
+    for r in global_results:
+        is_split = bool(r.get("is_split"))
+        quality = r.get("quality") or "HD"
+        filename = r.get("title") or "video.mkv"
+        title_parts = [
+            f"📁 {filename}",
+            f"💾 {r.get('size')}" if r.get("size") else "",
+            f"📡 {r.get('source_chat')}" if r.get("source_chat") else "📡 Global Search",
+        ]
+        if is_split:
+            kind = "zip parts" if r.get("is_zip") else "parts"
+            title_parts.append(f"📦 {r.get('part_count', 0)} {kind}")
+        streams.append({
+            "name": f"🌐 GLOBAL {quality}",
+            "title": "\n".join(part for part in title_parts if part),
+            "url": f"{BASE_URL}/dl/{token}/{r.get('token')}/video.mkv",
+            "size_bytes": parse_size_to_bytes(r.get("size", "")),
+            "_recommended": False,
+        })
+    return streams
+
+
 @router.api_route("/{token}/stream/{media_type}/{id}.json", methods=["GET", "HEAD"])
 async def get_streams(
     request: Request,
@@ -999,7 +1142,6 @@ async def get_streams(
             "staleError": 600,
         }
 
-
     try:
         parts = id.split(":")
         imdb_id = parts[0]
@@ -1014,143 +1156,132 @@ async def get_streams(
         episode_number=episode_num
     )
 
-    if not media_details:
-        return {
-            "streams": [],
-            "cacheMaxAge": 0,
-            "staleRevalidate": 0,
-            "staleError": 0,
-        }
-    if not _media_visible_to_token(media_details, token_data, allow_searchable_exclusive=True):
-        return {
-            "streams": [],
-            "cacheMaxAge": 0,
-            "staleRevalidate": 0,
-            "staleError": 0,
-        }
-
     streams = []
-    for quality in media_details.get("telegram", []):
-        if quality.get("hidden_from_stremio"):
-            continue
-        filename = quality.get("name", "")
-        quality_str = quality.get("quality", "HD")
-        size = quality.get("size", "")
+    if media_details:
+        if not _media_visible_to_token(media_details, token_data, allow_searchable_exclusive=True):
+            return {
+                "streams": [],
+                "cacheMaxAge": 0,
+                "staleRevalidate": 0,
+                "staleError": 0,
+            }
+        for quality in media_details.get("telegram", []):
+            if quality.get("hidden_from_stremio"):
+                continue
+            filename = quality.get("name", "")
+            quality_str = quality.get("quality", "HD")
+            size = quality.get("size", "")
+            size_bytes = parse_size_to_bytes(size)
 
-        stream_name, stream_title = format_stream_details(
-            filename, quality_str, size
-        )
-        badges = []
-        if quality.get("recommended"):
-            badges.append("Recommended")
-        if quality.get("parts"):
-            badges.append("Split")
-        if quality.get("flagged_duplicate"):
-            badges.append("Duplicate")
-        if quality.get("quality_note"):
-            badges.append(str(quality.get("quality_note"))[:40])
-        if badges:
-            stream_name = f"{' | '.join(badges)} | {stream_name}"
-
-        source_type = quality.get("source_type") or "telegram"
-        if source_type == "local_vps":
-            local_stream = await build_local_vps_stream(token, quality, stream_name)
-            if local_stream:
-                local_stream["_recommended"] = bool(quality.get("recommended"))
-                streams.append(local_stream)
-            continue
-
-        if source_type == "torrent":
-            info_hash = quality.get("info_hash")
-            torrent_stats = await db.get_torrent_stats(info_hash) if info_hash else None
-            download_job = await db.get_torrent_download(info_hash) if info_hash else None
-            db.queue_torrent_stats_refresh(
-                info_hash,
-                quality.get("sources") or [],
-                torrent_private=bool(quality.get("torrent_private", False)),
+            stream_name, stream_title = format_stream_details(
+                filename, quality_str, size
             )
-            torrent_stream = build_torrent_stream(quality, stream_name, stream_title, torrent_stats)
-            if torrent_stream:
-                torrent_stream["_recommended"] = bool(quality.get("recommended"))
-                streams.append(torrent_stream)
-            downloaded_stream = await build_downloaded_torrent_stream(
-                token,
-                quality,
-                stream_name,
-                download_job,
-                season_number=season_num,
-                episode_number=episode_num,
-            )
-            if downloaded_stream:
-                downloaded_stream["_recommended"] = bool(quality.get("recommended"))
-                streams.append(downloaded_stream)
-            continue
+            badges = []
+            if quality.get("recommended"):
+                badges.append("Recommended")
+            if quality.get("parts"):
+                badges.append("Split")
+            if quality.get("flagged_duplicate"):
+                badges.append("Duplicate")
+            if quality.get("quality_note"):
+                badges.append(str(quality.get("quality_note"))[:40])
+            if badges:
+                stream_name = f"{' | '.join(badges)} | {stream_name}"
 
-        if not quality.get("id"):
-            continue
+            source_type = quality.get("source_type") or "telegram"
+            if source_type == "local_vps":
+                local_stream = await build_local_vps_stream(token, quality, stream_name)
+                if local_stream:
+                    local_stream["_recommended"] = bool(quality.get("recommended"))
+                    streams.append(local_stream)
+                continue
 
-        original_url = f"{BASE_URL}/dl/{token}/{quality.get('id')}/video.mkv"
-        proxy_url = f"{Telegram.HTTP_PROXY_URL}{original_url}" if Telegram.PROXY and Telegram.HTTP_PROXY_URL else None
+            if source_type == "torrent":
+                info_hash = quality.get("info_hash")
+                torrent_stats = await db.get_torrent_stats(info_hash) if info_hash else None
+                download_job = await db.get_torrent_download(info_hash) if info_hash else None
+                db.queue_torrent_stats_refresh(
+                    info_hash,
+                    quality.get("sources") or [],
+                    torrent_private=bool(quality.get("torrent_private", False)),
+                )
+                torrent_stream = build_torrent_stream(quality, stream_name, stream_title, torrent_stats)
+                if torrent_stream:
+                    torrent_stream["_recommended"] = bool(quality.get("recommended"))
+                    streams.append(torrent_stream)
+                downloaded_stream = await build_downloaded_torrent_stream(
+                    token,
+                    quality,
+                    stream_name,
+                    download_job,
+                    season_number=season_num,
+                    episode_number=episode_num,
+                )
+                if downloaded_stream:
+                    downloaded_stream["_recommended"] = bool(quality.get("recommended"))
+                    streams.append(downloaded_stream)
+                continue
 
-        if Telegram.SHOW_PROXY_AND_NON_PROXY_BOTH and proxy_url:
-            streams.append({
-                "name": f"{stream_name} (Proxy)",
-                "title": stream_title,
-                "url": proxy_url,
-                "_recommended": bool(quality.get("recommended")),
-            })
-            streams.append({
-                "name": f"{stream_name} (Direct)",
-                "title": stream_title,
-                "url": original_url,
-                "_recommended": bool(quality.get("recommended")),
-            })
-        elif proxy_url:
-            streams.append({
-                "name": stream_name,
-                "title": stream_title,
-                "url": proxy_url,
-                "_recommended": bool(quality.get("recommended")),
-            })
-        else:
-            streams.append({
-                "name": stream_name,
-                "title": stream_title,
-                "url": original_url,
-                "_recommended": bool(quality.get("recommended")),
-            })
+            if not quality.get("id"):
+                continue
 
-    if len(streams) < 3 and is_global_search_enabled():
-        try:
-            global_results = await global_search(
-                media_details.get("title") or "",
-                Telegram.AUTH_CHANNEL,
-                year=media_details.get("release_year"),
-                season=season_num,
-                episode=episode_num,
-            )
-            for result in global_results:
-                quality = result.get("quality") or "HD"
-                filename = result.get("title") or "video.mkv"
+            original_url = f"{BASE_URL}/dl/{token}/{quality.get('id')}/video.mkv"
+            proxy_url = f"{Telegram.HTTP_PROXY_URL}{original_url}" if Telegram.PROXY and Telegram.HTTP_PROXY_URL else None
+
+            if Telegram.SHOW_PROXY_AND_NON_PROXY_BOTH and proxy_url:
                 streams.append({
-                    "name": f"🌐 GLOBAL {quality}",
-                    "title": "\n".join(
-                        part for part in [
-                            f"📁 {filename}",
-                            f"💾 {result.get('size')}" if result.get("size") else "",
-                            f"📡 {result.get('source_chat')}" if result.get("source_chat") else "📡 Global Search",
-                        ]
-                        if part
-                    ),
-                    "url": f"{BASE_URL}/dl/{token}/{result.get('token')}/video.mkv",
-                    "_recommended": False,
+                    "name": f"{stream_name} (Proxy)",
+                    "title": stream_title,
+                    "url": proxy_url,
+                    "size_bytes": size_bytes,
+                    "_recommended": bool(quality.get("recommended")),
                 })
-        except Exception as e:
-            LOGGER.warning(f"Global Search failed for {media_details.get('title')}: {e}")
+                streams.append({
+                    "name": f"{stream_name} (Direct)",
+                    "title": stream_title,
+                    "url": original_url,
+                    "size_bytes": size_bytes,
+                    "_recommended": bool(quality.get("recommended")),
+                })
+            elif proxy_url:
+                streams.append({
+                    "name": stream_name,
+                    "title": stream_title,
+                    "url": proxy_url,
+                    "size_bytes": size_bytes,
+                    "_recommended": bool(quality.get("recommended")),
+                })
+            else:
+                streams.append({
+                    "name": stream_name,
+                    "title": stream_title,
+                    "url": original_url,
+                    "size_bytes": size_bytes,
+                    "_recommended": bool(quality.get("recommended")),
+                })
 
+    #----- Global Search fallback when the library has no streams for this title/episode
+    if not streams and is_global_search_enabled():
+        try:
+            streams.extend(
+                await _global_streams_for(token, imdb_id, media_type, season_num, episode_num)
+            )
+        except Exception as e:
+            LOGGER.error(f"[GLOBAL SEARCH] stream search failed for {imdb_id}: {e}")
+
+    #----- Per-token quality filter (fall back to all if it would hide everything)
+    config = token_data.get("config") or {}
+    quality_filter = set(config.get("quality_filter") or [])
+    if quality_filter and streams:
+        filtered = [s for s in streams if stream_res_label(s.get("name", "")) in quality_filter]
+        if filtered:
+            streams = filtered
+
+    #----- Recommended first, then quality sort (per-token asc/desc, size as tie-breaker)
+    streams.sort(key=lambda s: 0 if s.get("_recommended") else 1)
     streams.sort(
-        key=lambda s: (1 if s.get("_recommended") else 0, get_resolution_priority(s.get("name", ""))),
-        reverse=True
+        key=lambda s: (get_resolution_priority(s.get("name", "")), s.get("size_bytes") or 0),
+        reverse=config.get("quality_sort") != "asc",
     )
     for s in streams:
         s.pop("_recommended", None)
