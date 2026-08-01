@@ -2,7 +2,7 @@ from fastapi import Request, Form, HTTPException, Depends
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from Backend.fastapi.security.credentials import verify_credentials, require_auth, is_authenticated, get_current_user
-from Backend.fastapi.themes import get_theme, get_all_themes
+from Backend.fastapi.themes import get_theme, get_all_themes, DEFAULT_THEME
 from Backend import db
 from Backend.pyrofork.bot import work_loads, multi_clients, StreamBot
 from Backend.helper.pyro import get_readable_time
@@ -18,7 +18,7 @@ from Backend.config import Telegram
 templates = Jinja2Templates(directory="Backend/fastapi/templates")
 
 async def admin_dashboard_page(request: Request, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
     
@@ -34,7 +34,7 @@ async def login_page(request: Request):
     if is_authenticated(request):
         return RedirectResponse(url="/", status_code=302)
     
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     
     return templates.TemplateResponse("login.html", {
@@ -50,7 +50,7 @@ async def login_post(request: Request, username: str = Form(...), password: str 
         request.session["username"] = username
         return RedirectResponse(url="/", status_code=302)
     else:
-        theme_name = request.session.get("theme", "dark_professional")
+        theme_name = request.session.get("theme", DEFAULT_THEME)
         theme = get_theme(theme_name)
         return templates.TemplateResponse("login.html", {
             "request": request,
@@ -70,7 +70,7 @@ async def set_theme(request: Request, theme: str = Form(...)):
     return RedirectResponse(url=request.headers.get("referer", "/"), status_code=302)
 
 async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
     
@@ -173,7 +173,7 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
 
 
 async def media_management_page(request: Request, media_type: str = "movie", _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
     
@@ -187,7 +187,7 @@ async def media_management_page(request: Request, media_type: str = "movie", _: 
     })
 
 async def custom_catalogs_page(request: Request, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
 
@@ -201,7 +201,7 @@ async def custom_catalogs_page(request: Request, _: bool = Depends(require_auth)
 
 
 async def watch_requests_page(request: Request, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
 
@@ -215,7 +215,7 @@ async def watch_requests_page(request: Request, _: bool = Depends(require_auth))
 
 
 async def live_tv_page(request: Request, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
 
@@ -229,7 +229,7 @@ async def live_tv_page(request: Request, _: bool = Depends(require_auth)):
 
 
 async def settings_page(request: Request, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
     settings = SettingsManager.current().to_dict()
@@ -251,7 +251,7 @@ async def settings_page(request: Request, _: bool = Depends(require_auth)):
 
 
 async def tools_page(request: Request, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
 
@@ -265,7 +265,7 @@ async def tools_page(request: Request, _: bool = Depends(require_auth)):
 
 
 async def launch_readiness_page(request: Request, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
 
@@ -279,7 +279,7 @@ async def launch_readiness_page(request: Request, _: bool = Depends(require_auth
 
 
 async def admin_requests_page(request: Request, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     return templates.TemplateResponse("requests_manage.html", {
         "request": request,
@@ -291,7 +291,7 @@ async def admin_requests_page(request: Request, _: bool = Depends(require_auth))
 
 
 async def public_request_page(request: Request):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     return templates.TemplateResponse("request_public.html", {
         "request": request,
@@ -305,7 +305,7 @@ async def public_request_page(request: Request):
 
 
 async def policy_page(request: Request, policy: str):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     titles = {
         "terms": "Terms of Service",
@@ -328,7 +328,7 @@ async def policy_page(request: Request, policy: str):
 
 
 async def edit_media_page(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
     
@@ -352,7 +352,7 @@ async def edit_media_page(request: Request, tmdb_id: int, db_index: int, media_t
     })
 
 async def public_status_page(request: Request):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     
     try:
@@ -384,7 +384,7 @@ async def public_status_page(request: Request):
     })
 
 async def stremio_guide_page(request: Request):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     
     return templates.TemplateResponse("stremio_guide.html", {
@@ -396,7 +396,7 @@ async def stremio_guide_page(request: Request):
     })
 
 async def admin_subscriptions_page(request: Request, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
     
@@ -410,7 +410,7 @@ async def admin_subscriptions_page(request: Request, _: bool = Depends(require_a
 
 
 async def admin_access_page(request: Request, _: bool = Depends(require_auth)):
-    theme_name = request.session.get("theme", "dark_professional")
+    theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)
     current_user = get_current_user(request)
 
