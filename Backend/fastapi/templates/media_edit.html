@@ -423,6 +423,42 @@
     </div>
     {% endif %}
 
+    {% if media_details %}
+    <div class="glass-card rounded-3xl p-5 sm:p-6 lg:p-8 mb-6 sm:mb-8">
+        <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-5 sm:mb-6">
+            <div>
+                <h3 class="section-title text-xl sm:text-2xl">Subtitles</h3>
+                <p class="muted mt-1 text-sm sm:text-base">
+                    Attach subtitle files from a Telegram channel your bot can read.
+                </p>
+            </div>
+            <button type="button" onclick="openSubtitleModal()" class="btn-ui btn-primary">➕ Add Subtitle</button>
+        </div>
+
+        <div id="subtitle-list" class="space-y-2"></div>
+        <div id="subtitle-empty" class="hidden text-center py-8">
+            <p class="muted text-sm">No subtitles added yet.</p>
+        </div>
+    </div>
+
+    <div id="subtitle-modal" class="fixed inset-0 z-50 hidden" aria-modal="true" role="dialog">
+        <div class="absolute inset-0 bg-black/60" onclick="closeSubtitleModal()"></div>
+        <div class="relative z-10 glass-card rounded-3xl w-[min(92vw,40rem)] mx-auto mt-[8vh] p-5 sm:p-6 lg:p-8 max-h-[80vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="section-title text-xl">Add Subtitles</h3>
+                <button type="button" onclick="closeSubtitleModal()" class="text-2xl leading-none text-text-secondary hover:text-text">×</button>
+            </div>
+            <p class="muted text-xs mt-1 mb-4">Forward the subtitle file to a channel your bot admins (a MANUAL channel is recommended), then paste its message link. Language is auto-detected but you can override it.</p>
+            <div id="subtitle-rows" class="space-y-3"></div>
+            <div class="flex flex-col sm:flex-row justify-end gap-3 mt-6">
+                <button type="button" onclick="closeSubtitleModal()" class="btn-ui btn-ghost">Cancel</button>
+                <button type="button" onclick="addSubtitleRow()" class="btn-ui btn-ghost">➕ Add Row</button>
+                <button type="button" onclick="submitSubtitles()" class="btn-ui btn-primary">Add Subtitles</button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="glass-card rounded-3xl p-5 sm:p-6 lg:p-8 mb-6 sm:mb-8">
         <div class="flex items-center justify-between gap-3 mb-5 sm:mb-6">
             <h3 class="section-title text-xl sm:text-2xl">Edit Details</h3>
@@ -1350,6 +1386,7 @@
         if (select) select.addEventListener('change', updateCatalogDropdownStatus);
         loadMediaCatalogDropdown();
         loadMediaVisibility();
+        loadTitleSubtitles();
         document.querySelectorAll('.season-content').forEach((content, index) => {
             if (index > 0) {
                 content.classList.add('season-collapsed');
@@ -1604,5 +1641,117 @@
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') closeSpeedTest();
     });
+
+    //----- Subtitles
+    let subtitleLanguages = [];
+
+    function subtitleLangOptions() {
+        if (!subtitleLanguages.length) return '<option value="und">Unknown</option>';
+        return subtitleLanguages.map(l => `<option value="${escapeHtml(l.code)}">${escapeHtml(l.label)}</option>`).join('');
+    }
+
+    function addSubtitleRow() {
+        const div = document.createElement('div');
+        div.setAttribute('data-sub-row', '');
+        div.className = 'flex flex-col sm:flex-row gap-2 items-start sm:items-center';
+        div.innerHTML = `
+            <input type="text" placeholder="t.me/... or chat id" class="field-input sub-url" data-name="url">
+            <input type="text" placeholder="Season (series)" class="field-input w-24 sub-season" data-name="season">
+            <input type="text" placeholder="Episode (series)" class="field-input w-24 sub-episode" data-name="episode">
+            <select class="field-input w-36 sub-lang">${subtitleLangOptions()}</select>
+            <button type="button" onclick="this.closest('[data-sub-row]').remove()" class="btn-ui btn-danger px-3 py-2">✕</button>`;
+        document.getElementById('subtitle-rows').appendChild(div);
+    }
+
+    async function loadSubtitleLanguages() {
+        if (subtitleLanguages.length) return;
+        try {
+            const res = await fetch('/api/media/subtitles/languages');
+            const data = await res.json();
+            subtitleLanguages = data.languages || [];
+        } catch (err) { /* optional languages */ }
+    }
+
+    async function loadTitleSubtitles() {
+        const listEl = document.getElementById('subtitle-list');
+        const emptyEl = document.getElementById('subtitle-empty');
+        if (!listEl) return;
+        try {
+            const res = await fetch(`/api/media/subtitles?media_type=${mediaType}&tmdb_id=${tmdbId}&db_index=${dbIndex}`);
+            const data = await res.json();
+            const subs = data.subtitles || [];
+            emptyEl.classList.toggle('hidden', subs.length > 0);
+            listEl.innerHTML = subs.map((s, i) => `
+                <div class="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-white/5 px-4 py-3">
+                    <div class="min-w-0">
+                        <p class="text-sm font-semibold text-text">${escapeHtml(s.lang_label || s.lang_code || 'Unknown')}${s.season ? ` · S${escapeHtml(String(s.season))}E${escapeHtml(String(s.episode || ''))}` : ''}</p>
+                        <p class="text-xs text-text-secondary truncate">${escapeHtml(s.name || '')} · msg ${s.msg_id}</p>
+                    </div>
+                    <button type="button" onclick="removeSubtitle(${i})" class="btn-ui btn-danger px-3 py-2 text-sm">Remove</button>
+                </div>`).join('');
+            window._currentSubs = subs;
+        } catch (err) {
+            emptyEl.classList.remove('hidden');
+            emptyEl.querySelector('p').textContent = 'Could not load subtitles.';
+        }
+    }
+
+    async function removeSubtitle(index) {
+        const sub = (window._currentSubs || [])[index];
+        if (!sub) return;
+        try {
+            const res = await fetch('/api/media/subtitles/remove', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({chat_id: sub.chat_id, msg_id: sub.msg_id})
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Failed to remove subtitle');
+            showToast(data.message || 'Subtitle removed.', 'success', 'Subtitles');
+            loadTitleSubtitles();
+        } catch (err) {
+            showErrorMessage(err.message || 'Failed to remove subtitle.');
+        }
+    }
+
+    function openSubtitleModal() {
+        loadSubtitleLanguages().then(() => {
+            document.getElementById('subtitle-rows').innerHTML = '';
+            addSubtitleRow();
+            document.getElementById('subtitle-modal').classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        });
+    }
+
+    function closeSubtitleModal() {
+        document.getElementById('subtitle-modal').classList.add('hidden');
+        document.body.style.overflow = '';
+    }
+
+    async function submitSubtitles() {
+        const items = [...document.querySelectorAll('#subtitle-rows [data-sub-row]')].map(r => ({
+            url: r.querySelector('.sub-url')?.value.trim() || null,
+            chat_id: null,
+            msg_id: null,
+            season: r.querySelector('.sub-season')?.value.trim() || null,
+            episode: r.querySelector('.sub-episode')?.value.trim() || null,
+            lang_code: r.querySelector('.sub-lang')?.value || 'und',
+        })).filter(i => i.url);
+        if (!items.length) { showErrorMessage('Paste at least one subtitle link.'); return; }
+        try {
+            const res = await fetch('/api/media/subtitles/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({media_type: mediaType, tmdb_id: tmdbId, db_index: dbIndex, items})
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Failed to add subtitle');
+            showToast(data.message || 'Subtitles added.', 'success', 'Subtitles');
+            closeSubtitleModal();
+            loadTitleSubtitles();
+        } catch (err) {
+            showErrorMessage(err.message || 'Failed to add subtitles.');
+        }
+    }
 </script>
 {% endblock %}

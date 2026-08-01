@@ -9,7 +9,7 @@ from Backend.config import Telegram
 import Backend
 from Backend.logger import LOGGER
 from Backend.helper.encrypt import encode_string
-from Backend.helper.split_files import parse_split_info, strip_part_suffix
+from Backend.helper.split_files import parse_split_info, parse_combined_episodes, strip_part_suffix
 from Backend.helper.anime import fetch_anime_metadata, fetch_anime_movie_metadata
 from Backend.helper.metadata_matcher import (
     MatchCandidate,
@@ -70,6 +70,17 @@ def format_imdb_images(imdb_id: str) -> dict:
         "logo": f"https://images.metahub.space/logo/medium/{imdb_id}/img",
     }
 
+
+def tmdb_api_key() -> str:
+    try:
+        from Backend.helper.settings_manager import SettingsManager
+        key = SettingsManager.current().to_dict().get("tmdb_api") or ""
+        if key:
+            return key
+    except Exception:
+        pass
+    return str(Telegram.TMDB_API or "")
+
 def extract_default_id(url: str) -> str | None:
     # IMDb
     imdb_match = re.search(r'/title/(tt\d+)', url)
@@ -82,6 +93,97 @@ def extract_default_id(url: str) -> str | None:
         return tmdb_match.group(3)
 
     return None
+
+
+def _first(value):
+    return value[0] if isinstance(value, list) else value
+
+
+def parse_media_name(name: str) -> dict:
+    try:
+        ptn = PTN.parse(name) or {}
+    except Exception as e:
+        LOGGER.warning(f"PTN parsing failed for {name}: {e}")
+        ptn = {}
+
+    parsed = {
+        "title": _first(ptn.get("title")),
+        "year": _first(ptn.get("year")),
+        "season": _first(ptn.get("season")),
+        "episode": _first(ptn.get("episode")),
+        "quality": _first(ptn.get("resolution")),
+        "excess": ptn.get("excess"),
+    }
+
+    try:
+        from guessit import guessit as _guessit
+
+        g = _guessit(name)
+        parsed["title"] = parsed["title"] or _first(g.get("title"))
+        parsed["year"] = parsed["year"] or _first(g.get("year"))
+        parsed["season"] = parsed["season"] or _first(g.get("season"))
+        parsed["episode"] = parsed["episode"] or _first(g.get("episode"))
+        parsed["quality"] = parsed["quality"] or _first(g.get("screen_size"))
+    except Exception:
+        pass
+
+    return parsed
+
+
+_MULTIPART_RE = re.compile(r"(?:part|cd|disc|disk)[s._-]*\d+(?=\.\w+$)", re.IGNORECASE)
+
+
+def analyze_metadata_failure(filename: str) -> str:
+    if _MULTIPART_RE.search(filename or ""):
+        return "Looks like a multi-part video split (e.g. part1 / cd1) that can't be combined for streaming."
+
+    split_info = parse_split_info(filename or "")
+    parse_target = strip_part_suffix(filename) if split_info else (filename or "")
+
+    try:
+        parsed = parse_media_name(parse_target)
+    except Exception:
+        return "The file name / caption could not be parsed. Give it a clear name like 'Movie Name (2021) 1080p'."
+
+    combined = parse_combined_episodes(parse_target)
+    excess = parsed.get("excess") or []
+    if not combined and any("combined" in str(item).lower() for item in excess):
+        return "The caption says 'combined' but no season number could be read from it (e.g. name it 'Show S02 Combined')."
+
+    title = parsed.get("title")
+    season = parsed.get("season")
+    episode = parsed.get("episode")
+    quality = parsed.get("quality")
+
+    if not combined and (isinstance(season, list) or isinstance(episode, list)):
+        return ("The name spans multiple seasons (e.g. S01-S03) that can't be filed as one entry. "
+                "Upload one season per file. Combined episode packs within a single season are fine "
+                "when named like 'Show S02 E01-E05' or 'Show S02 Combined'.")
+    if not quality:
+        return "No video quality/resolution was found. Add one to the caption (e.g. 480p, 720p, 1080p or 2160p)."
+    if not title:
+        return "No title could be detected. Rename or caption the file with a clear title."
+
+    return ("Could not match this title on Cinemeta / TMDB. Fix the title/year in the caption, "
+            "or add an IMDb link/id (tt...) or a TMDB link/id, then forward it again.")
+
+
+def build_id_link(media_id: str, media_type: str = "movie") -> str:
+    if not media_id:
+        return ""
+    if str(media_id).startswith("tt"):
+        return f"https://www.imdb.com/title/{media_id}/"
+    return f"https://www.themoviedb.org/{'tv' if media_type == 'tv' else 'movie'}/{media_id}"
+
+
+def caption_with_id(message_caption: str, metadata_info: dict) -> str:
+    current = str(message_caption or "")
+    media_id = metadata_info.get("imdb_id") or metadata_info.get("tmdb_id")
+    if not media_id or build_id_link(media_id) in current:
+        return current
+    link = build_id_link(media_id, metadata_info.get("media_type", "movie"))
+    sep = "\n" if current and not current.endswith(("\n", " ")) else ""
+    return f"{current}{sep}\n{link}"
 
 
 def has_combined_marker(*values) -> bool:
@@ -1087,6 +1189,55 @@ async def search_tv_candidates(query: str, limit: int = 8) -> list[dict]:
         LOGGER.warning(f"TMDb TV candidate search failed for '{query}': {e}")
 
     return results[:limit]
+
+
+async def search_any_candidates(query: str, year: int | None = None, limit: int = 8) -> list[dict]:
+    query = (query or "").strip()
+    if not query:
+        return []
+
+    default_id = extract_default_id(query)
+    if default_id:
+        out: list[dict] = []
+        seen: set[tuple] = set()
+        for mt in ("movie", "tv"):
+            candidate = None
+            try:
+                if mt == "movie":
+                    data = await fetch_movie_metadata(
+                        title="manual-rescan", encoded_string=None, year=None, quality=None, default_id=default_id
+                    )
+                else:
+                    data = await fetch_tv_metadata(
+                        title="manual-rescan", season=1, episode=1, encoded_string=None,
+                        year=None, quality=None, default_id=default_id,
+                    )
+                if data:
+                    candidate = {
+                        "source": "id",
+                        "title": data.get("title", ""),
+                        "year": data.get("release_year", ""),
+                        "imdb_id": data.get("imdb_id"),
+                        "tmdb_id": data.get("tmdb_id"),
+                        "poster": data.get("poster", ""),
+                        "backdrop": data.get("backdrop", ""),
+                        "media_type": mt,
+                        "subtitle": "Resolved from ID",
+                    }
+            except Exception as e:
+                LOGGER.warning(f"Candidate resolution failed for {default_id} as {mt}: {e}")
+            if not candidate or not candidate.get("title"):
+                continue
+            key = (candidate.get("imdb_id"), str(candidate.get("tmdb_id")), mt)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(candidate)
+        return out
+
+    results = await search_movie_candidates(query, year, limit)
+    results += await search_tv_candidates(query, limit)
+    return results
 
 
 async def fetch_selected_movie_metadata(selected_id: str) -> dict | None:

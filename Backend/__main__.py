@@ -27,7 +27,7 @@ from Backend.helper.iptv import (
     start_iptv_interval_loop,
     start_iptv_sync_background,
 )
-from Backend.helper.scan_manager import scan_manager
+from Backend.helper.scan_manager import scan_manager, duplicate_manager
 from Backend.fastapi.main import app
 from Backend.helper.owner_alerts import schedule_owner_alert
 from Backend.helper.production_ops import start_backup_loop
@@ -113,6 +113,8 @@ async def start_services():
 
         await scan_manager.load(db)
         await asleep(0.2)
+
+        duplicate_manager.bind_db(db)
 
         LOGGER.info("Initializing Telegram-Stremio Web Server...")
         loop.create_task(server.serve())

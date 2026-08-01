@@ -1,9 +1,14 @@
 import unittest
+from types import SimpleNamespace
 from fastapi import Response
 from unittest.mock import patch
 
 from Backend.fastapi.routes import stremio_routes
 from Backend.helper.auto_catalog import classify_media_from_tmdb
+
+
+def fake_request():
+    return SimpleNamespace(headers={}, client=SimpleNamespace(host="1.2.3.4"))
 
 
 class FakeCatalogDB:
@@ -45,6 +50,7 @@ class CustomCatalogStremioTests(unittest.IsolatedAsyncioTestCase):
         fake_db = FakeCatalogDB()
         with patch.object(stremio_routes, "db", fake_db), patch.object(stremio_routes.Telegram, "HIDE_CATALOG", False):
             manifest = await stremio_routes.get_manifest(
+                fake_request(),
                 "token123",
                 Response(),
                 token_data={},
@@ -98,6 +104,7 @@ class CustomCatalogStremioTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(stremio_routes, "db", FakeStreamDB()), patch.object(stremio_routes, "BASE_URL", "https://example.test"):
             result = await stremio_routes.get_streams(
+                fake_request(),
                 "token123",
                 "movie",
                 "tt1234567",

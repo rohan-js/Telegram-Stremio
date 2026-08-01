@@ -63,12 +63,22 @@ async def _announce(info: dict) -> None:
         return
     markup = None
     if Telegram.BASE_URL and Telegram.DEFAULT_ADDON_TOKEN:
-        markup = InlineKeyboardMarkup([[
+        base = Telegram.BASE_URL.rstrip("/")
+        rows = []
+        imdb_id = str(info.get("imdb_id") or "").strip()
+        stremio_type = "series" if info.get("media_type") == "tv" else "movie"
+        if imdb_id:
+            rows.append([
+                InlineKeyboardButton("▶️ Stremio", url=f"{base}/stremio/open/{stremio_type}/{imdb_id}"),
+                InlineKeyboardButton("📱 Nuvio", url=f"{base}/nuvio/open/{stremio_type}/{imdb_id}"),
+            ])
+        rows.append([
             InlineKeyboardButton(
-                "▶️ Open Addon",
-                url=f"{Telegram.BASE_URL.rstrip('/')}/stremio/{Telegram.DEFAULT_ADDON_TOKEN}/configure",
+                "🤖 Open Addon",
+                url=f"{base}/stremio/{Telegram.DEFAULT_ADDON_TOKEN}/configure",
             )
-        ]])
+        ])
+        markup = InlineKeyboardMarkup(rows)
     poster = info.get("backdrop") or info.get("poster")
     try:
         if poster:

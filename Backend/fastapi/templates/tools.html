@@ -112,6 +112,36 @@
       </div>
       <pre id="dbcheck-status" class="rounded-2xl bg-background border border-border p-4 text-xs overflow-auto min-h-48"></pre>
     </div>
+
+    <div class="glass-panel rounded-3xl p-6 space-y-5">
+      <h2 class="text-xl font-black">Duplicate Check</h2>
+      <p class="text-sm text-text-secondary">Finds streams with the same quality, filename and size, then removes the redundant ones.</p>
+      <div class="flex flex-wrap gap-3">
+        <button onclick="startDupCheck()" class="bg-primary text-background px-5 py-2 rounded-full font-bold">Scan for duplicates</button>
+        <button onclick="cancelDupCheck()" class="border border-red-500/40 text-red-300 px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Cancel</button>
+      </div>
+      <div id="dup-summary" class="text-sm text-text-secondary">No duplicates to show yet. Run a scan above.</div>
+      <div id="dup-groups" class="space-y-3"></div>
+      <div class="flex flex-wrap gap-3">
+        <button onclick="purgeSelectedDups()" class="border border-red-500/40 text-red-300 px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Remove selected</button>
+        <button onclick="purgeAllDups()" class="border border-red-500/40 text-red-300 px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Keep newest per group</button>
+      </div>
+    </div>
+
+    <div class="glass-panel rounded-3xl p-6 space-y-5">
+      <h2 class="text-xl font-black">Bot Admin</h2>
+      <p class="text-sm text-text-secondary">Promotes your managed bots to admins in every configured channel, and can demote orphan bots.</p>
+      <div class="flex flex-wrap gap-3">
+        <button onclick="scanBotAdmin()" class="bg-primary text-background px-5 py-2 rounded-full font-bold">Scan channels</button>
+        <button onclick="applyBotAdmin()" class="border border-border px-5 py-2 rounded-full font-bold hover:bg-white/10">Apply</button>
+        <label class="flex items-center gap-2 text-sm text-text-secondary">
+          <input type="checkbox" id="bot-admin-demote" class="rounded">
+          <span>Also remove orphan bot-admins</span>
+        </label>
+      </div>
+      <div id="bot-admin-scan" class="rounded-2xl bg-background border border-border p-4 text-xs overflow-auto max-h-96"></div>
+      <div id="bot-admin-status" class="rounded-2xl bg-background border border-border p-4 text-xs overflow-auto max-h-96"></div>
+    </div>
   </div>
 </section>
 
@@ -194,6 +224,159 @@ async function refreshDbCheck() {
   document.getElementById('dbcheck-status').textContent = JSON.stringify(data.status, null, 2);
 }
 
+let dupStatus = null;
+let dupSelected = new Set();
+
+async function startDupCheck() {
+  try {
+    const data = await api('/api/admin/tools/duplicates/start', {method: 'POST'});
+    showToast(data.message || 'Duplicate scan started', 'success', 'Started');
+    await refreshDupCheck();
+  } catch (err) {
+    showToast(err.message, 'error', 'Duplicates');
+  }
+}
+
+async function cancelDupCheck() {
+  await api('/api/admin/tools/duplicates/cancel', {method: 'POST'}).catch(err => showToast(err.message, 'error', 'Duplicates'));
+  await refreshDupCheck();
+}
+
+function renderDupGroups(groups) {
+  const box = document.getElementById('dup-groups');
+  if (!groups || !groups.length) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = groups.map(g => `
+    <div class="rounded-2xl border border-border p-4 space-y-2">
+      <p class="text-sm font-bold">${escapeHtml(g.title)} · ${escapeHtml(String(g.quality || '?'))}</p>
+      ${(g.entries || []).map(e => `
+        <label class="flex items-center gap-3 text-sm text-text-secondary rounded-xl bg-background border border-border px-3 py-2">
+          <input type="checkbox" data-dup-id="${escapeHtml(e.id)}" onchange="toggleDupSelect(this)" ${dupSelected.has(e.id) ? 'checked' : ''}>
+          <span class="min-w-0 truncate flex-1">${escapeHtml(e.name || e.id)}</span>
+          <span class="text-xs shrink-0">${escapeHtml(String(e.size || ''))}</span>
+        </label>`).join('')}
+    </div>`).join('');
+}
+
+async function refreshDupCheck() {
+  const data = await api('/api/admin/tools/duplicates/status');
+  dupStatus = data.data || {};
+  const s = dupStatus;
+  const summary = document.getElementById('dup-summary');
+  const statusText = s.is_running ? 'Scanning…' : s.status === 'completed' ? `Done — ${s.group_count || 0} duplicate group(s) found.` : s.status === 'error' ? (s.error || 'Scan failed.') : s.status;
+  const purgeText = s.purge_running ? `Removing… ${s.purge_done}/${s.purge_total} (${s.purge_progress || 0}%)` : s.purge_status === 'completed' ? `Removed ${s.purge_total || 0} duplicate(s).` : '';
+  summary.textContent = [statusText, s.duplicate_count ? `${s.duplicate_count} redundant stream(s)` : '', purgeText].filter(Boolean).join(' · ');
+  renderDupGroups(s.groups || []);
+}
+
+function toggleDupSelect(el) {
+  const id = el.dataset.dupId;
+  if (el.checked) dupSelected.add(id);
+  else dupSelected.delete(id);
+}
+
+async function purgeSelectedDups() {
+  const streamIds = Array.from(dupSelected);
+  if (!streamIds.length) { showToast('Select at least one duplicate.', 'error', 'Duplicates'); return; }
+  try {
+    const data = await api('/api/admin/tools/duplicates/purge', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({stream_ids: streamIds})
+    });
+    showToast(data.message || 'Cleanup started', 'success', 'Duplicates');
+    dupSelected.clear();
+    await refreshDupCheck();
+  } catch (err) {
+    showToast(err.message, 'error', 'Duplicates');
+  }
+}
+
+async function purgeAllDups() {
+  try {
+    const data = await api('/api/admin/tools/duplicates/purge', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({delete_all: true})
+    });
+    showToast(data.message || 'Cleanup started', 'success', 'Duplicates');
+    dupSelected.clear();
+    await refreshDupCheck();
+  } catch (err) {
+    showToast(err.message, 'error', 'Duplicates');
+  }
+}
+
+let botAdminScan = null;
+
+async function scanBotAdmin() {
+  const box = document.getElementById('bot-admin-scan');
+  box.textContent = 'Scanning…';
+  try {
+    const data = await api('/api/admin/tools/bot-admin/scan');
+    if (data.status !== 'success') {
+      box.textContent = data.message || 'Scan unavailable.';
+      return;
+    }
+    botAdminScan = data.data;
+    const {bots, channels} = data.data;
+    box.innerHTML = '';
+    const botRow = document.createElement('p');
+    botRow.className = 'mb-3';
+    botRow.innerHTML = `<span class="font-bold">Bots:</span> ${bots.map(b => `${escapeHtml(b.name)}${b.is_main ? ' (main)' : ''}`).join(', ') || 'none'}`;
+    box.appendChild(botRow);
+    for (const ch of channels) {
+      const div = document.createElement('div');
+      div.className = 'rounded-xl border border-border p-3 mb-2';
+      const rolePills = (ch.roles || []).map(r => `<span class="px-2 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] font-bold mr-1">${escapeHtml(r)}</span>`).join('');
+      div.innerHTML = `
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-bold truncate">${escapeHtml(ch.name)} (${escapeHtml(ch.id)})</span>
+          <label class="flex items-center gap-1 text-[11px] shrink-0">
+            <input type="checkbox" class="ba-channel" value="${escapeHtml(ch.id)}" ${ch.manageable ? '' : 'disabled'}>
+            <span>Apply</span>
+          </label>
+        </div>
+        <p class="text-[11px] text-text-secondary mt-1">${rolePills}${escapeHtml(ch.reason || (ch.manageable ? 'manageable' : 'not manageable'))}</p>
+        <p class="text-[11px] mt-1">${bots.map(b => `${escapeHtml(b.name)}: <b>${escapeHtml(ch.bots[String(b.user_id)] || 'missing')}</b>`).join(' · ')}</p>
+        ${(ch.orphans || []).length ? `<p class="text-[11px] text-amber-300 mt-1">Orphan admins: ${ch.orphans.map(o => escapeHtml(o.name)).join(', ')}</p>` : ''}`;
+      box.appendChild(div);
+    }
+  } catch (err) {
+    box.textContent = err.message;
+  }
+}
+
+async function applyBotAdmin() {
+  const channelIds = Array.from(document.querySelectorAll('.ba-channel:checked')).map(x => x.value);
+  if (!channelIds.length) { showToast('Select at least one channel.', 'error', 'Bot Admin'); return; }
+  const demote = document.getElementById('bot-admin-demote').checked;
+  try {
+    const data = await api('/api/admin/tools/bot-admin/apply', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({channel_ids: channelIds, demote_orphans: demote})
+    });
+    showToast(data.message || 'Apply started', 'success', 'Bot Admin');
+    await refreshBotAdminApply();
+  } catch (err) {
+    showToast(err.message, 'error', 'Bot Admin');
+  }
+}
+
+async function refreshBotAdminApply() {
+  const box = document.getElementById('bot-admin-status');
+  try {
+    const data = await api('/api/admin/tools/bot-admin/apply/status');
+    const s = data.data || {};
+    box.textContent = JSON.stringify({status: s.status, done: s.done, total: s.total, results: s.results, error: s.error}, null, 2);
+  } catch (err) {
+    box.textContent = err.message;
+  }
+}
+
 async function searchManualTitles() {
   const query = document.getElementById('manual-query').value.trim();
   if (!query) return;
@@ -206,7 +389,7 @@ async function searchManualTitles() {
     document.getElementById('manual-results').innerHTML = manualResults.length ? manualResults.map((item, index) => `
       <button type="button" onclick="selectManualTitle(${index})" class="text-left rounded-2xl border border-border p-4 hover:border-primary/60">
         <span class="font-bold block">${escapeHtml(item.title || 'Untitled')}</span>
-        <span class="text-xs text-text-secondary">${escapeHtml(item.media_type)} · ${escapeHtml(String(item.year || 'Year unknown'))}${item.is_personal ? ' · Personal' : ''}</span>
+        <span class="text-xs text-text-secondary">${escapeHtml(item.media_type)} · ${escapeHtml(String(item.year || 'Year unknown'))}${item.is_personal ? ' · Personal' : ''}${item.selected_id ? ' · <span class="text-primary">Online</span>' : ''}</span>
       </button>
     `).join('') : '<p class="text-sm text-text-secondary">No matching library titles.</p>';
   } catch (err) {
@@ -234,6 +417,8 @@ async function startManualSession() {
     season: document.getElementById('manual-season').value || null,
     episode: document.getElementById('manual-episode').value || null,
     quality: document.getElementById('manual-quality').value.trim() || null,
+    selected_id: selectedManualResult.selected_id || null,
+    in_library: !!selectedManualResult.db_index,
   };
   try {
     await api('/api/admin/tools/manual-session', {
@@ -378,7 +563,7 @@ async function submitManualAdd() {
 }
 
 async function refreshAll() {
-  await Promise.allSettled([loadChannels(), refreshScan(), refreshDbCheck(), loadManualSession()]);
+  await Promise.allSettled([loadChannels(), refreshScan(), refreshDbCheck(), refreshDupCheck(), refreshBotAdminApply(), loadManualSession()]);
 }
 
 refreshAll();

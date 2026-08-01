@@ -26,7 +26,7 @@ from Backend.fastapi.routes.api_routes import (
     grant_lifetime_api, backfill_token_names_api,
     speed_test_api, speed_test_stream_api,
     get_admin_stats_api, clear_cache_api, get_dead_links_api,
-    get_stream_analytics_api, clear_stream_analytics_api,
+    get_stream_analytics_api, clear_stream_analytics_api, get_user_activity_api,
     get_subscription_plans_api, add_subscription_plan_api,
     update_subscription_plan_api, delete_subscription_plan_api,
     get_all_subscribers_api, manage_subscriber_api,
@@ -48,6 +48,9 @@ from Backend.fastapi.routes.api_routes import (
     get_tools_channels_api, start_tools_scan_api, cancel_tools_scan_api,
     get_tools_scan_status_api, start_tools_dbcheck_api, cancel_tools_dbcheck_api,
     get_tools_dbcheck_status_api, purge_tools_dead_links_api,
+    start_duplicate_check_api, cancel_duplicate_check_api,
+    duplicate_check_status_api, purge_duplicates_api,
+    bot_admin_scan_api, bot_admin_apply_api, bot_admin_apply_status_api,
     get_manual_session_api, search_manual_session_api,
     set_manual_session_api, clear_manual_session_api,
     get_warp_status_api, apply_warp_api,
@@ -55,7 +58,9 @@ from Backend.fastapi.routes.api_routes import (
     request_search_api, request_popular_api, request_submit_api,
     get_requests_api, update_request_api, delete_request_api,
     get_health_api, get_admin_logs_api, download_admin_logs_api,
-    export_config_api, import_config_api
+    export_config_api, import_config_api,
+    resolve_subtitle_api, list_subtitle_languages_api, list_subtitles_api,
+    add_subtitles_api, remove_subtitle_api,
 )
 
 app = FastAPI(
@@ -309,6 +314,36 @@ async def delete_tv_season(tmdb_id: int, db_index: int, season: int, _: bool = D
 async def get_media_duplicates(_: bool = Depends(require_auth)):
     return await get_duplicate_media_api()
 
+@app.get("/api/admin/user-activity")
+async def user_activity(page: int = 1, per_page: int = 12, _: bool = Depends(require_auth)):
+    return await get_user_activity_api(page, per_page)
+
+
+#----- Manual subtitle management
+@app.get("/api/media/subtitles/languages")
+async def subtitle_languages(_: bool = Depends(require_auth)):
+    return list_subtitle_languages_api()
+
+
+@app.get("/api/media/subtitles")
+async def list_subtitles(media_type: str, tmdb_id: int, db_index: int, _: bool = Depends(require_auth)):
+    return await list_subtitles_api(media_type, tmdb_id, db_index)
+
+
+@app.post("/api/media/subtitles/resolve")
+async def resolve_subtitle(payload: dict, _: bool = Depends(require_auth)):
+    return await resolve_subtitle_api(payload)
+
+
+@app.post("/api/media/subtitles/add")
+async def add_subtitles(payload: dict, _: bool = Depends(require_auth)):
+    return await add_subtitles_api(payload)
+
+
+@app.post("/api/media/subtitles/remove")
+async def remove_subtitle_route(payload: dict, _: bool = Depends(require_auth)):
+    return await remove_subtitle_api(payload)
+
 @app.post("/api/media/quality-flags")
 async def update_quality_flags(payload: dict, _: bool = Depends(require_auth)):
     return await update_quality_flags_api(payload)
@@ -392,6 +427,34 @@ async def admin_tools_dbcheck_status(_: bool = Depends(require_auth)):
 @app.post("/api/admin/tools/dead-links/purge")
 async def admin_tools_dead_links_purge(payload: dict, _: bool = Depends(require_auth)):
     return await purge_tools_dead_links_api(payload)
+
+@app.post("/api/admin/tools/duplicates/start")
+async def tools_duplicates_start(_: bool = Depends(require_auth)):
+    return await start_duplicate_check_api()
+
+@app.post("/api/admin/tools/duplicates/cancel")
+async def tools_duplicates_cancel(_: bool = Depends(require_auth)):
+    return await cancel_duplicate_check_api()
+
+@app.get("/api/admin/tools/duplicates/status")
+async def tools_duplicates_status(_: bool = Depends(require_auth)):
+    return await duplicate_check_status_api()
+
+@app.post("/api/admin/tools/duplicates/purge")
+async def tools_duplicates_purge(payload: dict | None = None, _: bool = Depends(require_auth)):
+    return await purge_duplicates_api(payload)
+
+@app.get("/api/admin/tools/bot-admin/scan")
+async def tools_bot_admin_scan(_: bool = Depends(require_auth)):
+    return await bot_admin_scan_api()
+
+@app.post("/api/admin/tools/bot-admin/apply")
+async def tools_bot_admin_apply(payload: dict, _: bool = Depends(require_auth)):
+    return await bot_admin_apply_api(payload)
+
+@app.get("/api/admin/tools/bot-admin/apply/status")
+async def tools_bot_admin_apply_status(_: bool = Depends(require_auth)):
+    return await bot_admin_apply_status_api()
 
 @app.get("/api/admin/warp/status")
 async def admin_warp_status(_: bool = Depends(require_auth)):

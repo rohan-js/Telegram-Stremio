@@ -18,7 +18,7 @@ from Backend.helper.manual_add import resolve_telegram_message
 from Backend.helper.manual_session import manual_session_manager
 from Backend.helper.nuvio import build_nuvio_bridge_url
 from Backend.helper.settings_manager import SettingsManager
-from Backend.helper.task_manager import edit_message
+from Backend.helper.task_manager import delete_message, edit_message
 from Backend.helper.torrent_source import (
     TorrentItem,
     extract_magnet_links,
@@ -40,6 +40,9 @@ from Backend.helper.disk_cache import PRECACHE_MANAGER, PrecacheJob
 from Backend.helper.announcer import announce_new_media
 from Backend.helper.requests_manager import mark_uploaded_for_media
 from Backend.helper.subtitles import ingest_subtitle, is_subtitle_file, remove_subtitle
+from Backend.helper.metadata import analyze_metadata_failure
+from Backend.helper.manual_add import stamp_caption_by_ref
+from Backend.helper.skip_channel import is_skip_channel, route_to_skip_channel
 
 
 file_queue = Queue()
@@ -161,6 +164,8 @@ async def _finalize_failed_status_or_reply(job: dict, reason: str) -> None:
         title = job.get("display_name") or job.get("title") or job.get("file_name") or "unknown"
         template = TORRENT_METADATA_FAILED_TEXT if job.get("source_type") == "torrent" else METADATA_FAILED_TEXT
         text = f"{template.format(title=escape(title))}\n\nReason: <code>{escape(str(reason)[:120])}</code>"
+        if job.get("source_type") != "torrent":
+            text += f"\n\n{escape(analyze_metadata_failure(job.get('file_name') or title))}"
         await _edit_status(job.get("status_chat_id"), job.get("status_msg_id"), text)
         job["_last_status_text"] = text
         job["_last_status_at"] = monotonic()
@@ -271,6 +276,7 @@ async def _process_ingest_job(job: dict) -> None:
         })
 
     await _set_status(job, "indexing stream")
+    insert_status: dict = {}
     updated_id = await db.insert_media(
         metadata_info,
         channel=int(job["channel"]),
@@ -278,10 +284,26 @@ async def _process_ingest_job(job: dict) -> None:
         size=job.get("size") or "",
         name=job.get("display_name") or title,
         raw_size=int(job.get("file_size") or job.get("raw_size") or 0),
+        status=insert_status,
     )
-    if updated_id:
+    if not updated_id:
+        reason = "database_insert_failed"
+        if job.get("status_chat_id") and job.get("status_msg_id"):
+            await _set_status(job, "failed", reason=reason, force=True)
+        else:
+            await _send_metadata_failed_reply(job, reason)
+        LOGGER.info("Queued update failed due to validation/database errors.")
+    elif insert_status.get("duplicate_skipped"):
+        LOGGER.info(f"Duplicate protection: deleting duplicate message {job.get('msg_id')} from channel {job.get('channel')}.")
+        create_task(delete_message(int(f"-100{int(job['channel'])}"), int(job["msg_id"])))
+        if job.get("status_chat_id") and job.get("status_msg_id"):
+            await _delete_status(job.get("status_chat_id"), job.get("status_msg_id"))
+    else:
         LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
         announce_new_media(metadata_info)
+        if job.get("source_type") == "telegram" and job.get("channel") and job.get("msg_id"):
+            from Backend.pyrofork.bot import StreamBot as _stamp_client
+            create_task(stamp_caption_by_ref(_stamp_client, job["channel"], job["msg_id"], metadata_info))
         try:
             await mark_uploaded_for_media(metadata_info)
         except Exception as e:
@@ -296,13 +318,6 @@ async def _process_ingest_job(job: dict) -> None:
             "status_chat_id": job.get("status_chat_id"),
             "status_msg_id": job.get("status_msg_id"),
         })
-    else:
-        reason = "database_insert_failed"
-        if job.get("status_chat_id") and job.get("status_msg_id"):
-            await _set_status(job, "failed", reason=reason, force=True)
-        else:
-            await _send_metadata_failed_reply(job, reason)
-        LOGGER.info("Queued update failed due to validation/database errors.")
 
 
 async def process_file():

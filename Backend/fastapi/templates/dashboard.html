@@ -274,6 +274,19 @@
         <div class="glass-panel rounded-[2.5rem] overflow-hidden">
             <div class="p-8 border-b border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
                 <div>
+                    <h3 class="text-xl font-bold text-text">User Activity</h3>
+                    <p id="ua-online" class="text-sm text-text-secondary">Users who recently fetched metadata or streamed.</p>
+                </div>
+                <div id="ua-pagination" class="flex items-center gap-2"></div>
+            </div>
+            <div id="ua-list" class="p-6 space-y-4"></div>
+        </div>
+    </section>
+
+    <section class="mt-12">
+        <div class="glass-panel rounded-[2.5rem] overflow-hidden">
+            <div class="p-8 border-b border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div>
                     <h3 class="text-xl font-bold text-text">Access Management</h3>
                     <p class="text-sm text-text-secondary">Control API tokens, daily quotas, and monthly quotas. HTTP egress and VPS TX outbound are tracked separately in System Overview.</p>
                 </div>
@@ -1052,11 +1065,75 @@
         });
     }
 
+    const uaInitial = {{ user_activity_initial | tojson }};
+
+    function uaEsc(value) {
+        return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    function renderUaPagination(data) {
+        const el = document.getElementById('ua-pagination');
+        if (!el) return;
+        const cur = data.page || 1, pages = data.total_pages || 1;
+        if (pages <= 1) { el.innerHTML = ''; return; }
+        el.innerHTML = `<button onclick="loadUserActivity(${cur - 1})" ${cur <= 1 ? 'disabled' : ''} class="px-3 py-1.5 rounded-xl glass-panel border border-white/10 text-sm font-bold disabled:opacity-40"><i class="fa-solid fa-chevron-left"></i></button>
+            <span class="text-xs font-bold text-text-secondary">${cur} / ${pages}</span>
+            <button onclick="loadUserActivity(${cur + 1})" ${cur >= pages ? 'disabled' : ''} class="px-3 py-1.5 rounded-xl glass-panel border border-white/10 text-sm font-bold disabled:opacity-40"><i class="fa-solid fa-chevron-right"></i></button>`;
+    }
+
+    function renderUserActivity(data) {
+        const box = document.getElementById('ua-list');
+        const onlineEl = document.getElementById('ua-online');
+        if (onlineEl) onlineEl.textContent = (data.online_count || 0) + ' online · ' + (data.total || 0) + ' total users';
+        const users = data.users || [];
+        if (!users.length) {
+            box.innerHTML = '<div class="text-center py-10 text-sm text-text-secondary">No user activity recorded yet.</div>';
+            renderUaPagination(data);
+            return;
+        }
+        box.innerHTML = users.map(u => {
+            const nowPlaying = u.online && u.now_playing
+                ? `<p class="mt-2 text-xs font-extrabold text-emerald-400"><i class="fa-solid fa-play mr-1"></i>${uaEsc(u.now_playing)}</p>` : '';
+            const geo = [u.country, u.city].filter(Boolean).join(', ');
+            const when = u.last_active
+                ? '<br><span>' + uaEsc(new Date(u.last_active.endsWith('Z') ? u.last_active : u.last_active + 'Z').toLocaleString()) + '</span>' : '';
+            return `<div class="flex flex-col md:flex-row md:items-center gap-3 p-4 rounded-[1.5rem] bg-white/[0.03] border border-white/5">
+                <div class="flex items-center gap-3 min-w-0 flex-1">
+                    <span class="w-2.5 h-2.5 rounded-full ${u.online ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-text-secondary'} shrink-0"></span>
+                    <div class="min-w-0">
+                        <p class="text-sm font-bold text-text truncate">${uaEsc(u.name)}</p>
+                        <p class="text-[10px] uppercase tracking-widest text-text-secondary">${uaEsc(u.app)}${u.device ? ' · ' + uaEsc(u.device) : ''}</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full ${u.proxy ? 'bg-red-500/15 text-red-400 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'}">${u.proxy ? 'VPN' : 'Clean'}</span>
+                    ${u.streams ? `<span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-white/5 text-text-secondary border border-white/10">${u.streams} stream${u.streams === 1 ? '' : 's'}</span>` : ''}
+                    ${geo ? `<span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-white/5 text-text-secondary border border-white/10">${uaEsc(geo)}</span>` : ''}
+                </div>
+                <p class="text-[10px] text-text-secondary md:text-right md:w-52 truncate">${uaEsc(u.isp || '')}${when}</p>
+                ${nowPlaying}
+            </div>`;
+        }).join('');
+        renderUaPagination(data);
+    }
+
+    async function loadUserActivity(page, silent) {
+        try {
+            const res = await fetch(`/api/admin/user-activity?page=${page || 1}&per_page=12`, { cache: 'no-store' });
+            if (!res.ok) return;
+            renderUserActivity(await res.json());
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         formatInitialBytes();
         loadStreamStats();
         setInterval(loadStreamStats, 30000);
         setInterval(refreshLiveDurations, 1000);
+        renderUserActivity(uaInitial);
+        setInterval(() => loadUserActivity(1, true), 60000);
     });
 </script>
 {% endblock %}

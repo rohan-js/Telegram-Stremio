@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from fastapi.templating import Jinja2Templates
 from typing import Optional
@@ -8,6 +9,7 @@ import PTN
 from datetime import datetime, timezone, timedelta
 from Backend.fastapi.security.tokens import verify_token
 from Backend.helper.encrypt import encode_string
+from Backend.helper.analytics import client_ip_from, record_client
 from Backend.helper.global_search import global_search, is_global_search_enabled
 from Backend.logger import LOGGER
 from Backend.helper.torrent_downloads import (
@@ -16,6 +18,8 @@ from Backend.helper.torrent_downloads import (
     select_completed_torrent_file,
 )
 from Backend.helper.subtitles import get_subtitles_for, stremio_subtitle_entries
+from Backend.helper.fanart import fanart_artwork
+from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.iptv import (
     IPTV_ALL_CATALOG_ID,
     IPTV_CATALOG_ID,
@@ -61,6 +65,52 @@ def format_released_date(media):
     return None
 
 # --- Helper Functions ---
+def _abs_media_url(value) -> str:
+    if not value:
+        return ""
+    value = str(value)
+    if value.startswith(("http://", "https://")):
+        return value
+    base = str(SettingsManager.current().base_url or "").rstrip("/")
+    return f"{base}/{value.lstrip('/')}" if base else value
+
+
+BETTERPOSTER_DEFAULT = "https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg"
+RPDB_FREE = "https://api.ratingposterdb.com/t0-free-rpdb/imdb/poster-default/{imdb_id}.jpg"
+
+
+def _poster_url(imdb_id: str, fallback: str) -> str:
+    settings = SettingsManager.current()
+    if imdb_id:
+        if settings.better_poster_enabled:
+            template = settings.better_poster or BETTERPOSTER_DEFAULT
+            return template.replace("{imdb_id}", str(imdb_id))
+        if settings.rpdb_enabled:
+            key = settings.rpdb_api_key
+            template = (
+                f"https://api.ratingposterdb.com/{key}/imdb/poster-default/{{imdb_id}}.jpg"
+                if key else RPDB_FREE
+            )
+            return template.replace("{imdb_id}", str(imdb_id))
+    return _abs_media_url(fallback)
+
+
+async def _apply_fanart(meta: dict, item: dict) -> None:
+    if not SettingsManager.current().fanart_enabled:
+        return
+    try:
+        art = await fanart_artwork(item.get("imdb_id"), item.get("tmdb_id"), item.get("media_type"))
+    except Exception as e:
+        LOGGER.warning(f"[FANART] artwork lookup failed for {item.get('imdb_id')}: {e}")
+        return
+    if art.get("poster"):
+        meta["poster"] = art["poster"]
+    if art.get("logo"):
+        meta["logo"] = art["logo"]
+    if art.get("background"):
+        meta["background"] = art["background"]
+
+
 def convert_to_stremio_meta(item: dict) -> dict:
     media_type = "series" if item.get("media_type") == "tv" else "movie"
     
@@ -68,13 +118,13 @@ def convert_to_stremio_meta(item: dict) -> dict:
         "id": item.get('imdb_id'),
         "type": media_type,
         "name": item.get("title"),
-        "poster": item.get("poster") or "",
+        "poster": _poster_url(item.get("imdb_id"), item.get("poster")),
         "logo": item.get("logo") or "",
         "year": item.get("release_year"),
         "releaseInfo": str(item.get("release_year", "")),
         "imdb_id": item.get("imdb_id", ""),
         "moviedb_id": item.get("tmdb_id", ""),
-        "background": item.get("backdrop") or "",
+        "background": _abs_media_url(item.get("backdrop")),
         "genres": item.get("genres") or [],
         "imdbRating": str(item.get("rating") or ""),
         "description": item.get("description") or "",
@@ -372,8 +422,14 @@ def _filter_visible_media(items: list[dict], token_data: dict, *, allow_searchab
 
 # --- Routes ---
 @router.get("/{token}/manifest.json")
-async def get_manifest(token: str, response: Response, token_data: dict = Depends(verify_token)):
+async def get_manifest(request: Request, token: str, response: Response, token_data: dict = Depends(verify_token)):
     apply_stremio_no_cache(response)
+    asyncio.create_task(record_client(
+        token,
+        token_data.get("name") or "Unknown",
+        client_ip_from(request),
+        request.headers.get("user-agent"),
+    ))
     if Telegram.HIDE_CATALOG:
         resources = ["stream", "subtitles"]
         catalogs = []
@@ -792,15 +848,16 @@ async def get_meta(token: str, media_type: str, id: str, response: Response, tok
         "year": str(media.get("release_year", "")),
         "imdbRating": str(media.get("rating", "")),
         "genres": media.get("genres", []),
-        "poster": media.get("poster", ""),
+        "poster": _poster_url(media.get("imdb_id") or id, media.get("poster")),
         "logo": media.get("logo", ""),
-        "background": media.get("backdrop", ""),
+        "background": _abs_media_url(media.get("backdrop")),
         "imdb_id": media.get("imdb_id", ""),
         "releaseInfo": str(media.get("release_year", "")),
         "moviedb_id": media.get("tmdb_id", ""),
         "cast": media.get("cast") or [],
         "runtime": media.get("runtime") or "",
     }
+    await _apply_fanart(meta_obj, media)
 
     if media.get("media_type") == "movie":
         released_date = format_released_date(media)
@@ -869,6 +926,7 @@ async def get_subtitles(
 
 @router.api_route("/{token}/stream/{media_type}/{id}.json", methods=["GET", "HEAD"])
 async def get_streams(
+    request: Request,
     token: str,
     media_type: str,
     id: str,
@@ -876,6 +934,12 @@ async def get_streams(
     token_data: dict = Depends(verify_token)
 ):
     apply_stremio_no_cache(response)
+    asyncio.create_task(record_client(
+        token,
+        token_data.get("name") or "Unknown",
+        client_ip_from(request),
+        request.headers.get("user-agent"),
+    ))
 
     if token_data.get("subscription_expired"):
         from Backend.config import Telegram as _TG

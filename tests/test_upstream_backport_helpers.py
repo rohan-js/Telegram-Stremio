@@ -237,6 +237,7 @@ class UpstreamBackportHelperTests(unittest.TestCase):
         self.assertEqual(Telegram.ANNOUNCEMENT_CHANNEL, "-100123")
 
     def test_settings_apply_manual_channels(self):
+        SettingsManager._current = None
         SettingsManager.apply_to_runtime(Settings({"manual_channels": ["123", "456"]}))
         self.assertEqual(Telegram.MANUAL_CHANNELS, ["123", "456"])
         self.assertEqual(SettingsManager.current().manual_channels, ["123", "456"])

@@ -3,6 +3,7 @@ import mimetypes
 import time
 from typing import Dict
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -11,6 +12,7 @@ from collections import deque
 
 from Backend import db
 from Backend.helper.encrypt import decode_string
+from Backend.helper.analytics import client_ip_from, record_stream_start
 from Backend.helper.exceptions import InvalidHash
 from Backend.helper.custom_dl import (
     ByteStreamer,
@@ -60,6 +62,11 @@ router = APIRouter(tags=["Streaming"])
 
 _streamer_by_client: Dict = {}
 _failure_decay_started: bool = False
+
+
+def _content_disposition(file_name, disposition="inline"):
+    ascii_fallback = str(file_name).encode("ascii", "ignore").decode("ascii").replace('"', "").strip() or "file"
+    return f"{disposition}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(str(file_name), safe='')}"
 
 VIDEO_MIME_BY_EXTENSION = {
     ".mkv": "video/x-matroska",
@@ -224,7 +231,7 @@ async def subtitle_handler(token: str, id: str, name: str, token_data: dict = De
             iter([data]),
             media_type=subtitle_mime_type(file_name),
             headers={
-                "Content-Disposition": f'inline; filename="{Path(file_name).name}"',
+                "Content-Disposition": _content_disposition(Path(file_name).name),
                 "Cache-Control": "private, max-age=3600",
             },
         )
@@ -567,7 +574,7 @@ async def downloaded_torrent_stream_handler(
     mime_type = guess_mime_type(file_path)
     headers = {
         "Content-Type": mime_type,
-        "Content-Disposition": f'inline; filename="{file_name}"',
+        "Content-Disposition": _content_disposition(file_name),
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=3600",
         "Access-Control-Allow-Origin": "*",
@@ -612,6 +619,12 @@ async def stream_handler(
     token_data: dict = Depends(verify_token),
 ):
     enforce_playback_token(token_data)
+    asyncio.create_task(record_stream_start(
+        token,
+        token_data.get("name") or "Unknown",
+        client_ip_from(request),
+        request.headers.get("user-agent"),
+    ))
     decoded = await decode_string(id)
     if decoded.get("parts"):
         return await virtual_media_streamer(
@@ -743,7 +756,7 @@ async def virtual_media_streamer(
 
     headers = {
         "Content-Type": mime_type,
-        "Content-Disposition": f'inline; filename="{file_name}"',
+        "Content-Disposition": _content_disposition(file_name),
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=3600",
         "Access-Control-Allow-Origin": "*",
@@ -943,7 +956,7 @@ async def media_streamer(
 
                 headers = {
                     "Content-Type": mime_type,
-                    "Content-Disposition": f'inline; filename="{file_name}"',
+                    "Content-Disposition": _content_disposition(file_name),
                     "Accept-Ranges": "bytes",
                     "Cache-Control": "public, max-age=3600",
                     "Access-Control-Allow-Origin": "*",
@@ -1011,7 +1024,7 @@ async def media_streamer(
         headers = {
             "Content-Type": mime_type,
             "Content-Length": str(req_length),
-            "Content-Disposition": f'inline; filename="{file_name}"',
+            "Content-Disposition": _content_disposition(file_name),
             "Accept-Ranges": "bytes",
             "Cache-Control": "public, max-age=3600",
             "Access-Control-Allow-Origin": "*",
@@ -1047,7 +1060,7 @@ async def media_streamer(
 
     headers = {
         "Content-Type": mime_type,
-        "Content-Disposition": f'inline; filename="{file_name}"',
+        "Content-Disposition": _content_disposition(file_name),
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=3600",
         "Access-Control-Allow-Origin": "*",

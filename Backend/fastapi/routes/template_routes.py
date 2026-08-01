@@ -12,6 +12,7 @@ from Backend.helper.custom_dl import ACTIVE_STREAMS, RECENT_STREAMS
 from Backend.helper.nginx_egress import get_nginx_egress_summary
 from Backend.helper.host_outbound import get_vps_outbound_summary, empty_vps_outbound_summary
 from Backend.helper.settings_manager import SettingsManager
+from Backend.helper.analytics import get_activity_overview
 from Backend.config import Telegram
 
 templates = Jinja2Templates(directory="Backend/fastapi/templates")
@@ -155,6 +156,10 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
         }
 
     api_tokens = await db.get_all_api_tokens()
+    try:
+        user_activity_initial = await get_activity_overview(1, 12)
+    except Exception:
+        user_activity_initial = {"users": [], "online_count": 0, "total": 0, "page": 1, "per_page": 12, "total_pages": 1}
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "theme": theme,
@@ -162,7 +167,8 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
         "current_theme": theme_name,
         "current_user": current_user,
         "system_stats": system_stats,
-        "api_tokens": api_tokens
+        "api_tokens": api_tokens,
+        "user_activity_initial": user_activity_initial
     })
 
 

@@ -31,6 +31,18 @@ DEFAULTS: Dict[str, Any] = {
     "content_requests_beta_only": True,
     "announce_new_content": False,
     "announcement_channel": "",
+    "skip_channel": "",
+    "delete_on_metadata_fail": False,
+    "duplicate_protection": False,
+    "better_poster_enabled": False,
+    "better_poster": "",
+    "rpdb_enabled": False,
+    "rpdb_api_key": "",
+    "fanart_enabled": False,
+    "fanart_api_key": "",
+    "fanart_shuffle": False,
+    "fanart_shuffle_interval": 5,
+    "fanart_low_res_poster": True,
     "updated_at": None,
 }
 
@@ -131,6 +143,57 @@ class Settings:
     @property
     def announcement_channel(self) -> str:
         return str(self._data.get("announcement_channel") or "").strip()
+
+    @property
+    def skip_channel(self) -> str:
+        return str(self._data.get("skip_channel") or "").strip()
+
+    @property
+    def delete_on_metadata_fail(self) -> bool:
+        return bool(self._data.get("delete_on_metadata_fail", False))
+
+    @property
+    def duplicate_protection(self) -> bool:
+        return bool(self._data.get("duplicate_protection", False))
+
+    @property
+    def better_poster_enabled(self) -> bool:
+        return bool(self._data.get("better_poster_enabled", False))
+
+    @property
+    def better_poster(self) -> str:
+        return str(self._data.get("better_poster") or "").strip()
+
+    @property
+    def rpdb_enabled(self) -> bool:
+        return bool(self._data.get("rpdb_enabled", False))
+
+    @property
+    def rpdb_api_key(self) -> str:
+        return str(self._data.get("rpdb_api_key") or "").strip()
+
+    @property
+    def fanart_enabled(self) -> bool:
+        return bool(self._data.get("fanart_enabled", False))
+
+    @property
+    def fanart_api_key(self) -> str:
+        return str(self._data.get("fanart_api_key") or "").strip()
+
+    @property
+    def fanart_shuffle(self) -> bool:
+        return bool(self._data.get("fanart_shuffle", False))
+
+    @property
+    def fanart_shuffle_interval(self) -> int:
+        try:
+            return max(0, int(self._data.get("fanart_shuffle_interval") or 0))
+        except (TypeError, ValueError):
+            return 5
+
+    @property
+    def fanart_low_res_poster(self) -> bool:
+        return bool(self._data.get("fanart_low_res_poster", True))
 
 
 class SettingsManager:
@@ -273,6 +336,13 @@ class SettingsManager:
         announcement_channel = str(merged.get("announcement_channel") or "").strip()
         if announcement_channel:
             cls._validate_channel_values([announcement_channel], "Announcement Channel")
+        skip_channel = str(merged.get("skip_channel") or "").strip()
+        if skip_channel:
+            cls._validate_channel_values([skip_channel], "Skip Channel")
+        try:
+            merged["fanart_shuffle_interval"] = max(0, int(merged.get("fanart_shuffle_interval") or 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Fanart Shuffle Interval must be a non-negative number of minutes.") from exc
         if merged.get("global_search") and not getattr(Telegram, "USER_SESSION_STRING", ""):
             merged["global_search"] = False
 

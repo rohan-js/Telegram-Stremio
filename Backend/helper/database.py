@@ -18,6 +18,8 @@ from Backend.helper.task_manager import delete_message
 from Backend.helper.torrent_stats import scrape_torrent_trackers
 from Backend.helper.host_outbound import build_vps_outbound_sample
 from Backend.helper.beta_access import default_token_limits, is_exempt_token
+from Backend.helper.manual_session import is_personal_media
+from Backend.helper.settings_manager import SettingsManager
 
 
 def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
@@ -1329,7 +1331,8 @@ class Database:
 
     async def insert_media(
         self, metadata_info: dict,
-        channel: int, msg_id: int, size: str, name: str, raw_size: int = 0
+        channel: int, msg_id: int, size: str, name: str, raw_size: int = 0,
+        status: Optional[dict] = None,
     ) -> Optional[ObjectId]:
         quality_detail = await self._quality_from_metadata(metadata_info, channel, msg_id, size, name, raw_size)
         
@@ -1352,7 +1355,7 @@ class Database:
                 telegram=[quality_detail],
                 is_anime=bool(metadata_info.get("is_anime", False)),
             )
-            return await self.update_movie(media)
+            return await self.update_movie(media, status=status)
         else:
             if metadata_info.get("season_pack") and metadata_info.get("season_pack_episodes"):
                 episodes = [
@@ -1398,7 +1401,7 @@ class Database:
                     episodes=episodes
                 )]
             )
-            return await self.update_tv_show(tv_show)
+            return await self.update_tv_show(tv_show, status=status)
 
     async def _build_part_id_and_size(self, parts: List[dict]) -> Tuple[str, str]:
         sorted_parts = sorted(parts or [], key=lambda p: int(p.get("part_number") or 0))
@@ -1489,6 +1492,13 @@ class Database:
 
     def _source_type(self, quality: dict) -> str:
         return quality.get("source_type") or "telegram"
+
+    #----- Identity of a non-split stream for duplicate protection (quality + name + size)
+    @staticmethod
+    def _dup_key(quality: dict) -> tuple:
+        name = re.sub(r"\s+", " ", str(quality.get("name") or "").strip().lower())
+        size = str(quality.get("size") or "").strip().lower()
+        return (quality.get("quality"), name, size)
 
     def _same_replace_group(self, existing_quality: dict, new_quality: dict) -> bool:
         if existing_quality.get("group_key") or new_quality.get("group_key"):
@@ -1716,7 +1726,7 @@ class Database:
         except Exception as e:
             LOGGER.error(f"Failed to queue file for deletion: {e}")
 
-    async def update_movie(self, movie_data: MovieSchema) -> Optional[ObjectId]:
+    async def update_movie(self, movie_data: MovieSchema, status: Optional[dict] = None) -> Optional[ObjectId]:
         try:
             movie_dict = movie_data.dict()
         except ValidationError as e:
@@ -1800,7 +1810,15 @@ class Database:
             existing_qualities.append(quality_to_update)
 
         else:
-            # allow duplicate qualities
+            # REPLACE_MODE off: skip exact duplicates when protection is on, else stack.
+            if SettingsManager.current().duplicate_protection and not is_personal_media(tmdb_id):
+                key = self._dup_key(quality_to_update)
+                for q in existing_qualities:
+                    if not q.get("group_key") and self._dup_key(q) == key:
+                        LOGGER.info(f"Duplicate protection: skipped existing stream '{quality_to_update.get('name')}'.")
+                        if status is not None:
+                            status["duplicate_skipped"] = True
+                        return movie_id
             existing_qualities.append(quality_to_update)
 
         existing_movie["telegram"] = existing_qualities
@@ -1825,7 +1843,7 @@ class Database:
             if any(keyword in str(e).lower() for keyword in ["storage", "quota"]):
                 return await self._handle_storage_error(self.update_movie, movie_data, total_storage_dbs=total_storage_dbs)
 
-    async def update_tv_show(self, tv_show_data: TVShowSchema) -> Optional[ObjectId]:
+    async def update_tv_show(self, tv_show_data: TVShowSchema, status: Optional[dict] = None) -> Optional[ObjectId]:
         try:
             tv_show_dict = tv_show_data.dict()
         except ValidationError as e:
@@ -1915,9 +1933,9 @@ class Database:
                             existing_episode["telegram"],
                             quality,
                         )
-
                     if exact_source_replaced:
                         continue
+
                     if Telegram.REPLACE_MODE:
                         to_delete = [
                             q for q in existing_episode["telegram"]
@@ -1934,6 +1952,17 @@ class Database:
                         existing_episode["telegram"].append(quality)
 
                     else:
+                        # REPLACE_MODE off: skip exact duplicates when protection is on, else stack.
+                        if SettingsManager.current().duplicate_protection and not is_personal_media(tmdb_id):
+                            key = self._dup_key(quality)
+                            if any(
+                                not q.get("group_key") and self._dup_key(q) == key
+                                for q in existing_episode["telegram"]
+                            ):
+                                LOGGER.info(f"Duplicate protection: skipped existing stream '{quality.get('name')}'.")
+                                if status is not None:
+                                    status["duplicate_skipped"] = True
+                                continue
                         existing_episode["telegram"].append(quality)
 
         existing_tv["updated_on"] = datetime.utcnow()
@@ -3232,6 +3261,16 @@ class Database:
                 "logged_at":   datetime.utcnow(),
             }
             await self.dbs["tracking"]["stream_analytics"].insert_one(record)
+            token = meta.get("token")
+            if token:
+                upd = {"last_active": datetime.utcnow()}
+                if record.get("title"):
+                    upd["last_title"] = record["title"]
+                if record.get("user_name"):
+                    upd["name"] = record["user_name"]
+                await self.dbs["tracking"]["user_activity"].update_one(
+                    {"_id": token}, {"$set": upd, "$inc": {"streams": 1}}, upsert=True
+                )
         except Exception as e:
             LOGGER.warning(f"Stream analytics log failed: {e}")
 

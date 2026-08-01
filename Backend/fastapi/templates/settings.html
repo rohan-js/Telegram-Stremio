@@ -163,6 +163,84 @@
         Config backup/export is available from <a href="/api/admin/backup/export" class="text-primary font-bold">Backup Export</a>. Imports use the protected API and never overwrite admin password/session secret.
       </div>
     </div>
+
+    <div class="glass-panel rounded-3xl p-6 space-y-5">
+      <h2 class="font-black text-xl">Posters & Fanart</h2>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>BetterPoster</b>
+          <span class="block text-sm text-text-secondary">Use a nicer poster layout from btttr.cc.</span>
+        </span>
+        <input id="better_poster_enabled" type="checkbox" class="w-5 h-5" {% if settings.better_poster_enabled %}checked{% endif %}>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">BetterPoster Template</span>
+        <input id="better_poster" value="{{ settings.better_poster or '' }}" placeholder="https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+      </label>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>RPDB Posters</b>
+          <span class="block text-sm text-text-secondary">Use RatingPosterDB poster art.</span>
+        </span>
+        <input id="rpdb_enabled" type="checkbox" class="w-5 h-5" {% if settings.rpdb_enabled %}checked{% endif %}>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">RPDB API Key</span>
+        <input id="rpdb_api_key" value="{{ settings.rpdb_api_key or '' }}" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+      </label>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>Fanart.tv</b>
+          <span class="block text-sm text-text-secondary">Use posters, logos and backgrounds from Fanart.tv (requires API key).</span>
+        </span>
+        <input id="fanart_enabled" type="checkbox" class="w-5 h-5" {% if settings.fanart_enabled %}checked{% endif %}>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Fanart.tv API Key</span>
+        <input id="fanart_api_key" value="{{ settings.fanart_api_key or '' }}" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+      </label>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>Fanart Shuffle</b>
+          <span class="block text-sm text-text-secondary">Rotate between fanart variations periodically.</span>
+        </span>
+        <input id="fanart_shuffle" type="checkbox" class="w-5 h-5" {% if settings.fanart_shuffle %}checked{% endif %}>
+      </label>
+      <label class="block">
+        <span class="text-sm font-bold">Fanart Shuffle Interval (minutes)</span>
+        <input id="fanart_shuffle_interval" type="number" min="0" value="{{ settings.fanart_shuffle_interval or 0 }}" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+      </label>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>Low-res Fanart</b>
+          <span class="block text-sm text-text-secondary">Use preview/compressed images to save bandwidth.</span>
+        </span>
+        <input id="fanart_low_res_poster" type="checkbox" class="w-5 h-5" {% if settings.fanart_low_res_poster %}checked{% endif %}>
+      </label>
+    </div>
+
+    <div class="glass-panel rounded-3xl p-6 space-y-5">
+      <h2 class="font-black text-xl">Skip Channel & Duplicates</h2>
+      <label class="block">
+        <span class="text-sm font-bold">Skip Channel</span>
+        <input id="skip_channel" value="{{ settings.skip_channel or '' }}" placeholder="-100... or @channel" class="mt-2 w-full rounded-2xl bg-background border border-border p-3">
+        <span class="text-xs text-text-secondary">Unmatched media is copied here instead of being indexed.</span>
+      </label>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>Delete On Metadata Fail</b>
+          <span class="block text-sm text-text-secondary">Also delete the original channel message after copying to the skip channel.</span>
+        </span>
+        <input id="delete_on_metadata_fail" type="checkbox" class="w-5 h-5" {% if settings.delete_on_metadata_fail %}checked{% endif %}>
+      </label>
+      <label class="flex items-center justify-between gap-4">
+        <span>
+          <b>Duplicate Protection</b>
+          <span class="block text-sm text-text-secondary">Skip re-indexing when the same quality/name/size already exists (Replace Mode off).</span>
+        </span>
+        <input id="duplicate_protection" type="checkbox" class="w-5 h-5" {% if settings.duplicate_protection %}checked{% endif %}>
+      </label>
+    </div>
   </div>
 </section>
 
@@ -222,6 +300,18 @@ document.getElementById('save-btn').addEventListener('click', async () => {
     content_requests_beta_only: document.getElementById('content_requests_beta_only').checked,
     announce_new_content: document.getElementById('announce_new_content').checked,
     announcement_channel: document.getElementById('announcement_channel').value.trim(),
+    skip_channel: document.getElementById('skip_channel').value.trim(),
+    delete_on_metadata_fail: document.getElementById('delete_on_metadata_fail').checked,
+    duplicate_protection: document.getElementById('duplicate_protection').checked,
+    better_poster_enabled: document.getElementById('better_poster_enabled').checked,
+    better_poster: document.getElementById('better_poster').value.trim(),
+    rpdb_enabled: document.getElementById('rpdb_enabled').checked,
+    rpdb_api_key: document.getElementById('rpdb_api_key').value.trim(),
+    fanart_enabled: document.getElementById('fanart_enabled').checked,
+    fanart_api_key: document.getElementById('fanart_api_key').value.trim(),
+    fanart_shuffle: document.getElementById('fanart_shuffle').checked,
+    fanart_shuffle_interval: Number(document.getElementById('fanart_shuffle_interval').value || 0),
+    fanart_low_res_poster: document.getElementById('fanart_low_res_poster').checked,
   };
   button.disabled = true;
   button.classList.add('opacity-60');

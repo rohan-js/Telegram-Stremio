@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import Response
@@ -17,6 +18,10 @@ from Backend.helper.iptv import (
     update_iptv_settings,
     verify_proxy_target,
 )
+
+
+def fake_request():
+    return SimpleNamespace(headers={}, client=SimpleNamespace(host="1.2.3.4"))
 
 
 class IptvHelperTests(unittest.TestCase):
@@ -403,6 +408,7 @@ class IptvStremioRouteTests(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             manifest = await stremio_routes.get_manifest(
+                fake_request(),
                 "token123",
                 Response(),
                 token_data={},
@@ -510,6 +516,7 @@ class IptvStremioRouteTests(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             result = await stremio_routes.get_streams(
+                fake_request(),
                 "token123",
                 "tv",
                 "iptv:News.in",
