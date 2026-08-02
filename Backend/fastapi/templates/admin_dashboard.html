@@ -357,16 +357,16 @@
             </div>
             <span class="pill" id="warp-mode-pill">Loading</span>
         </div>
-        <div class="p-4 sm:p-5 lg:p-6 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4">
+        <div class="p-4 sm:p-5 lg:p-6 grid grid-cols-1 lg:grid-cols-[1fr_minmax(0,auto)] gap-4">
             <div class="mobile-kv">
                 <div class="key">Mode</div><div id="warp-mode">-</div>
                 <div class="key">Proxy</div><div id="warp-proxy">-</div>
                 <div class="key">Active Streams</div><div id="warp-active">-</div>
                 <div class="key">Control</div><div id="warp-control">-</div>
             </div>
-            <div class="flex flex-col sm:flex-row lg:flex-col gap-3">
-                <button onclick="applyWarp(true, false)" class="btn-ui btn-primary"><i class="fas fa-cloud"></i> Enable WARP</button>
-                <button onclick="applyWarp(false, false)" class="btn-ui btn-ghost"><i class="fas fa-network-wired"></i> Disable WARP</button>
+            <div class="flex flex-col sm:flex-row lg:flex-col gap-3 min-w-0">
+                <button onclick="applyWarp(true, false)" class="btn-ui btn-primary w-full"><i class="fas fa-cloud"></i> Enable WARP</button>
+                <button onclick="applyWarp(false, false)" class="btn-ui btn-ghost w-full"><i class="fas fa-network-wired"></i> Disable WARP</button>
                 <label class="flex items-center gap-2 muted text-sm">
                     <input id="warp-force" type="checkbox"> Force if streams active
                 </label>
