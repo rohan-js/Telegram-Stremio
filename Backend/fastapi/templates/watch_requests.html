@@ -3,6 +3,13 @@
 {% block title %}Watch Requests - TG Stremio{% endblock %}
 
 {% block content %}
+<style>
+.pill { display:inline-flex; align-items:center; gap:.35rem; padding:.3rem .7rem; border-radius:9999px; font-size:.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+.pill-ok { background: color-mix(in srgb, #22c55e 14%, transparent); color:#22c55e; }
+.pill-danger { background: color-mix(in srgb, #ef4444 14%, transparent); color:#ef4444; }
+.pill-info { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); }
+.pill-cyan { background: color-mix(in srgb, #22d3ee 14%, transparent); color:#22d3ee; }
+</style>
 <div class="space-y-6">
     <section class="glass-panel rounded-[2.5rem] p-6 sm:p-8">
         <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
@@ -43,7 +50,7 @@
     </section>
 
     <section class="glass-panel rounded-[2.5rem] overflow-hidden">
-        <div class="p-6 border-b border-white/5 flex items-center justify-between gap-3">
+        <div class="p-6 border-b border-hairline flex items-center justify-between gap-3">
             <div>
                 <h2 class="text-lg font-bold text-text">Recent Requests</h2>
                 <p class="text-xs text-text-secondary mt-1">Latest callback clicks from Telegram channel posts.</p>
@@ -52,14 +59,14 @@
         </div>
 
         <div id="watch-empty" class="hidden p-10 text-center">
-            <i class="fa-solid fa-circle-play text-4xl text-white/10 mb-3"></i>
+            <i class="fa-solid fa-circle-play text-4xl text-[color:var(--hairline-strong)] mb-3"></i>
             <p class="text-sm text-text-secondary font-medium">No watch requests yet.</p>
             <p class="text-xs text-text-secondary mt-1">Clicks will appear here after someone requests a Stremio or Nuvio link in Telegram.</p>
         </div>
 
         <div id="watch-error" class="hidden p-10 text-center">
             <i class="fa-solid fa-triangle-exclamation text-4xl text-red-400/30 mb-3"></i>
-            <p class="text-sm text-red-300 font-medium">Unable to load watch requests.</p>
+            <p class="text-sm c-red font-medium">Unable to load watch requests.</p>
             <p class="text-xs text-text-secondary mt-1">Refresh the page or check the server logs.</p>
         </div>
 
@@ -70,7 +77,7 @@
         <div id="watch-table-wrap" class="hidden md:block overflow-x-auto">
             <table class="w-full text-left">
                 <thead>
-                    <tr class="bg-white/5 text-[10px] uppercase tracking-[0.2em] font-bold text-text-secondary">
+                    <tr class="bg-surface text-[10px] uppercase tracking-[0.2em] font-bold text-text-secondary">
                         <th class="py-5 px-6">Media</th>
                         <th class="py-5 px-6">Requester</th>
                         <th class="py-5 px-6">Username</th>
@@ -83,7 +90,7 @@
                         <th class="py-5 px-6">Channel / Msg</th>
                     </tr>
                 </thead>
-                <tbody id="watch-table" class="divide-y divide-white/5"></tbody>
+                <tbody id="watch-table" class="divide-y divide-hairline"></tbody>
             </table>
         </div>
     </section>
@@ -133,9 +140,9 @@ function mediaSubtitle(item) {
 
 function statusClass(status) {
     const normalized = String(status || '').toLowerCase();
-    if (normalized === 'sent') return 'bg-primary/10 text-primary';
-    if (normalized === 'failed') return 'bg-red-500/15 text-red-300';
-    return 'bg-white/10 text-text-secondary';
+    if (normalized === 'sent') return 'pill pill-ok';
+    if (normalized === 'failed') return 'pill pill-danger';
+    return 'bg-surface text-text-secondary';
 }
 
 function platformLabel(item) {
@@ -144,8 +151,8 @@ function platformLabel(item) {
 
 function platformClass(item) {
     return platformLabel(item) === 'Nuvio'
-        ? 'bg-cyan-400/10 text-cyan-300'
-        : 'bg-purple-400/10 text-purple-300';
+        ? 'pill pill-cyan'
+        : 'pill pill-info';
 }
 
 function renderMobileCard(item) {
@@ -160,11 +167,11 @@ function renderMobileCard(item) {
                     <p class="mt-1 text-xs text-text-secondary">${escapeHtml(mediaSubtitle(item))}</p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap ${platformClass(item)}">${escapeHtml(platformLabel(item))}</span>
-                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap ${statusClass(status)}">${escapeHtml(status)}</span>
+                    <span class="${platformClass(item)}">${escapeHtml(platformLabel(item))}</span>
+                    <span class="${statusClass(status)}">${escapeHtml(status)}</span>
                 </div>
             </div>
-            <div class="mt-4 pt-4 border-t border-white/5 grid grid-cols-1 gap-2 text-xs">
+            <div class="mt-4 pt-4 border-t border-hairline grid grid-cols-1 gap-2 text-xs">
                 <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Requester</span><span class="text-text text-right truncate max-w-[65%]">${escapeHtml(item?.requester_name || 'Telegram User')}</span></div>
                 <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">Username</span><span class="text-text text-right truncate max-w-[65%]">${escapeHtml(username)}</span></div>
                 <div class="flex items-center justify-between gap-3"><span class="text-text-secondary">User ID</span><span class="font-mono text-text text-right truncate max-w-[65%]">${escapeHtml(item?.requester_user_id || 'Unknown')}</span></div>
@@ -183,7 +190,7 @@ function renderTableRow(item) {
     const status = item?.last_delivery_status || 'requested';
     const clickCount = Number(item?.click_count || 0);
     return `
-        <tr class="group hover:bg-white/[0.02] transition-colors">
+        <tr class="group hover:bg-surface-2 transition-colors">
             <td class="py-5 px-6 min-w-[260px]">
                 <p class="font-bold text-text truncate max-w-[320px]">${escapeHtml(item?.media_title || 'Unknown Title')}</p>
                 <p class="text-[10px] uppercase tracking-[0.16em] text-text-secondary mt-1">${escapeHtml(mediaSubtitle(item))}</p>
@@ -193,9 +200,9 @@ function renderTableRow(item) {
             </td>
             <td class="py-5 px-6 text-xs text-text-secondary">${escapeHtml(username)}</td>
             <td class="py-5 px-6 font-mono text-xs text-text">${escapeHtml(item?.requester_user_id || 'Unknown')}</td>
-            <td class="py-5 px-6"><span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase ${platformClass(item)}">${escapeHtml(platformLabel(item))}</span></td>
+            <td class="py-5 px-6"><span class="${platformClass(item)}">${escapeHtml(platformLabel(item))}</span></td>
             <td class="py-5 px-6 text-xs text-text">${escapeHtml(item?.source_type || 'media')}</td>
-            <td class="py-5 px-6"><span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase ${statusClass(status)}">${escapeHtml(status)}</span></td>
+            <td class="py-5 px-6"><span class="${statusClass(status)}">${escapeHtml(status)}</span></td>
             <td class="py-5 px-6 font-mono text-xs text-text">${escapeHtml(clickCount)}</td>
             <td class="py-5 px-6 text-xs text-text">${escapeHtml(formatTimestamp(item?.clicked_at))}</td>
             <td class="py-5 px-6 font-mono text-xs text-text-secondary">${escapeHtml(sourceLabel(item))}</td>

@@ -108,6 +108,16 @@
     letter-spacing: .02em;
   }
 
+  .pill-ok { background: color-mix(in srgb, #22c55e 14%, transparent); color: #22c55e; border: 1px solid color-mix(in srgb, #22c55e 32%, transparent); }
+  .pill-warn { background: color-mix(in srgb, #f59e0b 14%, transparent); color: #f59e0b; border: 1px solid color-mix(in srgb, #f59e0b 32%, transparent); }
+  .pill-danger { background: color-mix(in srgb, #ef4444 14%, transparent); color: #ef4444; border: 1px solid color-mix(in srgb, #ef4444 32%, transparent); }
+  .pill-info { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 32%, transparent); }
+  .c-green { color: color-mix(in srgb, #22c55e 80%, var(--text)); }
+  .c-amber { color: color-mix(in srgb, #f59e0b 80%, var(--text)); }
+  .c-red { color: color-mix(in srgb, #ef4444 80%, var(--text)); }
+  .c-sky { color: color-mix(in srgb, #38bdf8 80%, var(--text)); }
+
+
   .btn-ui {
     display: inline-flex;
     align-items: center;
@@ -309,7 +319,7 @@
         </div>
 
         {% if media_details.description %}
-        <div class="border-t border-white/10 p-5 sm:p-6 lg:p-8">
+        <div class="border-t border-hairline p-5 sm:p-6 lg:p-8">
             <h3 class="section-title text-lg sm:text-xl mb-3">Overview</h3>
             <p class="muted leading-7 text-sm sm:text-base">{{ media_details.description }}</p>
         </div>
@@ -346,11 +356,11 @@
 
         <div id="rescan-results" class="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-4"></div>
 
-        <div id="rescan-preview" class="hidden mt-5 rounded-3xl border border-white/10 bg-white/5 p-4 sm:p-5">
+        <div id="rescan-preview" class="hidden mt-5 rounded-3xl border border-hairline bg-surface p-4 sm:p-5">
             <div class="flex items-start gap-4">
                 <img id="rescan-preview-poster" src="/static/placeholder.jpg" alt="Selected poster" class="match-thumb">
                 <div class="min-w-0 flex-1">
-                    <h4 id="rescan-preview-title" class="text-white font-bold text-lg"></h4>
+                    <h4 id="rescan-preview-title" class="text-text font-bold text-lg"></h4>
                     <p id="rescan-preview-subtitle" class="muted text-sm mt-1"></p>
                     <p id="rescan-preview-ids" class="muted text-xs mt-2 break-all"></p>
                 </div>
@@ -549,9 +559,9 @@
                                 {{ quality.quality }}
                             </span>
                             <span class="pill">{{ quality.size }}</span>
-                            {% if quality.recommended %}<span class="pill bg-green-500/15 text-green-300 border border-green-500/20">Recommended</span>{% endif %}
-                            {% if quality.hidden_from_stremio %}<span class="pill bg-red-500/15 text-red-300 border border-red-500/20">Hidden</span>{% endif %}
-                            {% if quality.flagged_duplicate %}<span class="pill bg-yellow-500/15 text-yellow-300 border border-yellow-500/20">Duplicate</span>{% endif %}
+                            {% if quality.recommended %}<span class="pill pill-ok">Recommended</span>{% endif %}
+                            {% if quality.hidden_from_stremio %}<span class="pill pill-danger">Hidden</span>{% endif %}
+                            {% if quality.flagged_duplicate %}<span class="pill pill-warn">Duplicate</span>{% endif %}
                         </div>
                         <p class="muted mt-3 text-sm break-all">{{ quality.name }}</p>
                         {% if quality.quality_note %}<p class="muted mt-2 text-xs">Note: {{ quality.quality_note }}</p>{% endif %}
@@ -588,8 +598,8 @@
         {% elif media_type == 'tv' and media_details.seasons %}
         <div class="space-y-4 sm:space-y-5">
             {% for season in media_details.seasons|sort(attribute='season_number') %}
-            <div class="glass-card-soft rounded-3xl overflow-hidden border border-white/10">
-                <div class="px-4 sm:px-5 lg:px-6 py-4 sm:py-5 border-b border-white/10 bg-white/5">
+            <div class="glass-card-soft rounded-3xl overflow-hidden border border-hairline">
+                <div class="px-4 sm:px-5 lg:px-6 py-4 sm:py-5 border-b border-hairline bg-surface">
                     <div class="flex items-center justify-between gap-3">
                         <div>
                             <h4 class="section-title text-base sm:text-lg lg:text-xl">Season {{ season.season_number }}</h4>
@@ -605,7 +615,7 @@
                 </div>
 
                 <div id="season-content-{{ loop.index0 }}" class="season-content">
-                    <div class="divide-y divide-white/10">
+                    <div class="divide-y divide-hairline">
                         {% for episode in season.episodes|sort(attribute='episode_number') %}
                         <div class="p-4 sm:p-5">
                             <div class="flex flex-col xl:flex-row xl:items-start gap-4">
@@ -615,7 +625,7 @@
 
                                 <div class="flex-1 min-w-0">
                                     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                                        <h5 class="text-sm sm:text-base font-semibold text-white text-center sm:text-left">{{ episode.title }}</h5>
+                                        <h5 class="text-sm sm:text-base font-semibold text-text text-center sm:text-left">{{ episode.title }}</h5>
                                         <button onclick="deleteTVEpisode({{ season.season_number }}, {{ episode.episode_number }})" class="btn-ui btn-danger px-3 py-2 text-xs sm:text-sm w-full sm:w-auto">
                                             Delete Episode
                                         </button>
@@ -629,11 +639,11 @@
                                             <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
                                                 <div class="min-w-0 flex-1">
                                                     <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-                                                        <span class="quality-badge bg-green-500/15 text-green-300 border border-green-500/20">{{ quality.quality }}</span>
+                                                        <span class="quality-badge pill-ok">{{ quality.quality }}</span>
                                                         <span class="pill">{{ quality.size }}</span>
-                                                        {% if quality.recommended %}<span class="pill bg-green-500/15 text-green-300 border border-green-500/20">Recommended</span>{% endif %}
-                                                        {% if quality.hidden_from_stremio %}<span class="pill bg-red-500/15 text-red-300 border border-red-500/20">Hidden</span>{% endif %}
-                                                        {% if quality.flagged_duplicate %}<span class="pill bg-yellow-500/15 text-yellow-300 border border-yellow-500/20">Duplicate</span>{% endif %}
+                                                        {% if quality.recommended %}<span class="pill pill-ok">Recommended</span>{% endif %}
+                                                        {% if quality.hidden_from_stremio %}<span class="pill pill-danger">Hidden</span>{% endif %}
+                                                        {% if quality.flagged_duplicate %}<span class="pill pill-warn">Duplicate</span>{% endif %}
                                                     </div>
                                                     <p class="muted text-xs sm:text-sm mt-2 break-all">{{ quality.name }}</p>
                                                     {% if quality.quality_note %}<p class="muted mt-2 text-xs">Note: {{ quality.quality_note }}</p>{% endif %}
@@ -675,7 +685,7 @@
                         {% endfor %}
                     </div>
 
-                    <div class="px-4 sm:px-5 lg:px-6 py-4 border-t border-white/10 bg-white/5 flex justify-center sm:justify-start">
+                    <div class="px-4 sm:px-5 lg:px-6 py-4 border-t border-hairline bg-surface flex justify-center sm:justify-start">
                         <button onclick="deleteTVSeason({{ season.season_number }})" class="btn-ui btn-danger px-4 py-2 text-sm">
                             Delete Entire Season
                         </button>
@@ -686,7 +696,7 @@
         </div>
         {% else %}
         <div class="text-center py-10">
-            <svg class="mx-auto h-12 w-12 text-white/25 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg class="mx-auto h-12 w-12 text-text/25 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                       d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2h4a1 1 0 110 2h-1v12a2 2 0 01-2-2V6H3a1 1 0 110-2h4zM9 6v10h6V6H9z" />
             </svg>
@@ -702,26 +712,26 @@
 
     <div class="absolute inset-0 flex items-center justify-center p-2 sm:p-4">
         <div class="glass-card speed-modal-shell rounded-2xl sm:rounded-3xl">
-            <div class="flex items-start sm:items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-white/10 bg-white/5">
+            <div class="flex items-start sm:items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-hairline bg-surface">
                 <div class="min-w-0">
-                    <h2 class="text-base sm:text-xl font-black text-white leading-tight">🚀 DC Speed Test</h2>
-                    <p id="st-label" class="text-[11px] sm:text-sm text-white/70 mt-1 break-all"></p>
+                    <h2 class="text-base sm:text-xl font-black text-text leading-tight">🚀 DC Speed Test</h2>
+                    <p id="st-label" class="text-[11px] sm:text-sm text-text/70 mt-1 break-all"></p>
                 </div>
-                <button onclick="closeSpeedTest()" class="flex-shrink-0 text-white/70 hover:text-white text-3xl leading-none transition-colors">&times;</button>
+                <button onclick="closeSpeedTest()" class="flex-shrink-0 text-text/70 hover:text-text text-3xl leading-none transition-colors">&times;</button>
             </div>
 
             <div class="speed-modal-body px-4 sm:px-6 py-5 sm:py-6">
                 <div id="st-spinner" class="flex flex-col items-center gap-4 py-8 sm:py-10">
-                    <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-full border-4 border-white/15 border-t-primary st-spin"></div>
-                    <p class="text-sm text-white/75 text-center">Testing all DC clients simultaneously…</p>
-                    <p class="text-xs text-white/50 text-center max-w-md">Downloading 100 MB from each bot client</p>
+                    <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-full border-4 border-border/15 border-t-primary st-spin"></div>
+                    <p class="text-sm text-text/75 text-center">Testing all DC clients simultaneously…</p>
+                    <p class="text-xs text-text/50 text-center max-w-md">Downloading 100 MB from each bot client</p>
                 </div>
 
                 <div id="st-results" class="hidden">
-                    <div class="overflow-x-auto rounded-2xl border border-white/10">
+                    <div class="overflow-x-auto rounded-2xl border border-hairline">
                         <table class="w-full min-w-[760px] text-sm">
-                            <thead class="bg-white/5 text-left">
-                                <tr class="text-white/70">
+                            <thead class="bg-surface text-left">
+                                <tr class="text-text/70">
                                     <th class="px-4 py-3 font-semibold text-xs uppercase tracking-wider whitespace-nowrap">Bot / DC</th>
                                     <th class="px-4 py-3 font-semibold text-xs uppercase tracking-wider whitespace-nowrap">Ping</th>
                                     <th class="px-4 py-3 font-semibold text-xs uppercase tracking-wider whitespace-nowrap">Speed</th>
@@ -730,16 +740,16 @@
                                     <th class="px-4 py-3 font-semibold text-xs uppercase tracking-wider whitespace-nowrap">Status</th>
                                 </tr>
                             </thead>
-                            <tbody id="st-tbody" class="divide-y divide-white/10 bg-white/5"></tbody>
+                            <tbody id="st-tbody" class="divide-y divide-hairline bg-surface"></tbody>
                         </table>
                     </div>
-                    <p id="st-summary" class="text-xs text-white/50 mt-3 text-right"></p>
+                    <p id="st-summary" class="text-xs text-text/50 mt-3 text-right"></p>
                 </div>
 
-                <div id="st-error" class="hidden mt-2 rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200"></div>
+                <div id="st-error" class="hidden mt-2 rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm c-red"></div>
             </div>
 
-            <div class="flex flex-col sm:flex-row justify-end gap-3 px-4 sm:px-6 py-4 border-t border-white/10 bg-white/5">
+            <div class="flex flex-col sm:flex-row justify-end gap-3 px-4 sm:px-6 py-4 border-t border-hairline bg-surface">
                 <button id="st-rerun-btn" onclick="rerunSpeedTest()" class="hidden btn-ui btn-primary">
                     🔄 Re-run
                 </button>
@@ -858,7 +868,7 @@
                         >
                         <div class="min-w-0 flex-1">
                             <div class="flex flex-wrap items-center gap-2">
-                                <h4 class="text-white font-bold text-base sm:text-lg">${escapeHtml(item.title || 'Unknown title')}</h4>
+                                <h4 class="text-text font-bold text-base sm:text-lg">${escapeHtml(item.title || 'Unknown title')}</h4>
                                 <span class="pill">${escapeHtml(item.year || '—')}</span>
                             </div>
                             <p class="muted text-sm mt-2">${escapeHtml(item.subtitle || '')}</p>
@@ -1147,10 +1157,10 @@
         const status = document.getElementById('custom-catalog-status');
         if (!status) return;
         status.textContent = message;
-        status.classList.remove('text-emerald-300', 'text-rose-300', 'text-amber-300');
-        if (type === 'success') status.classList.add('text-emerald-300');
-        if (type === 'error') status.classList.add('text-rose-300');
-        if (type === 'warn') status.classList.add('text-amber-300');
+        status.classList.remove('c-green', 'c-red', 'c-amber');
+        if (type === 'success') status.classList.add('c-green');
+        if (type === 'error') status.classList.add('c-red');
+        if (type === 'warn') status.classList.add('c-amber');
     }
 
     async function loadMediaCatalogDropdown(selectedCatalogId = '') {
@@ -1276,10 +1286,10 @@
         const status = document.getElementById('media-visibility-status');
         if (!status) return;
         status.textContent = message;
-        status.classList.remove('text-emerald-300', 'text-rose-300', 'text-amber-300');
-        if (type === 'success') status.classList.add('text-emerald-300');
-        if (type === 'error') status.classList.add('text-rose-300');
-        if (type === 'warn') status.classList.add('text-amber-300');
+        status.classList.remove('c-green', 'c-red', 'c-amber');
+        if (type === 'success') status.classList.add('c-green');
+        if (type === 'error') status.classList.add('c-red');
+        if (type === 'warn') status.classList.add('c-amber');
     }
 
     function updateMediaVisibilityControls() {
@@ -1310,7 +1320,7 @@
         }
         tokens.forEach(item => {
             const label = document.createElement('label');
-            label.className = 'flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 cursor-pointer';
+            label.className = 'flex items-center gap-3 rounded-xl border border-hairline bg-surface px-3 py-2 cursor-pointer';
             const input = document.createElement('input');
             input.type = 'checkbox';
             input.name = 'media-visibility-token';
@@ -1320,7 +1330,7 @@
             const textWrap = document.createElement('span');
             textWrap.className = 'min-w-0';
             const name = document.createElement('span');
-            name.className = 'block text-sm font-bold text-white';
+            name.className = 'block text-sm font-bold text-text';
             name.textContent = item.name || 'Unnamed token';
             const token = document.createElement('span');
             token.className = 'block muted text-xs break-all';
@@ -1445,23 +1455,23 @@
     }
 
     function _pingClass(ms) {
-        if (ms === null) return 'text-white/60';
-        if (ms < 100) return 'text-emerald-300 font-semibold';
-        if (ms < 300) return 'text-amber-300 font-semibold';
-        return 'text-rose-300 font-semibold';
+        if (ms === null) return 'text-text/60';
+        if (ms < 100) return 'c-green font-semibold';
+        if (ms < 300) return 'c-amber font-semibold';
+        return 'c-red font-semibold';
     }
 
     function _speedClass(mbps) {
-        if (mbps === null) return 'text-white/60';
-        if (mbps >= 20) return 'text-emerald-300 font-bold';
-        if (mbps >= 5) return 'text-amber-300 font-bold';
-        return 'text-rose-300 font-bold';
+        if (mbps === null) return 'text-text/60';
+        if (mbps >= 20) return 'c-green font-bold';
+        if (mbps >= 5) return 'c-amber font-bold';
+        return 'c-red font-bold';
     }
 
     function _miniBar(value, max, color) {
         if (!value || !max) return '';
         const pct = Math.min(100, (value / max) * 100).toFixed(1);
-        return `<div class="w-full bg-white/10 rounded-full h-1.5 mt-1 overflow-hidden">
+        return `<div class="w-full bg-surface-2 rounded-full h-1.5 mt-1 overflow-hidden">
             <div class="${color} h-1.5 rounded-full transition-all" style="width:${pct}%"></div>
         </div>`;
     }
@@ -1520,7 +1530,7 @@
                 document.getElementById('st-results').classList.remove('hidden');
 
                 if (msg.target_dc && msg.target_dc !== "?") {
-                    document.getElementById('st-label').innerHTML += ` &nbsp;|&nbsp; Target DC: <span class="text-white font-semibold">${msg.target_dc}</span>`;
+                    document.getElementById('st-label').innerHTML += ` &nbsp;|&nbsp; Target DC: <span class="text-text font-semibold">${msg.target_dc}</span>`;
                 }
 
                 const tbody = document.getElementById('st-tbody');
@@ -1529,12 +1539,12 @@
                     const tr = document.createElement('tr');
                     tr.className = 'animate-pulse';
                     tr.innerHTML = `
-                        <td class="px-4 py-3 font-medium text-white/40">🔄 Bot ${i + 1}</td>
-                        <td class="px-4 py-3"><span class="text-white/30">testing…</span></td>
-                        <td class="px-4 py-3"><span class="text-white/30">testing…</span></td>
-                        <td class="px-4 py-3 text-white/30">—</td>
-                        <td class="px-4 py-3 text-white/30">—</td>
-                        <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-xs bg-white/10 text-white/50">Pending</span></td>`;
+                        <td class="px-4 py-3 font-medium text-text/40">🔄 Bot ${i + 1}</td>
+                        <td class="px-4 py-3"><span class="text-text/30">testing…</span></td>
+                        <td class="px-4 py-3"><span class="text-text/30">testing…</span></td>
+                        <td class="px-4 py-3 text-text/30">—</td>
+                        <td class="px-4 py-3 text-text/30">—</td>
+                        <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-xs bg-surface-2 text-text/50">Pending</span></td>`;
                     tbody.appendChild(tr);
                     pendingRows[i] = tr;
                 }
@@ -1548,26 +1558,26 @@
                     maxSpeed = Math.max(maxSpeed, r.speed_mbps || 0, 1);
                     const isErr = !!r.error && !r.speed_mbps;
                     const medal = '';
-                    const dc = `Bot ${r.client_index + 1} <span class="text-xs text-white/45">(DC ${r.dc_id})</span>`;
-                    const ping = r.ping_ms !== null ? `<span class="${_pingClass(r.ping_ms)}">${r.ping_ms} ms</span>` : '<span class="text-white/60">—</span>';
+                    const dc = `Bot ${r.client_index + 1} <span class="text-xs text-text/45">(DC ${r.dc_id})</span>`;
+                    const ping = r.ping_ms !== null ? `<span class="${_pingClass(r.ping_ms)}">${r.ping_ms} ms</span>` : '<span class="text-text/60">—</span>';
                     const speed = r.speed_mbps !== null
                         ? `<span class="${_speedClass(r.speed_mbps)}">${r.speed_mbps.toFixed(2)} MB/s</span>
                            ${_miniBar(r.speed_mbps, maxSpeed, r.speed_mbps >= 20 ? 'bg-emerald-400' : r.speed_mbps >= 5 ? 'bg-amber-300' : 'bg-rose-300')}`
-                        : '<span class="text-white/60">—</span>';
+                        : '<span class="text-text/60">—</span>';
                     const taken = r.time_taken_sec !== null ? `${r.time_taken_sec.toFixed(2)}s` : '—';
                     const bytes = r.bytes_downloaded ? `${(r.bytes_downloaded / 1048576).toFixed(2)} MB` : '—';
                     const badge = isErr
-                        ? `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-rose-500/15 text-rose-200 border border-rose-500/20">Error</span>`
-                        : `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-200 border border-emerald-500/20">✓ OK</span>`;
+                        ? `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-rose-500/15 c-red border border-rose-500/20">Error</span>`
+                        : `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/15 c-green border border-emerald-500/20">✓ OK</span>`;
 
                     const newTr = document.createElement('tr');
                     newTr.className = `transition-colors ${isErr ? 'opacity-70' : ''}`;
                     newTr.innerHTML = `
-                        <td class="px-4 py-3 font-medium text-white">${medal}${dc}</td>
-                        <td class="px-4 py-3 text-white/90">${ping}</td>
-                        <td class="px-4 py-3 text-white/90">${speed}${isErr ? `<div class="text-xs text-rose-300 mt-1">${r.error}</div>` : ''}</td>
-                        <td class="px-4 py-3 text-white/70 text-sm">${taken}</td>
-                        <td class="px-4 py-3 text-white/60 text-xs">${bytes}</td>
+                        <td class="px-4 py-3 font-medium text-text">${medal}${dc}</td>
+                        <td class="px-4 py-3 text-text/90">${ping}</td>
+                        <td class="px-4 py-3 text-text/90">${speed}${isErr ? `<div class="text-xs c-red mt-1">${r.error}</div>` : ''}</td>
+                        <td class="px-4 py-3 text-text/70 text-sm">${taken}</td>
+                        <td class="px-4 py-3 text-text/60 text-xs">${bytes}</td>
                         <td class="px-4 py-3">${badge}</td>`;
 
                     if (pendingRows[r.client_index]) {
@@ -1595,26 +1605,26 @@
                     const r = allResults[i];
                     const isErr = !!r.error && !r.speed_mbps;
                     const medal = i === 0 && !isErr ? '🥇 ' : '';
-                    const dc = `Bot ${r.client_index + 1} <span class="text-xs text-white/45">(DC ${r.dc_id})</span>`;
-                    const ping = r.ping_ms !== null ? `<span class="${_pingClass(r.ping_ms)}">${r.ping_ms} ms</span>` : '<span class="text-white/60">—</span>';
+                    const dc = `Bot ${r.client_index + 1} <span class="text-xs text-text/45">(DC ${r.dc_id})</span>`;
+                    const ping = r.ping_ms !== null ? `<span class="${_pingClass(r.ping_ms)}">${r.ping_ms} ms</span>` : '<span class="text-text/60">—</span>';
                     const speed = r.speed_mbps !== null
                         ? `<span class="${_speedClass(r.speed_mbps)}">${r.speed_mbps.toFixed(2)} MB/s</span>
                            ${_miniBar(r.speed_mbps, maxSpeed, r.speed_mbps >= 20 ? 'bg-emerald-400' : r.speed_mbps >= 5 ? 'bg-amber-300' : 'bg-rose-300')}`
-                        : '<span class="text-white/60">—</span>';
+                        : '<span class="text-text/60">—</span>';
                     const taken = r.time_taken_sec !== null ? `${r.time_taken_sec.toFixed(2)}s` : '—';
                     const bytes = r.bytes_downloaded ? `${(r.bytes_downloaded / 1048576).toFixed(2)} MB` : '—';
                     const badge = isErr
-                        ? `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-rose-500/15 text-rose-200 border border-rose-500/20">Error</span>`
-                        : `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-200 border border-emerald-500/20">✓ OK</span>`;
+                        ? `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-rose-500/15 c-red border border-rose-500/20">Error</span>`
+                        : `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/15 c-green border border-emerald-500/20">✓ OK</span>`;
 
                     const tr = document.createElement('tr');
                     tr.className = `transition-colors ${isErr ? 'opacity-70' : ''}`;
                     tr.innerHTML = `
-                        <td class="px-4 py-3 font-medium text-white">${medal}${dc}</td>
-                        <td class="px-4 py-3 text-white/90">${ping}</td>
-                        <td class="px-4 py-3 text-white/90">${speed}${isErr ? `<div class="text-xs text-rose-300 mt-1">${r.error}</div>` : ''}</td>
-                        <td class="px-4 py-3 text-white/70 text-sm">${taken}</td>
-                        <td class="px-4 py-3 text-white/60 text-xs">${bytes}</td>
+                        <td class="px-4 py-3 font-medium text-text">${medal}${dc}</td>
+                        <td class="px-4 py-3 text-text/90">${ping}</td>
+                        <td class="px-4 py-3 text-text/90">${speed}${isErr ? `<div class="text-xs c-red mt-1">${r.error}</div>` : ''}</td>
+                        <td class="px-4 py-3 text-text/70 text-sm">${taken}</td>
+                        <td class="px-4 py-3 text-text/60 text-xs">${bytes}</td>
                         <td class="px-4 py-3">${badge}</td>`;
                     tbody.appendChild(tr);
                 }
@@ -1682,7 +1692,7 @@
             const subs = data.subtitles || [];
             emptyEl.classList.toggle('hidden', subs.length > 0);
             listEl.innerHTML = subs.map((s, i) => `
-                <div class="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-white/5 px-4 py-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-surface px-4 py-3">
                     <div class="min-w-0">
                         <p class="text-sm font-semibold text-text">${escapeHtml(s.lang_label || s.lang_code || 'Unknown')}${s.season ? ` · S${escapeHtml(String(s.season))}E${escapeHtml(String(s.episode || ''))}` : ''}</p>
                         <p class="text-xs text-text-secondary truncate">${escapeHtml(s.name || '')} · msg ${s.msg_id}</p>

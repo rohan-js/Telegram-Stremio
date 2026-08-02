@@ -2,6 +2,10 @@
 {% block title %}Tools - TG Stremio{% endblock %}
 
 {% block content %}
+<style>
+.c-red { color: color-mix(in srgb, #ef4444 80%, var(--text)); }
+.c-amber { color: color-mix(in srgb, #f59e0b 82%, var(--text)); }
+</style>
 <section class="space-y-6">
   <div class="glass-panel rounded-3xl p-6">
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -21,25 +25,25 @@
         <h2 class="text-xl font-black">Manual Upload Session</h2>
         <p class="text-sm text-text-secondary mt-1">Temporarily assign files from configured manual channels to one library title.</p>
       </div>
-      <button id="manual-stop" onclick="stopManualSession()" class="hidden border border-red-500/40 text-red-300 px-5 py-2 rounded-full font-bold hover:bg-red-500/10">End Session</button>
+      <button id="manual-stop" onclick="stopManualSession()" class="hidden border border-red-500/40 c-red px-5 py-2 rounded-full font-bold hover:bg-red-500/10">End Session</button>
     </div>
 
     <div id="manual-active" class="hidden rounded-2xl border border-primary/30 bg-primary/10 p-4 text-sm"></div>
     <div id="manual-form" class="space-y-4">
       <div class="flex flex-col md:flex-row gap-3">
-        <input id="manual-query" class="flex-1 rounded-2xl bg-background border border-border px-4 py-3" placeholder="Search title, IMDb ID, or TMDb ID" onkeydown="if(event.key==='Enter'){event.preventDefault();searchManualTitles();}">
+        <input id="manual-query" class="flex-1 rounded-2xl bg-surface border border-hairline px-4 py-3" placeholder="Search title, IMDb ID, or TMDb ID" onkeydown="if(event.key==='Enter'){event.preventDefault();searchManualTitles();}">
         <button onclick="searchManualTitles()" class="bg-primary text-background px-5 py-2.5 rounded-full font-bold">Search</button>
       </div>
       <div id="manual-results" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
       <div id="manual-options" class="hidden grid grid-cols-1 md:grid-cols-3 gap-3">
         <label class="text-sm text-text-secondary">Fallback season
-          <input id="manual-season" type="number" min="0" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="Optional for real TV">
+          <input id="manual-season" type="number" min="0" class="mt-1 w-full rounded-2xl bg-surface border border-hairline px-4 py-3" placeholder="Optional for real TV">
         </label>
         <label class="text-sm text-text-secondary">Starting episode
-          <input id="manual-episode" type="number" min="1" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="Personal TV only">
+          <input id="manual-episode" type="number" min="1" class="mt-1 w-full rounded-2xl bg-surface border border-hairline px-4 py-3" placeholder="Personal TV only">
         </label>
         <label class="text-sm text-text-secondary">Fallback quality
-          <input id="manual-quality" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="Personal media, e.g. 1080p">
+          <input id="manual-quality" class="mt-1 w-full rounded-2xl bg-surface border border-hairline px-4 py-3" placeholder="Personal media, e.g. 1080p">
         </label>
       </div>
       <button id="manual-start" onclick="startManualSession()" class="hidden bg-primary text-background px-5 py-2.5 rounded-full font-bold">Start Session</button>
@@ -53,11 +57,11 @@
       <p class="text-sm text-text-secondary mt-1">Resolve Telegram posts, select authoritative metadata, and optionally place the title in catalogs.</p>
     </div>
     <div class="grid grid-cols-1 md:grid-cols-[10rem_1fr_8rem_auto] gap-3">
-      <select id="add-media-type" class="rounded-2xl bg-background border border-border px-4 py-3">
+      <select id="add-media-type" class="rounded-2xl bg-surface border border-hairline px-4 py-3">
         <option value="movie">Movie</option><option value="tv">Series</option>
       </select>
-      <input id="add-meta-query" class="rounded-2xl bg-background border border-border px-4 py-3" placeholder="Title, IMDb ID, or TMDb ID">
-      <input id="add-meta-year" type="number" class="rounded-2xl bg-background border border-border px-4 py-3" placeholder="Year">
+      <input id="add-meta-query" class="rounded-2xl bg-surface border border-hairline px-4 py-3" placeholder="Title, IMDb ID, or TMDb ID">
+      <input id="add-meta-year" type="number" class="rounded-2xl bg-surface border border-hairline px-4 py-3" placeholder="Year">
       <button onclick="searchManualAddMetadata()" class="bg-primary text-background px-5 py-2.5 rounded-full font-bold">Find</button>
     </div>
     <div id="add-meta-results" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
@@ -65,23 +69,23 @@
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
       <label class="text-sm text-text-secondary md:col-span-2">Telegram message links, one per split part
-        <textarea id="add-links" rows="4" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="https://t.me/c/.../...\nhttps://t.me/c/.../..."></textarea>
+        <textarea id="add-links" rows="4" class="mt-1 w-full rounded-2xl bg-surface border border-hairline px-4 py-3" placeholder="https://t.me/c/.../...\nhttps://t.me/c/.../..."></textarea>
       </label>
       <div class="space-y-3">
         <label class="text-sm text-text-secondary block">Quality
-          <input id="add-quality" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="1080p">
+          <input id="add-quality" class="mt-1 w-full rounded-2xl bg-surface border border-hairline px-4 py-3" placeholder="1080p">
         </label>
         <label class="text-sm text-text-secondary block">Display filename
-          <input id="add-name" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3" placeholder="Optional">
+          <input id="add-name" class="mt-1 w-full rounded-2xl bg-surface border border-hairline px-4 py-3" placeholder="Optional">
         </label>
       </div>
     </div>
     <div id="add-tv-fields" class="hidden grid grid-cols-1 md:grid-cols-2 gap-3">
       <label class="text-sm text-text-secondary">Season
-        <input id="add-season" type="number" min="0" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3">
+        <input id="add-season" type="number" min="0" class="mt-1 w-full rounded-2xl bg-surface border border-hairline px-4 py-3">
       </label>
       <label class="text-sm text-text-secondary">Episode
-        <input id="add-episode" type="number" min="1" class="mt-1 w-full rounded-2xl bg-background border border-border px-4 py-3">
+        <input id="add-episode" type="number" min="1" class="mt-1 w-full rounded-2xl bg-surface border border-hairline px-4 py-3">
       </label>
     </div>
     <div>
@@ -97,10 +101,10 @@
       <div id="channels" class="space-y-2 text-sm text-text-secondary">Loading channels...</div>
       <div class="flex flex-wrap gap-3">
         <button onclick="startScan('scan')" class="bg-primary text-background px-5 py-2 rounded-full font-bold">Scan</button>
-        <button onclick="startScan('rescan')" class="border border-border px-5 py-2 rounded-full font-bold hover:bg-white/10">Rescan</button>
-        <button onclick="cancelScan()" class="border border-red-500/40 text-red-300 px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Cancel</button>
+        <button onclick="startScan('rescan')" class="border border-hairline px-5 py-2 rounded-full font-bold hover:bg-surface-2">Rescan</button>
+        <button onclick="cancelScan()" class="border border-red-500/40 c-red px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Cancel</button>
       </div>
-      <pre id="scan-status" class="rounded-2xl bg-background border border-border p-4 text-xs overflow-auto min-h-48"></pre>
+      <pre id="scan-status" class="rounded-2xl bg-surface border border-hairline p-4 text-xs overflow-auto min-h-48"></pre>
     </div>
 
     <div class="glass-panel rounded-3xl p-6 space-y-5">
@@ -108,9 +112,9 @@
       <p class="text-sm text-text-secondary">Checks indexed entries and exposes dead-link cleanup controls.</p>
       <div class="flex flex-wrap gap-3">
         <button onclick="startDbCheck()" class="bg-primary text-background px-5 py-2 rounded-full font-bold">Start DB Check</button>
-        <button onclick="cancelDbCheck()" class="border border-red-500/40 text-red-300 px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Cancel</button>
+        <button onclick="cancelDbCheck()" class="border border-red-500/40 c-red px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Cancel</button>
       </div>
-      <pre id="dbcheck-status" class="rounded-2xl bg-background border border-border p-4 text-xs overflow-auto min-h-48"></pre>
+      <pre id="dbcheck-status" class="rounded-2xl bg-surface border border-hairline p-4 text-xs overflow-auto min-h-48"></pre>
     </div>
 
     <div class="glass-panel rounded-3xl p-6 space-y-5">
@@ -118,13 +122,13 @@
       <p class="text-sm text-text-secondary">Finds streams with the same quality, filename and size, then removes the redundant ones.</p>
       <div class="flex flex-wrap gap-3">
         <button onclick="startDupCheck()" class="bg-primary text-background px-5 py-2 rounded-full font-bold">Scan for duplicates</button>
-        <button onclick="cancelDupCheck()" class="border border-red-500/40 text-red-300 px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Cancel</button>
+        <button onclick="cancelDupCheck()" class="border border-red-500/40 c-red px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Cancel</button>
       </div>
       <div id="dup-summary" class="text-sm text-text-secondary">No duplicates to show yet. Run a scan above.</div>
       <div id="dup-groups" class="space-y-3"></div>
       <div class="flex flex-wrap gap-3">
-        <button onclick="purgeSelectedDups()" class="border border-red-500/40 text-red-300 px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Remove selected</button>
-        <button onclick="purgeAllDups()" class="border border-red-500/40 text-red-300 px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Keep newest per group</button>
+        <button onclick="purgeSelectedDups()" class="border border-red-500/40 c-red px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Remove selected</button>
+        <button onclick="purgeAllDups()" class="border border-red-500/40 c-red px-5 py-2 rounded-full font-bold hover:bg-red-500/10">Keep newest per group</button>
       </div>
     </div>
 
@@ -133,14 +137,14 @@
       <p class="text-sm text-text-secondary">Promotes your managed bots to admins in every configured channel, and can demote orphan bots.</p>
       <div class="flex flex-wrap gap-3">
         <button onclick="scanBotAdmin()" class="bg-primary text-background px-5 py-2 rounded-full font-bold">Scan channels</button>
-        <button onclick="applyBotAdmin()" class="border border-border px-5 py-2 rounded-full font-bold hover:bg-white/10">Apply</button>
+        <button onclick="applyBotAdmin()" class="border border-hairline px-5 py-2 rounded-full font-bold hover:bg-surface-2">Apply</button>
         <label class="flex items-center gap-2 text-sm text-text-secondary">
           <input type="checkbox" id="bot-admin-demote" class="rounded">
           <span>Also remove orphan bot-admins</span>
         </label>
       </div>
-      <div id="bot-admin-scan" class="rounded-2xl bg-background border border-border p-4 text-xs overflow-auto max-h-96"></div>
-      <div id="bot-admin-status" class="rounded-2xl bg-background border border-border p-4 text-xs overflow-auto max-h-96"></div>
+      <div id="bot-admin-scan" class="rounded-2xl bg-surface border border-hairline p-4 text-xs overflow-auto max-h-96"></div>
+      <div id="bot-admin-status" class="rounded-2xl bg-surface border border-hairline p-4 text-xs overflow-auto max-h-96"></div>
     </div>
   </div>
 </section>
@@ -169,7 +173,7 @@ async function loadChannels() {
     return;
   }
   box.innerHTML = channels.map(ch => `
-    <label class="flex items-center gap-3 rounded-2xl border border-border p-3">
+    <label class="flex items-center gap-3 rounded-2xl border border-hairline p-3">
       <input type="checkbox" class="scan-channel" value="${escapeHtml(ch.id)}" checked>
       <span>${escapeHtml(ch.label || ch.id)}</span>
     </label>
@@ -249,10 +253,10 @@ function renderDupGroups(groups) {
     return;
   }
   box.innerHTML = groups.map(g => `
-    <div class="rounded-2xl border border-border p-4 space-y-2">
+    <div class="rounded-2xl border border-hairline p-4 space-y-2">
       <p class="text-sm font-bold">${escapeHtml(g.title)} · ${escapeHtml(String(g.quality || '?'))}</p>
       ${(g.entries || []).map(e => `
-        <label class="flex items-center gap-3 text-sm text-text-secondary rounded-xl bg-background border border-border px-3 py-2">
+        <label class="flex items-center gap-3 text-sm text-text-secondary rounded-xl bg-surface border border-hairline px-3 py-2">
           <input type="checkbox" data-dup-id="${escapeHtml(e.id)}" onchange="toggleDupSelect(this)" ${dupSelected.has(e.id) ? 'checked' : ''}>
           <span class="min-w-0 truncate flex-1">${escapeHtml(e.name || e.id)}</span>
           <span class="text-xs shrink-0">${escapeHtml(String(e.size || ''))}</span>
@@ -329,7 +333,7 @@ async function scanBotAdmin() {
     box.appendChild(botRow);
     for (const ch of channels) {
       const div = document.createElement('div');
-      div.className = 'rounded-xl border border-border p-3 mb-2';
+      div.className = 'rounded-xl border border-hairline p-3 mb-2';
       const rolePills = (ch.roles || []).map(r => `<span class="px-2 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] font-bold mr-1">${escapeHtml(r)}</span>`).join('');
       div.innerHTML = `
         <div class="flex items-center justify-between gap-2">
@@ -341,7 +345,7 @@ async function scanBotAdmin() {
         </div>
         <p class="text-[11px] text-text-secondary mt-1">${rolePills}${escapeHtml(ch.reason || (ch.manageable ? 'manageable' : 'not manageable'))}</p>
         <p class="text-[11px] mt-1">${bots.map(b => `${escapeHtml(b.name)}: <b>${escapeHtml(ch.bots[String(b.user_id)] || 'missing')}</b>`).join(' · ')}</p>
-        ${(ch.orphans || []).length ? `<p class="text-[11px] text-amber-300 mt-1">Orphan admins: ${ch.orphans.map(o => escapeHtml(o.name)).join(', ')}</p>` : ''}`;
+        ${(ch.orphans || []).length ? `<p class="text-[11px] c-amber mt-1">Orphan admins: ${ch.orphans.map(o => escapeHtml(o.name)).join(', ')}</p>` : ''}`;
       box.appendChild(div);
     }
   } catch (err) {
@@ -387,7 +391,7 @@ async function searchManualTitles() {
     document.getElementById('manual-options').classList.add('hidden');
     document.getElementById('manual-start').classList.add('hidden');
     document.getElementById('manual-results').innerHTML = manualResults.length ? manualResults.map((item, index) => `
-      <button type="button" onclick="selectManualTitle(${index})" class="text-left rounded-2xl border border-border p-4 hover:border-primary/60">
+      <button type="button" onclick="selectManualTitle(${index})" class="text-left rounded-2xl border border-hairline p-4 hover:border-primary/60">
         <span class="font-bold block">${escapeHtml(item.title || 'Untitled')}</span>
         <span class="text-xs text-text-secondary">${escapeHtml(item.media_type)} · ${escapeHtml(String(item.year || 'Year unknown'))}${item.is_personal ? ' · Personal' : ''}${item.selected_id ? ' · <span class="text-primary">Online</span>' : ''}</span>
       </button>
@@ -476,7 +480,7 @@ async function searchManualAddMetadata() {
     const data = await api(`/api/media/manual-add/search?media_type=${mediaType}&query=${encodeURIComponent(query)}${suffix}`);
     manualAddResults = data.results || [];
     document.getElementById('add-meta-results').innerHTML = manualAddResults.length ? manualAddResults.map((item, index) => `
-      <button type="button" onclick="selectManualAddMetadata(${index})" class="text-left rounded-2xl border border-border p-4 hover:border-primary/60">
+      <button type="button" onclick="selectManualAddMetadata(${index})" class="text-left rounded-2xl border border-hairline p-4 hover:border-primary/60">
         <span class="font-bold block">${escapeHtml(item.title || item.name || 'Untitled')}</span>
         <span class="text-xs text-text-secondary">${escapeHtml(String(item.year || item.release_year || 'Year unknown'))} · ${escapeHtml(String(item.imdb_id || item.tmdb_id || item.id || ''))}</span>
       </button>
@@ -508,7 +512,7 @@ async function loadManualAddCatalogs() {
     const data = await api('/api/media/manual-add/catalogs');
     manualAddCatalogs = data.catalogs || [];
     document.getElementById('add-catalogs').innerHTML = manualAddCatalogs.length ? manualAddCatalogs.map(item => `
-      <label class="rounded-full border border-border px-4 py-2 cursor-pointer">
+      <label class="rounded-full border border-hairline px-4 py-2 cursor-pointer">
         <input type="checkbox" class="add-catalog mr-2" value="${escapeHtml(item.id)}" data-exclusive="${item.exclusive ? 'true' : 'false'}" onchange="enforceExclusiveCatalog(this)">
         ${escapeHtml(item.name)}${item.exclusive ? ' · Exclusive' : ''}
       </label>

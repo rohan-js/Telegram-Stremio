@@ -60,7 +60,7 @@ from Backend.fastapi.routes.api_routes import (
     request_search_api, request_popular_api, request_submit_api,
     get_requests_api, update_request_api, delete_request_api,
     get_health_api, get_admin_logs_api, download_admin_logs_api,
-    export_config_api, import_config_api,
+    export_config_api, import_config_api, restart_app_api,
     resolve_subtitle_api, list_subtitle_languages_api, list_subtitles_api,
     add_subtitles_api, remove_subtitle_api,
 )
@@ -515,6 +515,10 @@ async def admin_backup_import(payload: dict, _: bool = Depends(require_auth)):
 @app.get("/api/admin/health")
 async def admin_health(force: bool = False, _: bool = Depends(require_auth)):
     return await get_health_api(force)
+
+@app.post("/api/admin/restart")
+async def admin_restart(_: bool = Depends(require_auth)):
+    return await restart_app_api()
 
 @app.get("/api/admin/logs")
 async def admin_logs(max_bytes: int = 200000, _: bool = Depends(require_auth)):

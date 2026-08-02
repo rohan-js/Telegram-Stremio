@@ -3395,14 +3395,54 @@ class Database:
                 summary["buffering_stream_rate"] = 0
                 summary["avg_buffering_rate"] = 0
 
+            #----- Most-streamed titles
+            top_titles = await col.aggregate([
+                {"$match": {"title": {"$nin": [None, ""]}}},
+                {"$group": {"_id": "$title", "streams": {"$sum": 1}, "total_bytes": {"$sum": "$total_bytes"}}},
+                {"$sort": {"streams": -1}},
+                {"$limit": 8},
+            ]).to_list(None)
+            for r in top_titles:
+                r["title"] = r.pop("_id")
+
+            #----- Heaviest viewers (by data transferred)
+            top_users = await col.aggregate([
+                {"$match": {"user_name": {"$nin": [None, ""]}}},
+                {"$group": {"_id": "$user_name", "streams": {"$sum": 1}, "total_bytes": {"$sum": "$total_bytes"}}},
+                {"$sort": {"total_bytes": -1}},
+                {"$limit": 8},
+            ]).to_list(None)
+            for r in top_users:
+                r["user"] = r.pop("_id")
+
+            #----- Streams & data per day (last 14 days, chronological)
+            per_day = await col.aggregate([
+                {"$group": {
+                    "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$logged_at"}},
+                    "streams": {"$sum": 1},
+                    "total_bytes": {"$sum": "$total_bytes"},
+                }},
+                {"$sort": {"_id": -1}},
+                {"$limit": 14},
+            ]).to_list(None)
+            for r in per_day:
+                r["date"] = r.pop("_id")
+            per_day.reverse()
+
+            distinct_users = await col.distinct("user_name")
+            summary["active_users"] = len([u for u in distinct_users if u and u != "Unknown"])
+
             return {
                 "summary":    summary,
                 "per_client": per_client,
+                "top_titles": top_titles,
+                "top_users":  top_users,
+                "per_day":    per_day,
                 "recent":     recent,
             }
         except Exception as e:
             LOGGER.error(f"get_stream_analytics error: {e}")
-            return {"summary": {}, "per_client": [], "recent": []}
+            return {"summary": {}, "per_client": [], "top_titles": [], "top_users": [], "per_day": [], "recent": []}
 
     # -------------------------------
     # Manual Quality Flags / Duplicates

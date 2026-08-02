@@ -1,7 +1,9 @@
 import asyncio
 import json
+import os
 import random
 import secrets
+import shutil
 from datetime import datetime
 from fastapi import Request, Query, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
@@ -327,6 +329,20 @@ async def delete_request_api(request_id: str) -> dict:
 
 async def get_health_api(force: bool = False) -> dict:
     return await run_health_checks(force=force)
+
+
+def _perform_restart():
+    uv = shutil.which("uv")
+    if not uv:
+        raise RuntimeError("uv executable not found; cannot restart the server.")
+    os.execl(uv, uv, "run", "-m", "Backend")
+
+
+async def restart_app_api():
+    try:
+        return await asyncio.to_thread(_perform_restart)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 async def get_admin_logs_api(max_bytes: int = 200_000) -> dict:
@@ -1569,7 +1585,7 @@ async def speed_test_stream_api(
 # ---------------------------------------------------------------------------
 
 async def get_admin_stats_api() -> dict:
-    from Backend.pyrofork.bot import work_loads, multi_clients, client_failures, client_avg_mbps
+    from Backend.pyrofork.bot import work_loads, multi_clients, client_failures, client_avg_mbps, client_dc_map
     from Backend.helper.custom_dl import get_client_cooldown_state
     from Backend.fastapi.routes.stream_routes import _streamer_by_client
     
@@ -1596,6 +1612,7 @@ async def get_admin_stats_api() -> dict:
         bot_stats.append({
             "client_index": client_index,
             "display_name": f"Bot {client_index + 1}",
+            "dc_id": client_dc_map.get(client_index),
             "current_load": load,
             "failures": failures,
             "avg_mbps": round(mbps, 2),

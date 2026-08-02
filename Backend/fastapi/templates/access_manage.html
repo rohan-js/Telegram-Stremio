@@ -376,6 +376,9 @@
             width: 100%;
         }
     }
+
+    .c-green { color: color-mix(in srgb, #22c55e 80%, var(--text)); }
+    .c-red { color: color-mix(in srgb, #ef4444 80%, var(--text)); }
 </style>
 
 <div class="access-shell py-2 sm:py-4">
@@ -734,9 +737,9 @@
                     <td class="px-4 py-4 text-soft text-xs">${t.created_at ? fmtDate(t.created_at) : '—'}</td>
                     <td class="px-4 py-4 text-xs">
                         ${t.lifetime || t.is_beta_exempt
-                            ? `<span class="text-green-300 font-semibold">Lifetime</span>`
+                            ? `<span class="c-green font-semibold">Lifetime</span>`
                             : t.expires_at
-                            ? `<span class="${t.is_expired ? 'text-red-300 font-semibold' : 'section-title'}">${fmtDate(t.expires_at)}</span>`
+                            ? `<span class="${t.is_expired ? 'c-red font-semibold' : 'section-title'}">${fmtDate(t.expires_at)}</span>`
                             : `<span class="text-soft italic">${escHtml(t.access_source || 'No expiry')}</span>`
                         }
                     </td>
@@ -789,7 +792,7 @@
                             <div class="rounded-2xl px-4 py-3"
                                  style="background: color-mix(in srgb, var(--bg) 55%, transparent); border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);">
                                 <div class="text-[11px] uppercase tracking-[0.14em] text-soft font-bold mb-1">Expires</div>
-                                <div class="text-sm font-semibold ${t.is_expired ? 'text-red-300' : 'section-title'} break-words">
+                                <div class="text-sm font-semibold ${t.is_expired ? 'c-red' : 'section-title'} break-words">
                                     ${t.lifetime || t.is_beta_exempt ? 'Lifetime' : (t.expires_at ? fmtDate(t.expires_at) : escHtml(t.access_source || 'No expiry'))}
                                 </div>
                             </div>
@@ -867,10 +870,10 @@
             renderPage();
         } catch (err) {
             document.getElementById('token-table-body').innerHTML = `
-                <tr><td colspan="6" class="text-center py-10 text-red-300">Error: ${err.message}</td></tr>
+                <tr><td colspan="6" class="text-center py-10 c-red">Error: ${err.message}</td></tr>
             `;
             document.getElementById('token-mobile-list').innerHTML = `
-                <div class="empty-state text-center px-4 py-8 text-red-300">Error: ${err.message}</div>
+                <div class="empty-state text-center px-4 py-8 c-red">Error: ${err.message}</div>
             `;
             showToast('Failed to load access tokens.', 'error', 'Load Error');
         }

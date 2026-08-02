@@ -4,22 +4,24 @@
 
 {% block content %}
 <div class="min-h-screen pb-12">
-    <header class="mb-10">
+    <header class="mb-8 sm:mb-10">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-                <h1 class="text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">
+                <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">
                     System Overview
                 </h1>
-                <p class="text-text-secondary text-sm mt-1">Real-time performance, live stream activity, and token access management</p>
+                <p class="text-text-secondary text-xs sm:text-sm mt-1">Real-time performance, live stream activity, and token access management</p>
             </div>
 
             <button onclick="refreshDashboard()"
-                class="flex items-center justify-center space-x-2 px-6 py-3 rounded-2xl bg-primary/10 border border-primary/20 hover:bg-primary hover:text-background transition-all group active:scale-95">
+                class="w-full md:w-auto flex items-center justify-center space-x-2 px-6 py-3 rounded-2xl bg-primary/10 border border-primary/20 hover:bg-primary hover:text-background transition-all group active:scale-95">
                 <i id="refresh-icon" class="fa-solid fa-arrows-rotate group-hover:rotate-180 transition-transform duration-700"></i>
                 <span class="font-bold text-sm uppercase tracking-wider">Refresh Data</span>
             </button>
         </div>
     </header>
+
+    <div id="setup-card" class="mb-8"></div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
         <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
@@ -33,7 +35,7 @@
         </div>
 
         <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent shadow-[0_0_15px_rgba(var(--accent-rgb),0.3)]">
+            <div class="w-12 h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent shadow-[0_0_15px_color-mix(in_srgb,var(--accent)_35%,transparent)]">
                 <i class="fa-solid fa-robot"></i>
             </div>
             <div>
@@ -53,7 +55,7 @@
         </div>
 
         <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-300">
+            <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
                 <i class="fa-solid fa-cloud-arrow-up"></i>
             </div>
             <div class="min-w-0">
@@ -66,7 +68,7 @@
         </div>
 
         <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center text-sky-300">
+            <div class="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center text-sky-500">
                 <i class="fa-solid fa-network-wired"></i>
             </div>
             <div class="min-w-0 flex-1">
@@ -75,7 +77,7 @@
                 <p class="text-[10px] text-text-secondary">
                     Today: <span id="sys-vps-outbound-today" data-bytes="{{ system_stats.vps_outbound.today.bytes|default(0) }}"></span>
                 </p>
-                <div class="mt-2 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                <div class="mt-2 h-1.5 bg-surface rounded-full overflow-hidden">
                     <div id="sys-vps-outbound-progress" class="h-full bg-sky-400 transition-all duration-700" style="width: {{ [system_stats.vps_outbound.month.percent|default(0), 100]|min }}%"></div>
                 </div>
                 <p class="mt-1 text-[9px] text-text-secondary">
@@ -85,7 +87,7 @@
         </div>
 
         <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-text-secondary">
+            <div class="w-12 h-12 rounded-2xl bg-surface flex items-center justify-center text-text-secondary">
                 <i class="fa-solid fa-code-branch"></i>
             </div>
             <div>
@@ -97,6 +99,99 @@
 
     <div class="grid lg:grid-cols-3 gap-8">
         <div class="lg:col-span-2 space-y-8">
+            <style>
+                .ua-dot { width:.7rem;height:.7rem;border-radius:9999px;background:var(--text-secondary);flex-shrink:0; }
+                .ua-dot.on { background:#22c55e;box-shadow:0 0 8px #22c55e; }
+                .ua-vpn { font-size:.6rem;font-weight:900;padding:.15rem .45rem;border-radius:9999px;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3);white-space:nowrap; }
+                .ua-clean { font-size:.6rem;font-weight:900;padding:.15rem .45rem;border-radius:9999px;background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3);white-space:nowrap; }
+                .ua-skel { height:132px;border-radius:1rem;border:1px solid var(--hairline);background:linear-gradient(90deg, color-mix(in srgb,var(--text) 6%,transparent) 25%, color-mix(in srgb,var(--text) 14%,transparent) 37%, color-mix(in srgb,var(--text) 6%,transparent) 63%);background-size:400% 100%;animation:ua-shimmer 1.4s ease infinite; }
+                @keyframes ua-shimmer { 0%{background-position:100% 0;} 100%{background-position:-100% 0;} }
+                .ua-now { margin-top:.5rem;font-size:.8rem;font-weight:800;color:#22c55e; }
+                .ua-meta { margin-top:.6rem;display:grid;grid-template-columns:1fr 1fr;gap:.3rem .6rem;font-size:.72rem; }
+                .ua-meta span { color:var(--text-secondary);display:flex;align-items:center;gap:.35rem;min-width:0; }
+                .ua-meta span span { color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+                .c-green { color:color-mix(in srgb,#22c55e 80%,var(--text)); }
+                .c-red { color:color-mix(in srgb,#ef4444 80%,var(--text)); }
+            </style>
+
+            <script>
+                function uaEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+                function uaFlag(cc) { if (!cc || cc.length !== 2) return ''; return String.fromCodePoint(...[...cc.toUpperCase()].map(c => 127397 + c.charCodeAt(0))); }
+                function uaAgo(iso) {
+                    if (!iso) return '—';
+                    const t = new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
+                    const d = (Date.now() - t) / 1000;
+                    if (d < 60) return 'just now';
+                    if (d < 3600) return Math.floor(d / 60) + 'm ago';
+                    if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+                    return Math.floor(d / 86400) + 'd ago';
+                }
+                let uaPage = 1;
+                const uaPerPage = 12;
+                window.__UA_INITIAL__ = {{ user_activity_initial | tojson }};
+                function renderUaPagination(data) {
+                    const el = document.getElementById('ua-pagination');
+                    if (!el) return;
+                    const pages = data.total_pages || 1, cur = data.page || 1;
+                    if (pages <= 1) { el.innerHTML = ''; return; }
+                    el.innerHTML = `
+                        <button onclick="loadUserActivity(${cur - 1})" ${cur <= 1 ? 'disabled' : ''} class="px-3 py-1.5 rounded-xl glass-panel border border-hairline text-sm font-bold disabled:opacity-40"><i class="fa-solid fa-chevron-left"></i></button>
+                        <span class="text-sm text-text-secondary">Page ${cur} of ${pages} · ${data.total} users</span>
+                        <button onclick="loadUserActivity(${cur + 1})" ${cur >= pages ? 'disabled' : ''} class="px-3 py-1.5 rounded-xl glass-panel border border-hairline text-sm font-bold disabled:opacity-40"><i class="fa-solid fa-chevron-right"></i></button>`;
+                }
+                function renderUserActivity(data) {
+                    const box = document.getElementById('ua-list');
+                    const users = data.users || [];
+                    document.getElementById('ua-online').textContent = (data.online_count || 0) + ' online';
+                    if (!users.length) { box.innerHTML = '<p class="text-text-secondary text-sm">No user activity recorded yet.</p>'; renderUaPagination(data); return; }
+                    box.innerHTML = users.map(u => {
+                        const loc = [u.country, u.city].filter(Boolean).join(': ') || 'Unknown';
+                        const nowLine = u.now_playing
+                            ? `<div class="ua-now"><i class="fas fa-play"></i> Now Playing — ${uaEsc(u.now_playing)}</div>`
+                            : `<div class="text-text-secondary text-xs mt-2 truncate"><i class="fas fa-clock-rotate-left"></i> ${uaEsc(u.last_title || 'No history')}</div>`;
+                        const fl = uaFlag(u.country_code);
+                        return `<div class="glass-panel p-4 rounded-2xl border border-hairline">
+                            <div class="flex items-center justify-between gap-2">
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <span class="ua-dot ${u.online ? 'on' : ''}"></span>
+                                    <span class="font-bold truncate">${uaEsc(u.name)}</span>
+                                </div>
+                                <span class="${u.proxy ? 'ua-vpn' : 'ua-clean'}"><i class="fas fa-shield-halved"></i> ${u.proxy ? 'VPN' : 'Clean'}</span>
+                            </div>
+                            ${nowLine}
+                            <div class="ua-meta">
+                                <span><i class="fas fa-signal"></i> <span>${u.online ? 'Online' : uaAgo(u.last_active)}</span></span>
+                                <span><i class="fas fa-location-dot"></i> <span>${fl ? fl + ' ' : ''}${uaEsc(loc)}</span></span>
+                                <span><i class="fas fa-network-wired"></i> <span>${uaEsc(u.isp || '—')}</span></span>
+                                <span><i class="fas fa-mobile-screen-button"></i> <span>${uaEsc(u.app)}${u.device ? ' · ' + uaEsc(u.device) : ''}</span></span>
+                                <span><i class="fas fa-globe"></i> <span>${uaEsc(u.ip || '—')}</span></span>
+                                <span><i class="fas fa-film"></i> <span>${u.streams} streams</span></span>
+                            </div>
+                        </div>`;
+                    }).join('');
+                    renderUaPagination(data);
+                }
+                function uaSkeleton() { return '<div class="ua-skel"></div>'; }
+                async function loadUserActivity(page, silent) {
+                    if (page) uaPage = page;
+                    const box = document.getElementById('ua-list');
+                    if (!box) return;
+                    if (!silent) box.innerHTML = uaSkeleton();
+                    try {
+                        const res = await fetch(`/api/admin/user-activity?page=${uaPage}&per_page=${uaPerPage}`);
+                        renderUserActivity(await res.json());
+                    } catch (e) {
+                        box.innerHTML = '<p class="text-text-secondary text-sm">Unable to load user activity.</p>';
+                    }
+                }
+                function uaInit() {
+                    if (window.__UA_INITIAL__ && (window.__UA_INITIAL__.users || []).length) renderUserActivity(window.__UA_INITIAL__);
+                    else loadUserActivity();
+                    setInterval(() => loadUserActivity(null, true), 15000);
+                }
+                if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', uaInit); else uaInit();
+            </script>
+
             <section>
                 <h3 class="flex items-center gap-2 text-lg font-bold mb-4 ml-2">
                     <i class="fa-solid fa-database text-primary"></i> Storage Nodes
@@ -104,7 +199,7 @@
 
                 <div class="grid md:grid-cols-2 gap-4">
                     {% for db_stat in system_stats.databases %}
-                    <div class="glass-panel p-6 rounded-[2rem] border-white/5 bg-card/10">
+                    <div class="glass-panel p-6 rounded-[2rem] border-hairline bg-card/10">
                         <div class="flex justify-between items-start mb-6">
                             <h4 class="font-bold text-text">{{ db_stat.db_name.replace("storage_", "Node ") }}</h4>
                             <span class="text-[10px] bg-primary/10 text-primary px-2 py-1 rounded-lg font-bold uppercase">Online</span>
@@ -121,7 +216,7 @@
                                     <span class="text-text-secondary">Disk Usage</span>
                                     <span class="text-primary">{{ "%.1f"|format(db_stat.storageSize / 1024 / 1024) }} MB</span>
                                 </div>
-                                <div class="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                <div class="w-full h-1.5 bg-surface rounded-full overflow-hidden">
                                     {% set storage_percent = (db_stat.storageSize / (500 * 1024 * 1024) * 100) | round %}
                                     <div class="h-full bg-gradient-to-r from-primary to-accent transition-all duration-1000" style="width: {{ storage_percent }}%"></div>
                                 </div>
@@ -133,7 +228,7 @@
             </section>
 
             <section class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <a href="/media/manage?media_type=movie" class="glass-panel p-6 rounded-[2rem] hover:bg-primary/5 transition-all group border border-white/5">
+                <a href="/media/manage?media_type=movie" class="glass-panel p-6 rounded-[2rem] hover:bg-primary/5 transition-all group border border-hairline">
                     <div class="flex items-center gap-4">
                         <div class="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
                             <i class="fa-solid fa-film text-2xl"></i>
@@ -142,11 +237,11 @@
                             <h4 class="font-bold text-text">Manage Movies</h4>
                             <p class="text-xs text-text-secondary">Organize and edit library</p>
                         </div>
-                        <i class="fa-solid fa-chevron-right ml-auto text-white/20 group-hover:text-primary group-hover:translate-x-1 transition-all"></i>
+                        <i class="fa-solid fa-chevron-right ml-auto text-muted group-hover:text-primary group-hover:translate-x-1 transition-all"></i>
                     </div>
                 </a>
 
-                <a href="/media/manage?media_type=tv" class="glass-panel p-6 rounded-[2rem] hover:bg-accent/5 transition-all group border border-white/5">
+                <a href="/media/manage?media_type=tv" class="glass-panel p-6 rounded-[2rem] hover:bg-accent/5 transition-all group border border-hairline">
                     <div class="flex items-center gap-4">
                         <div class="w-14 h-14 rounded-2xl bg-accent/10 flex items-center justify-center text-accent group-hover:scale-110 transition-transform">
                             <i class="fa-solid fa-tv text-2xl"></i>
@@ -155,15 +250,36 @@
                             <h4 class="font-bold text-text">Manage TV Shows</h4>
                             <p class="text-xs text-text-secondary">Handle series and episodes</p>
                         </div>
-                        <i class="fa-solid fa-chevron-right ml-auto text-white/20 group-hover:text-accent group-hover:translate-x-1 transition-all"></i>
+                        <i class="fa-solid fa-chevron-right ml-auto text-muted group-hover:text-accent group-hover:translate-x-1 transition-all"></i>
                     </div>
                 </a>
             </section>
+
+            <div class="glass-panel rounded-[2.5rem] overflow-hidden">
+                <div class="p-6 border-b border-hairline">
+                    <div class="flex items-center justify-between gap-3 mb-2">
+                        <h3 class="flex items-center gap-2 text-lg font-bold">
+                            <i class="fa-solid fa-users text-primary"></i> User Activity
+                            <span id="ua-online" class="text-[10px] font-bold uppercase tracking-[0.2em] text-primary bg-primary/10 px-3 py-1 rounded-full">0 online</span>
+                        </h3>
+                        <button onclick="loadUserActivity()" class="text-sm font-semibold text-text-secondary hover:text-primary transition">
+                            <i class="fa-solid fa-rotate"></i> Refresh
+                        </button>
+                    </div>
+                    <p class="text-sm text-text-secondary">Who's watching, where from, and on what</p>
+                </div>
+                <div class="p-6">
+                    <div id="ua-list" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                        <div class="ua-skel"></div>
+                    </div>
+                    <div id="ua-pagination" class="flex items-center justify-center gap-3 mt-6"></div>
+                </div>
+            </div>
         </div>
 
         <div class="lg:col-span-1">
             <div class="glass-panel rounded-[2.5rem] overflow-hidden h-full">
-                <div class="p-6 border-b border-white/5">
+                <div class="p-6 border-b border-hairline">
                     <div class="flex items-center justify-between gap-3 mb-2">
                         <h3 class="flex items-center gap-2 text-lg font-bold">
                             <i class="fa-solid fa-circle-play text-red-500 animate-pulse"></i> Live Network
@@ -212,7 +328,7 @@
                                         </span>
                                     </div>
 
-                                    <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-white/5">
+                                    <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-hairline">
                                         <div class="text-center">
                                             <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Speed</p>
                                             <p class="text-xs font-bold text-text">{{ "%.3f"|format(stream.avg_mbps or 0) }} MB/s</p>
@@ -231,7 +347,7 @@
                                         </div>
                                     </div>
 
-                                    <div class="mt-4 pt-4 border-t border-white/5 space-y-2">
+                                    <div class="mt-4 pt-4 border-t border-hairline space-y-2">
                                         <div class="flex items-center justify-between text-xs gap-3">
                                             <span class="text-text-secondary">Started</span>
                                             <span class="text-text text-right truncate max-w-[65%] live-started" data-start-ts="{{ stream.start_ts or 0 }}">—</span>
@@ -244,8 +360,8 @@
                                 </div>
                                 {% endfor %}
                             {% else %}
-                                <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-white/10">
-                                    <i class="fa-solid fa-satellite-dish text-4xl text-white/10 mb-3"></i>
+                                <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-hairline">
+                                    <i class="fa-solid fa-satellite-dish text-4xl text-muted mb-3"></i>
                                     <p class="text-sm text-text-secondary font-medium">No active streams right now</p>
                                     <p class="text-xs text-text-secondary mt-1">The live network is idle at the moment.</p>
                                 </div>
@@ -259,7 +375,7 @@
                             <span class="text-[10px] uppercase tracking-widest text-text-secondary">Errors</span>
                         </div>
                         <div id="recent-failed-streams-container" class="space-y-4">
-                            <div class="glass-panel p-6 rounded-[2rem] text-center border-dashed border-white/10">
+                            <div class="glass-panel p-6 rounded-[2rem] text-center border-dashed border-hairline">
                                 <p class="text-xs text-text-secondary">No recent stream errors.</p>
                             </div>
                         </div>
@@ -272,20 +388,7 @@
 
     <section class="mt-12">
         <div class="glass-panel rounded-[2.5rem] overflow-hidden">
-            <div class="p-8 border-b border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
-                <div>
-                    <h3 class="text-xl font-bold text-text">User Activity</h3>
-                    <p id="ua-online" class="text-sm text-text-secondary">Users who recently fetched metadata or streamed.</p>
-                </div>
-                <div id="ua-pagination" class="flex items-center gap-2"></div>
-            </div>
-            <div id="ua-list" class="p-6 space-y-4"></div>
-        </div>
-    </section>
-
-    <section class="mt-12">
-        <div class="glass-panel rounded-[2.5rem] overflow-hidden">
-            <div class="p-8 border-b border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="p-8 border-b border-hairline flex flex-col md:flex-row justify-between items-center gap-4">
                 <div>
                     <h3 class="text-xl font-bold text-text">Access Management</h3>
                     <p class="text-sm text-text-secondary">Control API tokens, daily quotas, and monthly quotas. HTTP egress and VPS TX outbound are tracked separately in System Overview.</p>
@@ -296,29 +399,29 @@
                 </button>
             </div>
 
-            <div id="create-form-container" class="hidden p-8 bg-white/5 border-b border-white/5 animate-in fade-in slide-in-from-top-4">
+            <div id="create-form-container" class="hidden p-8 bg-card/20 border-b border-hairline animate-in fade-in slide-in-from-top-4">
                 <form onsubmit="createToken(event)" class="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
                     <div class="md:col-span-2">
                         <label class="text-[10px] font-bold uppercase text-text-secondary tracking-widest ml-2 mb-1 block">Token Alias</label>
                         <input type="text" id="token-name" placeholder="E.g., Living Room TV" required
-                            class="w-full px-4 py-3 rounded-xl border border-white/10 focus:border-primary outline-none text-sm text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
+                            class="w-full px-4 py-3 rounded-xl border border-hairline focus:border-primary outline-none text-sm text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
                     </div>
 
                     <div>
                         <label class="text-[10px] font-bold uppercase text-text-secondary tracking-widest ml-2 mb-1 block">Daily (GB)</label>
                         <input type="number" id="daily-limit" value="0" step="0.1" min="0"
-                            class="w-full px-4 py-3 rounded-xl border border-white/10 focus:border-primary outline-none text-sm text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
+                            class="w-full px-4 py-3 rounded-xl border border-hairline focus:border-primary outline-none text-sm text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
                     </div>
 
                     <div>
                         <label class="text-[10px] font-bold uppercase text-text-secondary tracking-widest ml-2 mb-1 block">Monthly (GB)</label>
                         <input type="number" id="monthly-limit" value="0" step="0.1" min="0"
-                            class="w-full px-4 py-3 rounded-xl border border-white/10 focus:border-primary outline-none text-sm text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
+                            class="w-full px-4 py-3 rounded-xl border border-hairline focus:border-primary outline-none text-sm text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
                     </div>
 
                     <div class="flex gap-2">
                         <button type="submit" class="flex-1 py-3 bg-primary text-background font-bold rounded-xl text-sm">Create</button>
-                        <button type="button" onclick="toggleCreateForm()" class="px-4 py-3 bg-white/5 text-text-secondary rounded-xl hover:bg-white/10 transition-colors">
+                        <button type="button" onclick="toggleCreateForm()" class="px-4 py-3 bg-surface text-text-secondary rounded-xl hover:bg-primary/10 transition-colors">
                             <i class="fa-solid fa-xmark"></i>
                         </button>
                     </div>
@@ -328,7 +431,7 @@
             <div class="overflow-x-auto">
                 <table class="w-full text-left">
                     <thead>
-                        <tr class="bg-white/5 text-[10px] uppercase tracking-[0.2em] font-bold text-text-secondary">
+                        <tr class="bg-surface text-[10px] uppercase tracking-[0.2em] font-bold text-text-secondary">
                             <th class="py-5 px-8">Client Name</th>
                             <th class="py-5 px-8">Usage</th>
                             <th class="py-5 px-8">Limits</th>
@@ -336,9 +439,9 @@
                             <th class="py-5 px-8 text-right">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-white/5">
+                    <tbody class="divide-y divide-hairline">
                         {% for token in api_tokens %}
-                        <tr class="group hover:bg-white/[0.02] transition-colors" id="token-row-{{ loop.index0 }}">
+                        <tr class="group hover:bg-primary/5 transition-colors" id="token-row-{{ loop.index0 }}">
                             <td class="py-6 px-8">
                                 <p class="font-bold text-text">{{ token.name }}</p>
                                 <p class="text-[10px] text-text-secondary uppercase mt-1">
@@ -373,7 +476,7 @@
 
                             <td class="py-6 px-8">
                                 <button onclick='copyUrl({{ ((request.base_url|string).replace("http:", "https:") ~ "stremio/" ~ token.token ~ "/manifest.json")|tojson }})'
-                                    class="flex items-center gap-2 px-3 py-1.5 bg-background/50 rounded-lg border border-white/5 text-[10px] font-bold text-text-secondary hover:text-primary hover:border-primary/30 transition-all">
+                                    class="flex items-center gap-2 px-3 py-1.5 bg-surface rounded-lg border border-hairline text-[10px] font-bold text-text-secondary hover:text-primary hover:border-primary/30 transition-all">
                                     <i class="fa-solid fa-link text-[8px]"></i> COPY MANIFEST
                                 </button>
                             </td>
@@ -381,11 +484,11 @@
                             <td class="py-6 px-8 text-right">
                                 <div class="flex justify-end gap-2">
                                     <button onclick='openEditModal({{ token.token|tojson }}, {{ token.limits.daily_limit_gb|default(0)|tojson }}, {{ token.limits.monthly_limit_gb|default(0)|tojson }}, {{ token.limits.max_active_streams|default(2)|tojson }})'
-                                        class="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-text-secondary hover:bg-blue-500 hover:text-white transition-all token-action-btn">
+                                        class="w-8 h-8 rounded-lg bg-surface flex items-center justify-center text-text-secondary hover:bg-blue-500 hover:text-white transition-all token-action-btn">
                                         <i class="fa-solid fa-pen-to-square text-xs"></i>
                                     </button>
                                     <button onclick='revokeToken({{ token.token|tojson }})'
-                                        class="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-text-secondary hover:bg-red-500 hover:text-white transition-all token-action-btn">
+                                        class="w-8 h-8 rounded-lg bg-surface flex items-center justify-center text-text-secondary hover:bg-red-500 hover:text-white transition-all token-action-btn">
                                         <i class="fa-solid fa-trash text-xs"></i>
                                     </button>
                                 </div>
@@ -408,7 +511,7 @@
 </div>
 
 <div id="edit-modal" class="fixed inset-0 bg-background/80 backdrop-blur-md hidden flex items-center justify-center z-50 p-4">
-    <div class="glass-panel rounded-[2rem] p-8 w-full max-w-md border border-white/10 shadow-2xl">
+    <div class="glass-panel rounded-[2rem] p-8 w-full max-w-md border border-hairline shadow-2xl">
         <h3 class="text-xl font-bold mb-2">Edit Limits</h3>
         <p class="text-sm text-text-secondary mb-6">Modify daily and monthly data quotas for this token.</p>
 
@@ -417,23 +520,23 @@
             <div>
                 <label class="text-[10px] font-bold uppercase text-text-secondary tracking-widest ml-1 mb-1 block">Daily Limit (GB)</label>
                 <input type="number" id="edit-daily" step="0.1" min="0"
-                    class="w-full px-4 py-3 rounded-xl border border-white/10 focus:border-primary outline-none text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
+                    class="w-full px-4 py-3 rounded-xl border border-hairline focus:border-primary outline-none text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
             </div>
             <div>
                 <label class="text-[10px] font-bold uppercase text-text-secondary tracking-widest ml-1 mb-1 block">Monthly Limit (GB)</label>
                 <input type="number" id="edit-monthly" step="0.1" min="0"
-                    class="w-full px-4 py-3 rounded-xl border border-white/10 focus:border-primary outline-none text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
+                    class="w-full px-4 py-3 rounded-xl border border-hairline focus:border-primary outline-none text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
             </div>
             <div>
                 <label class="text-[10px] font-bold uppercase text-text-secondary tracking-widest ml-1 mb-1 block">Max Active Streams</label>
                 <input type="number" id="edit-active" min="1" step="1"
-                    class="w-full px-4 py-3 rounded-xl border border-white/10 focus:border-primary outline-none text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
+                    class="w-full px-4 py-3 rounded-xl border border-hairline focus:border-primary outline-none text-text placeholder:text-text-secondary bg-[color-mix(in_srgb,var(--card)_88%,var(--background)_12%)]">
                 <p class="text-[10px] text-text-secondary ml-1 mt-1">Maximum concurrent streams allowed for this user. (Applies from next stream start.)</p>
             </div>
         </div>
 
         <div class="mt-8 flex gap-3">
-            <button onclick="closeEditModal()" class="flex-1 py-3 bg-white/5 hover:bg-white/10 text-text rounded-xl font-bold transition-all">Cancel</button>
+            <button onclick="closeEditModal()" class="flex-1 py-3 bg-surface hover:bg-primary/10 text-text rounded-xl font-bold transition-all">Cancel</button>
             <button onclick="saveTokenLimits()" class="flex-1 py-3 bg-primary text-background rounded-xl font-bold transition-all">Save Changes</button>
         </div>
     </div>
@@ -442,7 +545,7 @@
 
 <style>
     .shadow-glow {
-        filter: drop-shadow(0 0 8px rgba(var(--primary-rgb), 0.4));
+        filter: drop-shadow(0 0 8px color-mix(in srgb, var(--primary) 45%, transparent));
     }
 
     .stream-card {
@@ -526,14 +629,14 @@
     }
 
     function openEditModal(token, daily, monthly, active) {
-    const tokenStr = String(token || '');
-    streamState.currentEditToken = tokenStr;
-    document.getElementById('edit-token-id').value = tokenStr;
-    document.getElementById('edit-daily').value = (daily === null || daily === undefined) ? 0 : daily;
-    document.getElementById('edit-monthly').value = (monthly === null || monthly === undefined) ? 0 : monthly;
-    document.getElementById('edit-active').value = (active === null || active === undefined) ? 2 : active;
-    const modal = document.getElementById('edit-modal');
-    modal.classList.remove('hidden');
+        const tokenStr = String(token || '');
+        streamState.currentEditToken = tokenStr;
+        document.getElementById('edit-token-id').value = tokenStr;
+        document.getElementById('edit-daily').value = (daily === null || daily === undefined) ? 0 : daily;
+        document.getElementById('edit-monthly').value = (monthly === null || monthly === undefined) ? 0 : monthly;
+        document.getElementById('edit-active').value = (active === null || active === undefined) ? 2 : active;
+        const modal = document.getElementById('edit-modal');
+        modal.classList.remove('hidden');
     }
 
     function closeEditModal() {
@@ -745,10 +848,10 @@
             return { className: 'bg-yellow-500/15 text-yellow-300', text: 'Cancelled' };
         }
         if (normalized === 'completed' || normalized === 'finished') {
-            return { className: 'bg-green-500/15 text-green-300', text: 'Completed' };
+            return { className: 'c-green', text: 'Completed' };
         }
         if (normalized === 'failed' || normalized === 'error') {
-            return { className: 'bg-red-500/15 text-red-300', text: normalized.charAt(0).toUpperCase() + normalized.slice(1) };
+            return { className: 'c-red', text: normalized.charAt(0).toUpperCase() + normalized.slice(1) };
         }
 
         return {
@@ -810,7 +913,7 @@
                     </span>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-white/5">
+                <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-hairline">
                     <div class="text-center">
                         <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Speed</p>
                         <p class="text-xs font-bold text-text">${avgSpeed}</p>
@@ -853,7 +956,7 @@
                     </div>
                 </div>
 
-                <div class="mt-4 pt-4 border-t border-white/5 space-y-2">
+                <div class="mt-4 pt-4 border-t border-hairline space-y-2">
                     <div class="flex items-center justify-between text-xs gap-3">
                         <span class="text-text-secondary">User</span>
                         <span class="text-text text-right truncate max-w-[65%]">${userName}</span>
@@ -874,7 +977,7 @@
                         <span class="text-text-secondary">Status</span>
                         <span class="text-text text-right truncate max-w-[65%]">${escapeHtml(stream?.status || 'active')}</span>
                     </div>
-                    ${errorReason ? `<div class="flex items-center justify-between text-xs gap-3"><span class="text-text-secondary">Error</span><span class="text-red-300 text-right break-all max-w-[65%]">${errorReason}</span></div>` : ''}
+                    ${errorReason ? `<div class="flex items-center justify-between text-xs gap-3"><span class="text-text-secondary">Error</span><span class="c-red text-right break-all max-w-[65%]">${errorReason}</span></div>` : ''}
                 </div>
             </div>
         `;
@@ -882,8 +985,8 @@
 
     function renderEmptyState(icon, title, subtitle) {
         return `
-            <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-white/10">
-                <i class="${icon} text-4xl text-white/10 mb-3"></i>
+            <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-hairline">
+                <i class="${icon} text-4xl text-muted mb-3"></i>
                 <p class="text-sm text-text-secondary font-medium">${escapeHtml(title)}</p>
                 <p class="text-xs text-text-secondary mt-1">${escapeHtml(subtitle)}</p>
             </div>
@@ -924,7 +1027,7 @@
             if (failedContainer) {
                 failedContainer.innerHTML = failedStreams.length
                     ? failedStreams.slice(0, 5).map(stream => renderStreamCard(stream)).join('')
-                    : '<div class="glass-panel p-6 rounded-[2rem] text-center border-dashed border-white/10"><p class="text-xs text-text-secondary">No recent stream errors.</p></div>';
+                    : '<div class="glass-panel p-6 rounded-[2rem] text-center border-dashed border-hairline"><p class="text-xs text-text-secondary">No recent stream errors.</p></div>';
             }
         } catch (error) {
             console.error(error);
@@ -1077,75 +1180,51 @@
         });
     }
 
-    const uaInitial = {{ user_activity_initial | tojson }};
-
-    function uaEsc(value) {
-        return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    }
-
-    function renderUaPagination(data) {
-        const el = document.getElementById('ua-pagination');
-        if (!el) return;
-        const cur = data.page || 1, pages = data.total_pages || 1;
-        if (pages <= 1) { el.innerHTML = ''; return; }
-        el.innerHTML = `<button onclick="loadUserActivity(${cur - 1})" ${cur <= 1 ? 'disabled' : ''} class="px-3 py-1.5 rounded-xl glass-panel border border-white/10 text-sm font-bold disabled:opacity-40"><i class="fa-solid fa-chevron-left"></i></button>
-            <span class="text-xs font-bold text-text-secondary">${cur} / ${pages}</span>
-            <button onclick="loadUserActivity(${cur + 1})" ${cur >= pages ? 'disabled' : ''} class="px-3 py-1.5 rounded-xl glass-panel border border-white/10 text-sm font-bold disabled:opacity-40"><i class="fa-solid fa-chevron-right"></i></button>`;
-    }
-
-    function renderUserActivity(data) {
-        const box = document.getElementById('ua-list');
-        const onlineEl = document.getElementById('ua-online');
-        if (onlineEl) onlineEl.textContent = (data.online_count || 0) + ' online · ' + (data.total || 0) + ' total users';
-        const users = data.users || [];
-        if (!users.length) {
-            box.innerHTML = '<div class="text-center py-10 text-sm text-text-secondary">No user activity recorded yet.</div>';
-            renderUaPagination(data);
-            return;
-        }
-        box.innerHTML = users.map(u => {
-            const nowPlaying = u.online && u.now_playing
-                ? `<p class="mt-2 text-xs font-extrabold text-emerald-400"><i class="fa-solid fa-play mr-1"></i>${uaEsc(u.now_playing)}</p>` : '';
-            const geo = [u.country, u.city].filter(Boolean).join(', ');
-            const when = u.last_active
-                ? '<br><span>' + uaEsc(new Date(u.last_active.endsWith('Z') ? u.last_active : u.last_active + 'Z').toLocaleString()) + '</span>' : '';
-            return `<div class="flex flex-col md:flex-row md:items-center gap-3 p-4 rounded-[1.5rem] bg-white/[0.03] border border-white/5">
-                <div class="flex items-center gap-3 min-w-0 flex-1">
-                    <span class="w-2.5 h-2.5 rounded-full ${u.online ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-text-secondary'} shrink-0"></span>
-                    <div class="min-w-0">
-                        <p class="text-sm font-bold text-text truncate">${uaEsc(u.name)}</p>
-                        <p class="text-[10px] uppercase tracking-widest text-text-secondary">${uaEsc(u.app)}${u.device ? ' · ' + uaEsc(u.device) : ''}</p>
-                    </div>
-                </div>
-                <div class="flex items-center gap-2 flex-wrap">
-                    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full ${u.proxy ? 'bg-red-500/15 text-red-400 border border-red-500/30' : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'}">${u.proxy ? 'VPN' : 'Clean'}</span>
-                    ${u.streams ? `<span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-white/5 text-text-secondary border border-white/10">${u.streams} stream${u.streams === 1 ? '' : 's'}</span>` : ''}
-                    ${geo ? `<span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-white/5 text-text-secondary border border-white/10">${uaEsc(geo)}</span>` : ''}
-                </div>
-                <p class="text-[10px] text-text-secondary md:text-right md:w-52 truncate">${uaEsc(u.isp || '')}${when}</p>
-                ${nowPlaying}
-            </div>`;
-        }).join('');
-        renderUaPagination(data);
-    }
-
-    async function loadUserActivity(page, silent) {
+    async function loadSetupStatus() {
+        const wrap = document.getElementById('setup-card');
+        if (!wrap) return;
         try {
-            const res = await fetch(`/api/admin/user-activity?page=${page || 1}&per_page=12`, { cache: 'no-store' });
+            const res = await fetch('/api/admin/launch-readiness');
             if (!res.ok) return;
-            renderUserActivity(await res.json());
-        } catch (e) {
-            console.error(e);
-        }
+            const data = await res.json();
+            const warnings = (data.warnings || []).filter(Boolean);
+            if (data.status !== 'needs_attention' || !warnings.length) { wrap.innerHTML = ''; return; }
+
+            const rows = warnings.map(w => `
+                <a href="/admin/launch-readiness" class="flex items-start gap-3 p-3 rounded-2xl transition hover:bg-primary/5">
+                    <span class="mt-0.5 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-amber-500/20 text-amber-400">
+                        <i class="fa-solid fa-arrow-right text-xs"></i>
+                    </span>
+                    <span>
+                        <span class="font-bold text-sm text-text">${escapeHtmlSetup(w)}</span>
+                        <span class="block text-xs text-text-secondary mt-0.5">Open launch readiness to review</span>
+                    </span>
+                </a>`).join('');
+
+            wrap.innerHTML = `
+                <div class="glass-panel rounded-[2rem] p-6 border border-amber-500/20">
+                    <div class="flex items-center justify-between gap-3 mb-4">
+                        <div>
+                            <h2 class="text-lg font-extrabold text-text flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation text-amber-400"></i> Attention needed</h2>
+                            <p class="text-xs text-text-secondary mt-1">${warnings.length} item(s) require your attention.</p>
+                        </div>
+                        <a href="/admin/launch-readiness" class="text-xs font-bold px-3 py-2 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-background transition-all">Review</a>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${rows}</div>
+                </div>`;
+        } catch (e) { /* ignore */ }
+    }
+
+    function escapeHtmlSetup(v) {
+        return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
     }
 
     document.addEventListener('DOMContentLoaded', () => {
         formatInitialBytes();
         loadStreamStats();
+        loadSetupStatus();
         setInterval(loadStreamStats, 30000);
         setInterval(refreshLiveDurations, 1000);
-        renderUserActivity(uaInitial);
-        setInterval(() => loadUserActivity(1, true), 60000);
     });
 </script>
 {% endblock %}

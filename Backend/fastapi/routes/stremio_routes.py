@@ -6,6 +6,7 @@ from typing import Optional
 from urllib.parse import unquote, quote
 from Backend.config import Telegram
 from Backend import db, __version__
+from Backend.fastapi.themes import get_theme, get_all_themes, DEFAULT_THEME
 import PTN
 from datetime import datetime, timezone, timedelta
 from Backend.fastapi.security.tokens import verify_token
@@ -702,6 +703,9 @@ async def configure_addon(request: Request, token: str):
         "status_kind": status_kind,
         "status_text": status_text,
         "token": token,
+        "theme": get_theme(request.session.get("theme", DEFAULT_THEME)),
+        "themes": get_all_themes(),
+        "current_theme": request.session.get("theme", DEFAULT_THEME),
     })
 
 

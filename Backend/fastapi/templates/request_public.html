@@ -16,15 +16,15 @@
   {% else %}
   <div class="glass-panel rounded-3xl p-6 space-y-4">
     <div class="flex flex-col md:flex-row gap-3">
-      <input id="request-query" class="flex-1 rounded-2xl bg-background border border-border p-3" placeholder="Example: Rocky III 1982 or tt0084602" onkeydown="if(event.key==='Enter') searchRequests()">
-      <button onclick="searchRequests()" class="bg-primary text-background px-5 py-3 rounded-2xl font-bold">Search</button>
+      <input id="request-query" class="flex-1 rounded-2xl bg-card border border-hairline p-3" placeholder="Example: Rocky III 1982 or tt0084602" onkeydown="if(event.key==='Enter') searchRequests()">
+      <button onclick="searchRequests()" class="bg-primary text-background shadow-[0_8px_22px_color-mix(in_srgb,var(--primary)_30%,transparent)] px-5 py-3 rounded-2xl font-bold">Search</button>
     </div>
     <div id="request-results" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
   </div>
   <div class="glass-panel rounded-3xl p-6">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-xl font-black">Most Requested</h2>
-      <button onclick="loadPopular()" class="px-4 py-2 rounded-full bg-white/10 border border-border">Refresh</button>
+      <button onclick="loadPopular()" class="px-4 py-2 rounded-full bg-surface border border-hairline">Refresh</button>
     </div>
     <div id="popular-requests" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
   </div>
@@ -34,13 +34,13 @@
 <script>
 function card(item, idx) {
   const poster = item.poster || 'https://via.placeholder.com/160x240/111827/94a3b8?text=No+Poster';
-  return `<div class="rounded-3xl border border-border bg-card/50 p-4 flex gap-4">
+  return `<div class="rounded-3xl border border-hairline bg-card/50 p-4 flex gap-4">
     <img src="${escapeHtml(poster)}" class="w-20 h-28 object-cover rounded-xl">
     <div class="min-w-0 flex-1">
       <h3 class="font-black truncate">${escapeHtml(item.title || 'Untitled')}</h3>
       <p class="text-sm text-text-secondary">${escapeHtml(item.media_type || '')}${item.year ? ' · ' + escapeHtml(item.year) : ''}</p>
       <p class="text-xs text-text-secondary line-clamp-3 mt-2">${escapeHtml(item.overview || '')}</p>
-      <button class="mt-3 px-4 py-2 rounded-full bg-primary text-background font-bold" onclick="submitRequest(${idx})">Request</button>
+      <button class="mt-3 px-4 py-2 rounded-full bg-primary text-background shadow-[0_8px_22px_color-mix(in_srgb,var(--primary)_30%,transparent)] font-bold" onclick="submitRequest(${idx})">Request</button>
     </div>
   </div>`;
 }
@@ -70,7 +70,7 @@ async function loadPopular() {
   const res = await fetch('/api/request/popular');
   const data = await res.json().catch(() => ({}));
   const items = data.requests || [];
-  box.innerHTML = items.length ? items.map((item) => `<div class="rounded-2xl border border-border p-4"><b>${escapeHtml(item.title)}</b><p class="text-sm text-text-secondary">${escapeHtml(item.media_type)}${item.year ? ' · ' + item.year : ''}</p><p class="text-xs text-text-secondary mt-2">${item.request_count || 0} request(s)</p></div>`).join('') : '<p class="text-text-secondary">No pending requests yet.</p>';
+  box.innerHTML = items.length ? items.map((item) => `<div class="rounded-2xl border border-hairline p-4"><b>${escapeHtml(item.title)}</b><p class="text-sm text-text-secondary">${escapeHtml(item.media_type)}${item.year ? ' · ' + item.year : ''}</p><p class="text-xs text-text-secondary mt-2">${item.request_count || 0} request(s)</p></div>`).join('') : '<p class="text-text-secondary">No pending requests yet.</p>';
 }
 document.addEventListener('DOMContentLoaded', loadPopular);
 </script>

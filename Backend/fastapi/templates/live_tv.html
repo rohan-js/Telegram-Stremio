@@ -3,6 +3,17 @@
 {% block title %}Live TV - TG Stremio{% endblock %}
 
 {% block content %}
+<style>
+.pill { display:inline-flex; align-items:center; gap:.35rem; padding:.3rem .7rem; border-radius:9999px; font-size:.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+.pill-ok { background: color-mix(in srgb, #22c55e 14%, transparent); color:#22c55e; }
+.pill-warn { background: color-mix(in srgb, #f59e0b 14%, transparent); color:#f59e0b; }
+.pill-danger { background: color-mix(in srgb, #ef4444 14%, transparent); color:#ef4444; }
+.pill-info { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); }
+.c-green { color: color-mix(in srgb, #10b981 78%, var(--text)); }
+.c-amber { color: color-mix(in srgb, #f59e0b 82%, var(--text)); }
+.c-sky { color: color-mix(in srgb, #0ea5e9 80%, var(--text)); }
+.c-red { color: color-mix(in srgb, #ef4444 80%, var(--text)); }
+</style>
 <div class="space-y-6">
     <section class="glass-panel rounded-[2.5rem] p-6 sm:p-8">
         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
@@ -44,11 +55,11 @@
         </div>
         <div class="glass-panel rounded-[2rem] p-5">
             <p class="text-[10px] uppercase tracking-[0.18em] text-text-secondary font-bold">Direct</p>
-            <p id="direct-count" class="mt-2 text-3xl font-extrabold text-emerald-300">0</p>
+            <p id="direct-count" class="mt-2 text-3xl font-extrabold c-green">0</p>
         </div>
         <div class="glass-panel rounded-[2rem] p-5">
             <p class="text-[10px] uppercase tracking-[0.18em] text-text-secondary font-bold">Header-Aware</p>
-            <p id="header-count" class="mt-2 text-3xl font-extrabold text-amber-300">0</p>
+            <p id="header-count" class="mt-2 text-3xl font-extrabold c-amber">0</p>
         </div>
         <div class="glass-panel rounded-[2rem] p-5">
             <p class="text-[10px] uppercase tracking-[0.18em] text-text-secondary font-bold">Last Sync</p>
@@ -79,7 +90,7 @@
                     <p class="font-bold text-text">Global category catalogs</p>
                     <p>All playable public channels are indexed. Hidden, blocklisted, closed, NSFW, adult-category, replaced, and unplayable channels are excluded.</p>
                 </div>
-                <div class="rounded-2xl border border-white/5 bg-white/[0.03] p-4 text-xs text-text-secondary space-y-2">
+                <div class="rounded-2xl border border-hairline bg-surface-2 p-4 text-xs text-text-secondary space-y-2">
                     <p><span class="font-bold text-text">Countries:</span> Global</p>
                     <p><span class="font-bold text-text">Catalogs:</span> All + categories</p>
                     <p><span class="font-bold text-text">Refresh:</span> Every 6 hours</p>
@@ -94,32 +105,32 @@
                     <h2 class="font-bold text-text">Sync Health</h2>
                     <p class="text-xs text-text-secondary mt-1">The previous good snapshot stays active if a refresh fails.</p>
                 </div>
-                <span id="sync-badge" class="text-[10px] font-bold uppercase tracking-[0.18em] bg-white/10 text-text-secondary px-3 py-1 rounded-full">Unknown</span>
+                <span id="sync-badge" class="pill pill-info">Unknown</span>
             </div>
             <div class="mt-6 grid sm:grid-cols-2 gap-4 text-sm">
-                <div class="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                <div class="rounded-2xl border border-hairline bg-surface-2 p-4">
                     <p class="text-[10px] uppercase tracking-widest text-text-secondary font-bold">Source Updated</p>
                     <p id="source-modified" class="mt-2 font-bold text-text break-words">Unknown</p>
                 </div>
-                <div class="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                <div class="rounded-2xl border border-hairline bg-surface-2 p-4">
                     <p class="text-[10px] uppercase tracking-widest text-text-secondary font-bold">Hidden Channels</p>
                     <p id="hidden-count" class="mt-2 font-bold text-text">0</p>
                 </div>
-                <div class="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                <div class="rounded-2xl border border-hairline bg-surface-2 p-4">
                     <p class="text-[10px] uppercase tracking-widest text-text-secondary font-bold">Eligible Channels</p>
                     <p id="source-channel-count" class="mt-2 font-bold text-text">0</p>
                 </div>
-                <div class="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                <div class="rounded-2xl border border-hairline bg-surface-2 p-4">
                     <p class="text-[10px] uppercase tracking-widest text-text-secondary font-bold">Playable Channels</p>
                     <p id="playable-channel-count" class="mt-2 font-bold text-text">0</p>
                 </div>
             </div>
-            <div id="sync-error" class="hidden mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200"></div>
+            <div id="sync-error" class="hidden mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm c-red"></div>
         </div>
     </section>
 
     <section class="glass-panel rounded-[2.5rem] overflow-hidden">
-        <div class="p-6 border-b border-white/5">
+        <div class="p-6 border-b border-hairline">
             <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                 <div>
                     <h2 class="text-lg font-bold text-text">Channels</h2>
@@ -129,17 +140,17 @@
                     <div class="relative">
                         <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary"></i>
                         <input id="channel-search" type="search" placeholder="Search channels"
-                            class="w-full sm:w-64 rounded-2xl border border-white/10 bg-black/10 pl-11 pr-4 py-3 text-sm text-text outline-none focus:border-primary">
+                            class="w-full sm:w-64 rounded-2xl border border-hairline bg-surface pl-11 pr-4 py-3 text-sm text-text outline-none focus:border-primary">
                     </div>
-                    <select id="visibility-filter" class="rounded-2xl border border-white/10 bg-[var(--bg)] px-4 py-3 text-sm text-text outline-none">
+                    <select id="visibility-filter" class="rounded-2xl border border-hairline bg-[var(--bg)] px-4 py-3 text-sm text-text outline-none">
                         <option value="visible">Visible</option>
                         <option value="all">All</option>
                         <option value="hidden">Hidden</option>
                     </select>
-                    <select id="category-filter" class="rounded-2xl border border-white/10 bg-[var(--bg)] px-4 py-3 text-sm text-text outline-none">
+                    <select id="category-filter" class="rounded-2xl border border-hairline bg-[var(--bg)] px-4 py-3 text-sm text-text outline-none">
                         <option value="">All categories</option>
                     </select>
-                    <select id="country-filter" class="rounded-2xl border border-white/10 bg-[var(--bg)] px-4 py-3 text-sm text-text outline-none">
+                    <select id="country-filter" class="rounded-2xl border border-hairline bg-[var(--bg)] px-4 py-3 text-sm text-text outline-none">
                         <option value="">All countries</option>
                     </select>
                 </div>
@@ -148,14 +159,14 @@
 
         <div id="channels-loading" class="p-10 text-center text-sm text-text-secondary">Loading channels...</div>
         <div id="channels-empty" class="hidden p-10 text-center">
-            <i class="fa-solid fa-tower-broadcast text-4xl text-white/10 mb-3"></i>
+            <i class="fa-solid fa-tower-broadcast text-4xl text-[color:var(--hairline-strong)] mb-3"></i>
             <p class="text-sm text-text-secondary">No channels match this view.</p>
         </div>
         <div id="channels-mobile" class="md:hidden p-4 space-y-4"></div>
         <div id="channels-table-wrap" class="hidden md:block overflow-x-auto">
             <table class="w-full text-left">
                 <thead>
-                    <tr class="bg-white/5 text-[10px] uppercase tracking-[0.2em] font-bold text-text-secondary">
+                    <tr class="bg-surface text-[10px] uppercase tracking-[0.2em] font-bold text-text-secondary">
                         <th class="py-5 px-6">Channel</th>
                         <th class="py-5 px-6">Country</th>
                         <th class="py-5 px-6">Categories</th>
@@ -165,13 +176,13 @@
                         <th class="py-5 px-6 text-right">Visibility</th>
                     </tr>
                 </thead>
-                <tbody id="channels-table" class="divide-y divide-white/5"></tbody>
+                <tbody id="channels-table" class="divide-y divide-hairline"></tbody>
             </table>
         </div>
-        <div id="pagination" class="hidden p-5 border-t border-white/5 flex items-center justify-between gap-4">
-            <button id="prev-page" onclick="changePage(-1)" class="px-4 py-2 rounded-xl border border-white/10 text-sm font-bold disabled:opacity-30">Previous</button>
+        <div id="pagination" class="hidden p-5 border-t border-hairline flex items-center justify-between gap-4">
+            <button id="prev-page" onclick="changePage(-1)" class="px-4 py-2 rounded-xl border border-hairline text-sm font-bold disabled:opacity-30">Previous</button>
             <span id="page-label" class="text-xs text-text-secondary">Page 1</span>
-            <button id="next-page" onclick="changePage(1)" class="px-4 py-2 rounded-xl border border-white/10 text-sm font-bold disabled:opacity-30">Next</button>
+            <button id="next-page" onclick="changePage(1)" class="px-4 py-2 rounded-xl border border-hairline text-sm font-bold disabled:opacity-30">Next</button>
         </div>
     </section>
 </div>
@@ -192,9 +203,9 @@ function fmtDate(value) {
 function routingLabel(channel) {
     const streams = Array.isArray(channel?.streams) ? channel.streams : [];
     const headers = streams.filter(item => item?.requires_headers).length;
-    if (!headers) return '<span class="text-emerald-300">Direct</span>';
-    if (headers === streams.length) return '<span class="text-amber-300">Headers + fallback</span>';
-    return '<span class="text-sky-300">Mixed</span>';
+    if (!headers) return '<span class="c-green">Direct</span>';
+    if (headers === streams.length) return '<span class="c-amber">Headers + fallback</span>';
+    return '<span class="c-sky">Mixed</span>';
 }
 
 function labelize(value) {
@@ -214,7 +225,7 @@ function logoMarkup(channel) {
 function visibilityButton(channel) {
     const hidden = Boolean(channel?.hidden);
     return `<button onclick="toggleChannel('${escapeHtml(channel._id)}', ${hidden ? 'false' : 'true'})"
-        class="px-3 py-2 rounded-xl text-xs font-bold ${hidden ? 'bg-primary/10 text-primary' : 'bg-red-500/10 text-red-300'}">
+        class="px-3 py-2 rounded-xl text-xs font-bold ${hidden ? 'bg-primary/10 text-primary' : 'bg-red-500/10 c-red'}">
         ${hidden ? 'Show' : 'Hide'}
     </button>`;
 }
@@ -230,7 +241,7 @@ function mobileCard(channel) {
                 </div>
                 ${visibilityButton(channel)}
             </div>
-            <div class="mt-4 pt-4 border-t border-white/5 grid grid-cols-2 gap-3 text-xs">
+            <div class="mt-4 pt-4 border-t border-hairline grid grid-cols-2 gap-3 text-xs">
                 <div><p class="text-text-secondary">Country</p><p class="mt-1 font-bold text-text">${escapeHtml(channel?.country_name || channel?.country || '-')}</p></div>
                 <div><p class="text-text-secondary">Languages</p><p class="mt-1 font-bold text-text">${escapeHtml((channel?.languages || []).join(', ') || '-')}</p></div>
                 <div><p class="text-text-secondary">Streams</p><p class="mt-1 font-bold text-text">${Number(channel?.stream_count || 0)}</p></div>
@@ -241,7 +252,7 @@ function mobileCard(channel) {
 
 function tableRow(channel) {
     return `
-        <tr class="hover:bg-white/[0.02] transition-colors">
+        <tr class="hover:bg-[color:var(--surface)] transition-colors">
             <td class="py-5 px-6 min-w-[260px]">
                 <div class="flex items-center gap-3">
                     ${logoMarkup(channel)}
@@ -283,10 +294,10 @@ async function loadStatus() {
 
         const badge = document.getElementById('sync-badge');
         badge.textContent = running ? 'Syncing' : String(data?.status || 'Unknown');
-        badge.className = `text-[10px] font-bold uppercase tracking-[0.18em] px-3 py-1 rounded-full ${
-            data?.status === 'error' ? 'bg-red-500/15 text-red-300' :
-            running ? 'bg-amber-500/15 text-amber-300' :
-            'bg-emerald-500/15 text-emerald-300'
+        badge.className = `${
+            data?.status === 'error' ? 'pill pill-danger' :
+            running ? 'pill pill-warn' :
+            'pill pill-ok'
         }`;
 
         const error = document.getElementById('sync-error');

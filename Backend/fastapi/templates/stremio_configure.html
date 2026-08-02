@@ -1,415 +1,336 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="{{ 'dark' if theme.is_dark else 'light' }}">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <title>Configure Telegram Stremio</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #07131f;
-      --panel: rgba(20, 36, 53, 0.86);
-      --panel-strong: #17283a;
-      --border: #32465d;
-      --text: #f4f7fb;
-      --muted: #9fb0c4;
-      --primary: #19bfd5;
-      --primary-dark: #083c48;
-      --success: #4ade80;
-      --danger: #fb7185;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      padding: 24px;
-      background: var(--bg);
-      color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    main {
-      width: min(100%, 520px);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel);
-      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
-      overflow: hidden;
-      backdrop-filter: blur(18px);
-    }
-    header {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      padding: 24px;
-      border-bottom: 1px solid var(--border);
-    }
-    .mark {
-      width: 44px;
-      height: 44px;
-      display: grid;
-      place-items: center;
-      border-radius: 50%;
-      background: var(--primary);
-      color: #03242b;
-      font-size: 20px;
-      font-weight: 900;
-      flex: none;
-    }
-    h1 { margin: 0; font-size: 21px; line-height: 1.25; letter-spacing: 0; }
-    header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
-    .content { padding: 24px; }
-    dl { margin: 0 0 20px; }
-    .row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      min-height: 48px;
-      padding: 11px 13px;
-      border: 1px solid var(--border);
-      border-bottom: 0;
-      background: rgba(7, 19, 31, 0.5);
-    }
-    .row:first-child { border-radius: 8px 8px 0 0; }
-    .row:last-child { border-bottom: 1px solid var(--border); border-radius: 0 0 8px 8px; }
-    dt { color: var(--muted); font-size: 13px; }
-    dd { margin: 0; max-width: 65%; text-align: right; font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
-    .status { color: var(--success); }
-    .status.danger { color: var(--danger); }
-    .install {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 100%;
-      min-height: 48px;
-      border-radius: 8px;
-      background: var(--primary);
-      color: #03242b;
-      text-decoration: none;
-      font-weight: 900;
-      transition: filter 160ms ease;
-    }
-    .install:hover { filter: brightness(1.08); }
-    .manual { margin-top: 22px; }
-    .manual h2 { margin: 0 0 9px; font-size: 15px; letter-spacing: 0; }
-    .manual p { margin: 0 0 10px; color: var(--muted); font-size: 13px; line-height: 1.55; }
-    .manifest {
-      width: 100%;
-      min-height: 68px;
-      resize: none;
-      padding: 12px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: #06101a;
-      color: var(--muted);
-      font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
-      overflow-wrap: anywhere;
-    }
-    .copy {
-      width: 100%;
-      min-height: 42px;
-      margin-top: 8px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel-strong);
-      color: var(--text);
-      font-weight: 800;
-      cursor: pointer;
-    }
-    .copy:hover { border-color: var(--primary); }
-    .copy:focus-visible, .install:focus-visible, .manifest:focus-visible {
-      outline: 3px solid var(--primary-dark);
-      outline-offset: 2px;
-    }
-    .settings { margin-top: 22px; }
-    .settings h2 { margin: 0 0 9px; font-size: 15px; letter-spacing: 0; }
-    .settings p.hint { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.55; }
-    .field { margin-bottom: 14px; }
-    .field label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 800; color: var(--text); }
-    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      padding: 8px 12px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      background: rgba(7, 19, 31, 0.5);
-      font-size: 13px;
-      cursor: pointer;
-      user-select: none;
-    }
-    .chip input { accent-color: var(--primary); }
-    .chip.on { border-color: var(--primary); color: var(--primary); }
-    select {
-      width: 100%;
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel-strong);
-      color: var(--text);
-      font-size: 14px;
-    }
-    .catalog-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 9px 11px;
-      border: 1px solid var(--border);
-      border-bottom: 0;
-      background: rgba(7, 19, 31, 0.5);
-      font-size: 13px;
-    }
-    .catalog-row:first-of-type { border-radius: 8px 8px 0 0; }
-    .catalog-row:last-of-type { border-bottom: 1px solid var(--border); border-radius: 0 0 8px 8px; }
-    .catalog-row .name { flex: 1; overflow-wrap: anywhere; }
-    .catalog-row .tag { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
-    .catalog-row button {
-      width: 30px;
-      height: 30px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel-strong);
-      color: var(--text);
-      font-size: 15px;
-      font-weight: 800;
-      cursor: pointer;
-    }
-    .catalog-row button:hover:not(:disabled) { border-color: var(--primary); }
-    .catalog-row button:disabled { opacity: 0.35; cursor: not-allowed; }
-    .save {
-      width: 100%;
-      min-height: 46px;
-      margin-top: 16px;
-      border: 0;
-      border-radius: 8px;
-      background: var(--primary);
-      color: #03242b;
-      font-weight: 900;
-      cursor: pointer;
-      transition: filter 160ms ease;
-    }
-    .save:hover { filter: brightness(1.08); }
-    .save:disabled { opacity: 0.6; cursor: wait; }
-    #save-note { margin: 10px 0 0; min-height: 18px; font-size: 13px; text-align: center; }
-    #save-note.ok { color: var(--success); }
-    #save-note.err { color: var(--danger); }
-    @media (max-width: 520px) {
-      body { padding: 12px; }
-      header, .content { padding: 18px; }
-      .row { align-items: flex-start; }
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Install Telegram Stremio Addon</title>
+
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='{{ theme.colors.primary | replace('#','%23') }}'/%3E%3Cpath d='M12.5 9.5l10 6.5-10 6.5z' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    color-scheme: {{ 'dark' if theme.is_dark else 'light' }};
+    --primary: {{ theme.colors.primary }};
+    --secondary: {{ theme.colors.secondary }};
+    --accent: {{ theme.colors.accent }};
+    --bg: {{ theme.colors.background }};
+    --card: {{ theme.colors.card }};
+    --border: {{ theme.colors.border }};
+    --text: {{ theme.colors.text }};
+    --text-sec: {{ theme.colors.text_secondary }};
+    --surface: color-mix(in srgb, var(--text) 5%, transparent);
+    --surface-2: color-mix(in srgb, var(--text) 9%, transparent);
+    --hairline: color-mix(in srgb, var(--text) 12%, transparent);
+    --hairline-strong: color-mix(in srgb, var(--text) 20%, transparent);
+    --ring: color-mix(in srgb, var(--primary) 35%, transparent);
+    --shadow-color: {{ '0,0,0' if theme.is_dark else '15,23,42' }};
+    {% set status_color = '#22c55e' if status_kind == 'success' else '#ef4444' %}
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background-color: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: clamp(16px, 4vw, 40px);
+}
+
+.wrap { width: 100%; max-width: 960px; margin: auto; }
+.layout { display: grid; gap: 16px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+        radial-gradient(circle at 15% 10%, color-mix(in srgb, var(--primary) 14%, transparent), transparent 40%),
+        radial-gradient(circle at 85% 85%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 40%);
+}
+
+.card {
+    background: color-mix(in srgb, var(--card) 90%, var(--bg));
+    border: 1px solid var(--hairline);
+    border-radius: 1.75rem;
+    box-shadow: 0 24px 60px rgba(var(--shadow-color), {{ '0.45' if theme.is_dark else '0.16' }});
+    padding: clamp(24px, 4vw, 36px);
+    width: 100%;
+    text-align: center;
+}
+
+.brand { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 20px; }
+.brand-logo {
+    width: 44px; height: 44px; border-radius: 9999px;
+    background: var(--primary); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem; box-shadow: 0 0 18px color-mix(in srgb, var(--primary) 55%, transparent);
+}
+.brand-name {
+    font-size: 1.6rem; font-weight: 800; letter-spacing: 0.02em;
+    background: linear-gradient(90deg, var(--primary), var(--accent));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+h1 { font-size: 1.15rem; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.sub-title { color: var(--text-sec); font-size: 0.85rem; margin-bottom: 26px; line-height: 1.5; }
+
+.info-row {
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--surface); border: 1px solid var(--hairline);
+    border-radius: 0.85rem; padding: 12px 16px; margin-bottom: 10px; font-size: 0.88rem;
+}
+.info-label { color: var(--text-sec); font-weight: 500; }
+.info-val { font-weight: 700; color: var(--text); }
+.status-badge {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 3px 12px; border-radius: 9999px; font-size: 0.78rem; font-weight: 700;
+    background: {{ status_color }}22; color: {{ status_color }};
+}
+
+.btn-install {
+    display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+    width: 100%; margin: 26px 0 12px;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: #fff; font-weight: 700; font-size: 0.98rem;
+    padding: 14px 24px; border-radius: 1rem; border: none;
+    cursor: pointer; text-decoration: none;
+    box-shadow: 0 10px 26px color-mix(in srgb, var(--primary) 32%, transparent);
+    transition: filter .2s ease, transform .12s ease;
+}
+.btn-install:hover { filter: brightness(1.08); }
+.btn-install:active { transform: scale(.98); }
+.btn-install:disabled { opacity: .6; cursor: wait; }
+
+.btn-web {
+    display: block; color: var(--primary); font-size: 0.82rem;
+    font-weight: 600; text-decoration: none; margin-bottom: 22px;
+}
+.btn-web:hover { text-decoration: underline; }
+
+.steps {
+    background: var(--surface); border: 1px solid var(--hairline);
+    border-radius: 0.85rem; padding: 14px 18px; margin: 16px 0;
+    text-align: left; font-size: 0.85rem; color: var(--text-sec);
+}
+.steps b { color: var(--text); }
+.steps ol { margin-top: 8px; margin-left: 18px; line-height: 1.9; }
+
+.url-box {
+    background: color-mix(in srgb, var(--bg) 70%, var(--card));
+    border: 1px solid var(--hairline); border-radius: 0.7rem;
+    padding: 10px 14px; font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.72rem; color: var(--text-sec);
+    word-break: break-all; text-align: left; margin-top: 16px;
+}
+
+.btn-copy {
+    margin-top: 10px; width: 100%; padding: 10px;
+    background: var(--surface); border: 1px solid var(--hairline); color: var(--text-sec);
+    border-radius: 0.7rem; cursor: pointer; font-size: 0.85rem; font-weight: 600;
+    transition: background .2s ease, color .2s ease, border-color .2s ease;
+}
+.btn-copy:hover { background: var(--surface-2); color: var(--text); border-color: var(--hairline-strong); }
+</style>
 </head>
 <body>
-  <main>
-    <header>
-      <div class="mark" aria-hidden="true">▶</div>
-      <div>
-        <h1>Telegram Stremio</h1>
-        <p>Install or refresh your private addon.</p>
-      </div>
-    </header>
-    <div class="content">
-      <dl>
-        <div class="row"><dt>User</dt><dd>{{ user_name }}</dd></div>
-        <div class="row"><dt>Status</dt><dd class="status{% if status_kind == 'danger' %} danger{% endif %}">{{ status_text }}</dd></div>
-        <div class="row"><dt>Expires</dt><dd>{{ expiry_str }}</dd></div>
-      </dl>
-
-      <a class="install" href="{{ install_page_url }}" target="_blank" rel="noopener">Install / Update in Stremio</a>
-
-      <section class="manual">
-        <h2>Manual manifest URL</h2>
-        <p>Use this URL in Stremio's addon search when automatic installation is unavailable.</p>
-        <textarea id="manifest-url" class="manifest" readonly aria-label="Manifest URL">{{ manifest_url }}</textarea>
-        <button id="copy-button" type="button" class="copy">Copy manifest URL</button>
-      </section>
-
-      <section class="settings">
-        <h2>Addon preferences</h2>
-        <p class="hint">These apply to your addon only. Save, then refresh the addon in Stremio.</p>
-
-        <div class="field">
-          <label>Show only these qualities</label>
-          <div class="chips" id="quality-chips"></div>
-        </div>
-
-        <div class="field">
-          <label for="quality-sort">Sort streams</label>
-          <select id="quality-sort">
-            <option value="desc">Best quality first</option>
-            <option value="asc">Best quality last</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <label>Catalog order (highest = top)</label>
-          <div id="catalog-list"></div>
-        </div>
-
-        <div class="field">
-          <label>Hidden catalogs</label>
-          <div class="chips" id="hidden-chips"></div>
-        </div>
-
-        <button id="save-config" type="button" class="save">Save preferences</button>
-        <p id="save-note" aria-live="polite"></p>
-      </section>
+<div class="wrap">
+<div class="layout">
+<div class="card">
+    <div class="brand">
+        <div class="brand-logo"><i class="fa-solid fa-play"></i></div>
+        <span class="brand-name">TG Stremio</span>
     </div>
-  </main>
-  <script>
-    const TOKEN = '{{ token }}';
-    const configApi = `/stremio/${TOKEN}/addon-config`;
-    const QUALITY_OPTIONS = ['4K', '1080p', '720p', '480p', '360p', 'other'];
 
-    let catalogs = [];
-    let config = {};
+    <h1>Install / Update Addon</h1>
+    <p class="sub-title">Add or refresh your personal Telegram library inside Stremio.</p>
 
-    function makeChip(value, label, selected) {
-      const el = document.createElement('label');
-      el.className = 'chip' + (selected ? ' on' : '');
-      const box = document.createElement('input');
-      box.type = 'checkbox';
-      box.checked = !!selected;
-      box.value = value;
-      el.appendChild(box);
-      el.appendChild(document.createTextNode(label));
-      return el;
-    }
+    <div class="info-row">
+        <span class="info-label">User</span>
+        <span class="info-val">{{ user_name }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Status</span>
+        <span class="status-badge">{{ status_text }}</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label">Expires</span>
+        <span class="info-val">{{ expiry_str }}</span>
+    </div>
 
-    function renderQuality() {
-      const wrap = document.getElementById('quality-chips');
-      wrap.innerHTML = '';
-      const selected = new Set(config.quality_filter || []);
-      QUALITY_OPTIONS.forEach((opt) => {
-        wrap.appendChild(makeChip(opt, opt, selected.has(opt)));
-      });
-      wrap.querySelectorAll('.chip input').forEach((box) => {
-        box.addEventListener('change', () => {
-          box.closest('.chip').classList.toggle('on', box.checked);
-        });
-      });
-    }
+    <a href="{{ install_page_url }}" class="btn-install" target="_blank" rel="noopener">
+        <i class="fa-solid fa-bolt"></i> Install / Update in Stremio
+    </a>
 
-    function renderSort() {
-      document.getElementById('quality-sort').value = config.quality_sort === 'asc' ? 'asc' : 'desc';
-    }
+    <div class="steps">
+        <b>Prefer to do it manually?</b>
+        <ol>
+            <li>Open Stremio and go to the <b>Add-ons</b> tab</li>
+            <li>Click the <b>Search / URL</b> field</li>
+            <li>Paste the URL below and press Enter</li>
+        </ol>
+    </div>
 
-    function renderCatalogOrder() {
-      const wrap = document.getElementById('catalog-list');
-      wrap.innerHTML = '';
-      const order = config.catalog_order && config.catalog_order.length ? config.catalog_order : catalogs.map((c) => c.id);
-      order.forEach((cid, idx) => {
-        const meta = catalogs.find((c) => c.id === cid);
-        if (!meta) return;
-        const row = document.createElement('div');
-        row.className = 'catalog-row';
-        const name = document.createElement('span');
-        name.className = 'name';
-        name.textContent = meta.name;
-        const tag = document.createElement('span');
-        tag.className = 'tag';
-        tag.textContent = meta.type;
-        const up = document.createElement('button');
-        up.type = 'button';
-        up.textContent = '↑';
-        up.disabled = idx === 0;
-        up.addEventListener('click', () => {
-          const arr = [...order];
-          [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
-          config.catalog_order = arr;
-          renderCatalogOrder();
-        });
-        const down = document.createElement('button');
-        down.type = 'button';
-        down.textContent = '↓';
-        down.disabled = idx === order.length - 1;
-        down.addEventListener('click', () => {
-          const arr = [...order];
-          [arr[idx + 1], arr[idx]] = [arr[idx], arr[idx + 1]];
-          config.catalog_order = arr;
-          renderCatalogOrder();
-        });
-        row.appendChild(name);
-        row.appendChild(tag);
-        row.appendChild(up);
-        row.appendChild(down);
-        wrap.appendChild(row);
-      });
-    }
+    <div class="url-box" id="murl">{{ manifest_url }}</div>
+    <button onclick="copyUrl()" class="btn-copy"><i class="fa-solid fa-copy"></i> Copy URL</button>
+</div>
 
-    function renderHidden() {
-      const wrap = document.getElementById('hidden-chips');
-      wrap.innerHTML = '';
-      const hidden = new Set(config.hidden_catalogs || []);
-      catalogs.forEach((c) => {
-        wrap.appendChild(makeChip(c.id, c.name, hidden.has(c.id)));
-      });
-      wrap.querySelectorAll('.chip input').forEach((box) => {
-        box.addEventListener('change', () => {
-          box.closest('.chip').classList.toggle('on', box.checked);
-        });
-      });
-    }
+<div class="card" style="text-align:left">
+    <h1 style="text-align:center"><i class="fa-solid fa-sliders"></i> Personalize</h1>
+    <p class="sub-title" style="text-align:center">Tune quality and catalogs for your install. Re-install after saving.</p>
 
-    function renderAll() {
-      renderQuality();
-      renderSort();
-      renderCatalogOrder();
-      renderHidden();
-    }
+    <div class="cfg-block">
+        <div class="cfg-title">Stream quality order</div>
+        <div class="seg" id="cfg-sort">
+            <button type="button" data-val="desc" class="seg-btn active" onclick="setSort('desc')">Highest first</button>
+            <button type="button" data-val="asc" class="seg-btn" onclick="setSort('asc')">Lowest first</button>
+        </div>
+    </div>
 
-    async function loadConfig() {
-      const res = await fetch(configApi);
-      const data = await res.json();
-      config = data.config || {};
-      catalogs = data.catalogs || [];
-      renderAll();
-    }
+    <div class="cfg-block">
+        <div class="cfg-title">Show only these qualities</div>
+        <div class="chips" id="cfg-quality"></div>
+        <p class="cfg-hint">Leave all off to show every quality.</p>
+    </div>
 
-    async function saveConfig() {
-      const btn = document.getElementById('save-config');
-      const note = document.getElementById('save-note');
-      btn.disabled = true;
-      note.textContent = 'Saving...';
-      note.className = '';
-      try {
-        const qualityFilter = [...document.querySelectorAll('#quality-chips input:checked')].map((i) => i.value);
-        const hiddenCatalogs = [...document.querySelectorAll('#hidden-chips input:checked')].map((i) => i.value);
-        const payload = {
-          quality_filter: qualityFilter,
-          quality_sort: document.getElementById('quality-sort').value,
-          hidden_catalogs: hiddenCatalogs,
-          catalog_order: config.catalog_order || [],
-        };
-        const res = await fetch(configApi, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
+    <div class="cfg-block">
+        <div class="cfg-title">Catalogs</div>
+        <div id="cfg-catalogs" class="cfg-catalogs"></div>
+        <p class="cfg-hint">Toggle to hide a catalog; use arrows to reorder.</p>
+    </div>
+
+    <button onclick="saveConfig()" class="btn-install" id="cfg-save" style="margin-top:8px">
+        <i class="fa-solid fa-floppy-disk"></i> Save preferences
+    </button>
+    <p id="cfg-state" class="cfg-hint" style="text-align:center"></p>
+</div>
+</div>
+</div>
+
+<style>
+.cfg-block { margin: 14px 0; }
+.cfg-title { font-size: .8rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--text-sec); margin-bottom: 8px; }
+.cfg-hint { font-size: .72rem; color: var(--text-sec); margin-top: 6px; }
+.seg { display: flex; gap: 6px; background: var(--surface); border: 1px solid var(--hairline); border-radius: .8rem; padding: 4px; }
+.seg-btn { flex: 1; padding: 9px; border-radius: .6rem; border: none; background: transparent; color: var(--text-sec); font-weight: 700; font-size: .82rem; cursor: pointer; }
+.seg-btn.active { background: var(--primary); color: #fff; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.qchip { padding: 7px 14px; border-radius: 9999px; border: 1px solid var(--hairline); background: var(--surface); color: var(--text); font-weight: 800; font-size: .8rem; cursor: pointer; }
+.qchip.on { background: linear-gradient(135deg, var(--primary), var(--accent)); color: #fff; border-color: transparent; }
+.cfg-catalogs { display: flex; flex-direction: column; gap: 6px; }
+.cfg-cat { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: .7rem; background: var(--surface); }
+.cfg-cat.hidden-cat { opacity: .5; }
+.cfg-cat .nm { flex: 1; min-width: 0; font-weight: 700; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cfg-eye, .cfg-arr { width: 30px; height: 26px; border-radius: .5rem; border: 1px solid var(--hairline); background: var(--bg); color: var(--text); cursor: pointer; font-size: .72rem; }
+.cfg-arr:disabled { opacity: .35; cursor: not-allowed; }
+</style>
+
+<script>
+let cfg = { quality_sort: 'desc', quality_filter: [], hidden_catalogs: [], catalog_order: [] };
+let cfgCatalogs = [];
+let qualityOptions = ['4K', '1080p', '720p', '480p', '360p', 'other'];
+
+function setSort(v) {
+    cfg.quality_sort = v;
+    document.querySelectorAll('#cfg-sort .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.val === v));
+}
+
+function renderQuality() {
+    document.getElementById('cfg-quality').innerHTML = qualityOptions.map(q =>
+        `<button type="button" class="qchip ${cfg.quality_filter.includes(q) ? 'on' : ''}" onclick="toggleQuality('${q}')">${q}</button>`
+    ).join('');
+}
+
+function toggleQuality(q) {
+    const i = cfg.quality_filter.indexOf(q);
+    if (i >= 0) cfg.quality_filter.splice(i, 1); else cfg.quality_filter.push(q);
+    renderQuality();
+}
+
+function renderCatalogs() {
+    document.getElementById('cfg-catalogs').innerHTML = cfgCatalogs.map((c, i) => {
+        const hidden = cfg.hidden_catalogs.includes(c.id);
+        const tag = c.type === 'series' ? 'TV' : (c.type === 'tv' ? 'Live' : 'Movie');
+        return `<div class="cfg-cat ${hidden ? 'hidden-cat' : ''}">
+            <button class="cfg-eye" title="Show/hide" onclick="toggleHide(${i})"><i class="fa-solid fa-eye${hidden ? '-slash' : ''}"></i></button>
+            <span class="nm">${escapeCfg(c.name)} <small style="opacity:.6">· ${tag}</small></span>
+            <button class="cfg-arr" ${i === 0 ? 'disabled' : ''} onclick="moveCat(${i}, -1)">▲</button>
+            <button class="cfg-arr" ${i === cfgCatalogs.length - 1 ? 'disabled' : ''} onclick="moveCat(${i}, 1)">▼</button>
+        </div>`;
+    }).join('') || '<p class="cfg-hint">No catalogs available.</p>';
+}
+
+function toggleHide(i) {
+    const at = cfg.hidden_catalogs.indexOf(cfgCatalogs[i].id);
+    if (at >= 0) cfg.hidden_catalogs.splice(at, 1); else cfg.hidden_catalogs.push(cfgCatalogs[i].id);
+    renderCatalogs();
+}
+
+function moveCat(i, dir) {
+    const j = i + dir;
+    if (j < 0 || j >= cfgCatalogs.length) return;
+    [cfgCatalogs[i], cfgCatalogs[j]] = [cfgCatalogs[j], cfgCatalogs[i]];
+    renderCatalogs();
+}
+
+function escapeCfg(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function loadConfig() {
+    try {
+        const res = await fetch('addon-config');
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Save failed');
-        config = data.config || {};
-        note.textContent = 'Saved. Refresh the addon in Stremio to apply.';
-        note.className = 'ok';
-      } catch (error) {
-        note.textContent = error.message;
-        note.className = 'err';
-      } finally {
-        btn.disabled = false;
-      }
-    }
+        cfg = Object.assign(cfg, data.config || {});
+        cfgCatalogs = data.catalogs || [];
+        if (Array.isArray(data.quality_options) && data.quality_options.length) qualityOptions = data.quality_options;
+        if (!Array.isArray(cfg.quality_filter)) cfg.quality_filter = [];
+        if (!Array.isArray(cfg.hidden_catalogs)) cfg.hidden_catalogs = [];
+        setSort(cfg.quality_sort || 'desc');
+        renderQuality();
+        renderCatalogs();
+    } catch (e) {}
+}
 
-    document.getElementById('save-config').addEventListener('click', saveConfig);
-    loadConfig().catch(() => {
-      const note = document.getElementById('save-note');
-      note.textContent = 'Could not load preferences.';
-      note.className = 'err';
+async function saveConfig() {
+    const btn = document.getElementById('cfg-save');
+    const state = document.getElementById('cfg-state');
+    btn.disabled = true;
+    cfg.catalog_order = cfgCatalogs.map(c => c.id);
+    try {
+        const res = await fetch('addon-config', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
+        });
+        if (!res.ok) throw new Error();
+        state.textContent = 'Saved! Re-install the addon to apply changes.';
+    } catch (e) {
+        state.textContent = 'Could not save. Please try again.';
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function copyUrl() {
+    const url = document.getElementById('murl').textContent.trim();
+    navigator.clipboard.writeText(url).then(() => {
+        const b = document.querySelector('.btn-copy');
+        b.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+        setTimeout(() => b.innerHTML = '<i class="fa-solid fa-copy"></i> Copy URL', 2000);
     });
-  </script>
+}
+
+loadConfig();
+</script>
 </body>
 </html>
