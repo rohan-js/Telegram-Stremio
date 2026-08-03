@@ -165,7 +165,7 @@
                                 <span><i class="fas fa-network-wired"></i> <span>${uaEsc(u.isp || '—')}</span></span>
                                 <span><i class="fas fa-mobile-screen-button"></i> <span>${uaEsc(u.app)}${u.device ? ' · ' + uaEsc(u.device) : ''}</span></span>
                                 <span><i class="fas fa-globe"></i> <span>${uaEsc(u.ip || '—')}</span></span>
-                                <span><i class="fas fa-film"></i> <span>${u.streams} streams</span></span>
+                                <span title="Lifetime streams: ${u.streams}"><i class="fas fa-film"></i> <span>${u.streams24h} streams (24h)</span></span>
                             </div>
                         </div>`;
                     }).join('');

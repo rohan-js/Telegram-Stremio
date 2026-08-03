@@ -3274,11 +3274,12 @@ class Database:
                 "smart_routing": meta.get("smart_routing"),
                 "route_attempts": stats.get("route_attempts", [])[-10:],
                 "logged_at":   datetime.utcnow(),
+                "token":       meta.get("token"),
             }
             await self.dbs["tracking"]["stream_analytics"].insert_one(record)
             token = meta.get("token")
             if token:
-                upd = {"last_active": datetime.utcnow()}
+                upd = {"last_active": datetime.utcnow(), "last_play_active": datetime.utcnow()}
                 if record.get("title"):
                     upd["last_title"] = record["title"]
                 if record.get("user_name"):

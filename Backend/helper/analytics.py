@@ -1,5 +1,8 @@
+import ipaddress
+import socket
 import time
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 import httpx
 
@@ -11,7 +14,43 @@ _IP_CACHE = {}
 _IP_TTL = 6 * 3600
 _LAST_FULL = {}
 _FULL_INTERVAL = 60
-ONLINE_WINDOW = 120
+#----- A user is "online" only while actually streaming video
+#----- (or within ONLINE_PLAY_WINDOW seconds of starting/stopping).
+ONLINE_PLAY_WINDOW = 180
+
+#----- Server-own traffic (watchdog checks, organic-admin, host-side tests)
+#----- must never pollute real user activity.
+_SELF_IPS = set()
+_SELF_IPS_FETCH_AT = 0.0
+_SELF_IPS_TTL = 3600
+
+
+def _own_public_ips() -> set:
+    global _SELF_IPS, _SELF_IPS_FETCH_AT
+    now = time.time()
+    if _SELF_IPS and now - _SELF_IPS_FETCH_AT < _SELF_IPS_TTL:
+        return _SELF_IPS
+    try:
+        from Backend.config import Telegram as _TG
+        host = urlparse(getattr(_TG, "BASE_URL", "") or "").hostname
+        if host:
+            _SELF_IPS = set(socket.gethostbyname_ex(host)[2])
+    except Exception as e:
+        LOGGER.warning(f"[ANALYTICS] self-IP resolution failed (fail-open): {e}")
+    _SELF_IPS_FETCH_AT = now
+    return _SELF_IPS
+
+
+def _is_self_ip(ip: str) -> bool:
+    if not ip:
+        return False
+    try:
+        addr = ipaddress.ip_address(ip)
+        if addr.is_private or addr.is_loopback or addr.is_link_local:
+            return True
+    except ValueError:
+        return False
+    return ip in _own_public_ips()
 
 #----- App/device parsed from the ADDON-PROTOCOL User-Agent (manifest/stream requests),
 #----- not the video-fetch UA which players spoof.
@@ -144,13 +183,20 @@ async def lookup_ip(ip: str) -> dict:
 async def _record(token: str, name: str, ip: str, user_agent: str, is_client: bool) -> None:
     if not token:
         return
+    #----- Exclude server-own traffic (watchdog / organic-admin / host tests).
+    if _is_self_ip(ip):
+        return
     coll = db.dbs["tracking"]["user_activity"]
-    setf = {"last_active": datetime.utcnow(), "ip": ip or ""}
+    now = datetime.utcnow()
+    setf = {"last_active": now, "ip": ip or ""}
     #----- Only the addon-protocol request carries a trustworthy app/device UA.
     if is_client:
         setf["app"] = parse_app(user_agent)
         setf["device"] = parse_device(user_agent)
         setf["user_agent"] = user_agent or ""
+    else:
+        #----- Actual video byte-stream: refresh the playback-presence window.
+        setf["last_play_active"] = now
     try:
         await coll.update_one(
             {"_id": token},
@@ -192,8 +238,9 @@ async def record_client(token: str, name: str, ip: str, user_agent: str = "") ->
 
 async def get_activity_overview(page: int = 1, per_page: int = 12) -> dict:
     now = datetime.utcnow()
-    cutoff = now - timedelta(seconds=ONLINE_WINDOW)
+    cutoff = now - timedelta(seconds=ONLINE_PLAY_WINDOW)
     coll = db.dbs["tracking"]["user_activity"]
+    stream_coll = db.dbs["tracking"]["stream_analytics"]
 
     playing = {}
     for info in ACTIVE_STREAMS.values():
@@ -204,10 +251,23 @@ async def get_activity_overview(page: int = 1, per_page: int = 12) -> dict:
 
     try:
         total = await coll.count_documents({})
-        online_count = await coll.count_documents({"last_active": {"$gte": cutoff}})
+        online_count = await coll.count_documents({"last_play_active": {"$gte": cutoff}})
     except Exception:
         total, online_count = 0, 0
     online_count = max(online_count, len(playing))
+
+    #----- Streams actually played in the last 24h (per display name).
+    streams24h = {}
+    try:
+        ago = now - timedelta(hours=24)
+        pipeline = [
+            {"$match": {"logged_at": {"$gte": ago}}},
+            {"$group": {"_id": "$user_name", "count": {"$sum": 1}}},
+        ]
+        async for group in stream_coll.aggregate(pipeline):
+            streams24h[group["_id"]] = int(group.get("count") or 0)
+    except Exception:
+        streams24h = {}
 
     per_page = max(1, min(int(per_page or 12), 60))
     total_pages = max(1, (total + per_page - 1) // per_page)
@@ -222,11 +282,11 @@ async def get_activity_overview(page: int = 1, per_page: int = 12) -> dict:
     rows = []
     for d in docs:
         token = d.get("_id")
-        last = d.get("last_active")
+        last_play = d.get("last_play_active")
         online = token in playing
-        if not online and last:
+        if not online and last_play:
             try:
-                online = last >= cutoff
+                online = last_play >= cutoff
             except Exception:
                 online = False
         rows.append({
@@ -244,7 +304,8 @@ async def get_activity_overview(page: int = 1, per_page: int = 12) -> dict:
             "device": d.get("device") or "",
             "proxy": bool(d.get("proxy")),
             "streams": int(d.get("streams") or 0),
-            "last_active": last.isoformat() if last else None,
+            "streams24h": int(streams24h.get(d.get("name") or "") or 0),
+            "last_active": (d.get("last_active") or last_play).isoformat() if (d.get("last_active") or last_play) else None,
         })
 
     rows.sort(key=lambda r: 0 if r["online"] else 1)
