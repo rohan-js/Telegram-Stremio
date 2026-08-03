@@ -14,9 +14,10 @@ _IP_CACHE = {}
 _IP_TTL = 6 * 3600
 _LAST_FULL = {}
 _FULL_INTERVAL = 60
-#----- A user is "online" only while actually streaming video
-#----- (or within ONLINE_PLAY_WINDOW seconds of starting/stopping).
-ONLINE_PLAY_WINDOW = 180
+#----- A user is "online" only while video bytes are actively flowing
+#----- (or within ONLINE_PLAY_WINDOW seconds of the last delivered chunk).
+#----- 25s = near real-time without flickering between player chunk requests.
+ONLINE_PLAY_WINDOW = 25
 
 #----- Server-own traffic (watchdog checks, organic-admin, host-side tests)
 #----- must never pollute real user activity.
@@ -238,23 +239,33 @@ async def record_client(token: str, name: str, ip: str, user_agent: str = "") ->
 
 async def get_activity_overview(page: int = 1, per_page: int = 12) -> dict:
     now = datetime.utcnow()
+    now_ts = time.time()
     cutoff = now - timedelta(seconds=ONLINE_PLAY_WINDOW)
     coll = db.dbs["tracking"]["user_activity"]
     stream_coll = db.dbs["tracking"]["stream_analytics"]
 
+    #----- Real-time: a token is "playing" only while its stream entry is
+    #----- actively delivering bytes (entry["last_ts"] refreshes per chunk).
     playing = {}
+    playing_fresh_tokens = set()
+    playing_fresh = 0
     for info in ACTIVE_STREAMS.values():
         meta = info.get("meta", {}) or {}
         tok = meta.get("token")
-        if tok:
-            playing[tok] = meta.get("title") or "Streaming"
+        if not tok:
+            continue
+        playing[tok] = meta.get("title") or "Streaming"
+        last_ts = info.get("last_ts") or info.get("start_ts") or now_ts
+        if now_ts - last_ts <= ONLINE_PLAY_WINDOW:
+            playing_fresh_tokens.add(tok)
+            playing_fresh += 1
 
     try:
         total = await coll.count_documents({})
         online_count = await coll.count_documents({"last_play_active": {"$gte": cutoff}})
     except Exception:
         total, online_count = 0, 0
-    online_count = max(online_count, len(playing))
+    online_count = max(online_count, playing_fresh)
 
     #----- Streams actually played in the last 24h (per display name).
     streams24h = {}
@@ -269,13 +280,17 @@ async def get_activity_overview(page: int = 1, per_page: int = 12) -> dict:
     except Exception:
         streams24h = {}
 
+    #----- Live-only view: the card shows ONLY users who are streaming now.
+    #----- Stale historical rows are never listed (empty state instead).
     per_page = max(1, min(int(per_page or 12), 60))
-    total_pages = max(1, (total + per_page - 1) // per_page)
-    page = max(1, min(int(page or 1), total_pages))
-    offset = (page - 1) * per_page
-
+    online_tokens = list(playing_fresh_tokens)
     try:
-        docs = await coll.find().sort("last_active", -1).skip(offset).limit(per_page).to_list(per_page)
+        query = (
+            {"$or": [{"last_play_active": {"$gte": cutoff}}, {"_id": {"$in": online_tokens}}]}
+            if online_tokens
+            else {"last_play_active": {"$gte": cutoff}}
+        )
+        docs = await coll.find(query).sort("last_active", -1).limit(100).to_list(100)
     except Exception:
         docs = []
 
@@ -283,12 +298,14 @@ async def get_activity_overview(page: int = 1, per_page: int = 12) -> dict:
     for d in docs:
         token = d.get("_id")
         last_play = d.get("last_play_active")
-        online = token in playing
+        online = token in playing_fresh_tokens
         if not online and last_play:
             try:
                 online = last_play >= cutoff
             except Exception:
                 online = False
+        if not online:
+            continue
         rows.append({
             "token": token,
             "name": d.get("name") or "Unknown",
@@ -306,9 +323,13 @@ async def get_activity_overview(page: int = 1, per_page: int = 12) -> dict:
             "streams": int(d.get("streams") or 0),
             "streams24h": int(streams24h.get(d.get("name") or "") or 0),
             "last_active": (d.get("last_active") or last_play).isoformat() if (d.get("last_active") or last_play) else None,
+            "last_play_active": last_play.isoformat() if last_play else None,
         })
 
     rows.sort(key=lambda r: 0 if r["online"] else 1)
+    total = len(rows)
+    total_pages = 1
+    page = 1
     return {
         "users": rows,
         "online_count": online_count,
