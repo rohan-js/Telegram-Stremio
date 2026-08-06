@@ -536,6 +536,7 @@ class ByteStreamer:
         request: Optional[Request] = None,
         chat_id: Optional[int] = None,
         message_id: Optional[int] = None,
+        extra_clients: Optional[List] = None,
     ):
         if not stream_id:
             stream_id = secrets.token_hex(8)
@@ -583,6 +584,32 @@ class ByteStreamer:
         location = await self._get_location(file_id)
         target_dc = int(getattr(file_id, "dc_id", 0) or 0)
 
+        session_pool = [(client_index, media_session, [location], self)]
+        if extra_clients:
+            for ec_idx, ec_streamer, ec_file_id in extra_clients:
+                try:
+                    ec_session = await ec_streamer._get_media_session(ec_file_id)
+                    ec_location = await ec_streamer._get_location(ec_file_id)
+                    session_pool.append((ec_idx, ec_session, [ec_location], ec_streamer))
+                    LOGGER.debug("Stream %s pool: added extra client %s", stream_id, ec_idx)
+                except Exception as e:
+                    LOGGER.warning("Stream %s: extra client %s session setup failed: %s", stream_id, ec_idx, e)
+
+        async def refresh_slot_location(slot_idx: int) -> bool:
+            """Re-fetch the FileId for a pool member (handles FILE_REFERENCE_EXPIRED)."""
+            if chat_id is None or message_id is None:
+                return False
+            try:
+                ec_idx, ec_session, ec_loc_box, ec_streamer = session_pool[slot_idx]
+                ec_streamer._file_id_cache.pop((int(chat_id), int(message_id)), None)
+                fresh_id = await ec_streamer.get_file_properties(chat_id=int(chat_id), message_id=int(message_id))
+                ec_loc_box[0] = await ec_streamer._get_location(fresh_id)
+                LOGGER.debug("Stream %s: refreshed location for client %s", stream_id, ec_idx)
+                return True
+            except Exception as exc:
+                LOGGER.warning("Stream %s: location refresh failed client=%s: %s", stream_id, ec_idx, exc)
+                return False
+
         def remember_route_attempt(event: dict) -> None:
             try:
                 attempts = registry_entry.setdefault("route_attempts", [])
@@ -606,9 +633,10 @@ class ByteStreamer:
             tries = 0
             while tries < 3 and not stop_event.is_set():
                 # --- choose which media session to use this attempt ---
-                use_session = media_session
-                use_location = location
-                use_client_idx = client_index
+                slot = seq_idx % len(session_pool)
+                slot_entry = session_pool[slot]
+                use_client_idx, use_session, use_loc_box, _slot_streamer = slot_entry
+                use_location = use_loc_box[0]
                 if tries >= 1 and len(multi_clients) > 1:
                     # Pick the best other helper for this file's Telegram DC.
                     fallback_pool = [
@@ -759,6 +787,9 @@ class ByteStreamer:
                         "target_dc": target_dc,
                         "error": str(e)[:240],
                     })
+                    err_str = str(getattr(e, "args", e) or e)
+                    if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
+                        await refresh_slot_location(slot)
 
                 # Exponential back-off: 0.5 s, 1 s, 2 s, 4 s, 8 s, 10 s (cap)
                 await asyncio.sleep(min(0.5 * (2 ** (tries - 1)), 10.0))
@@ -897,7 +928,14 @@ class ByteStreamer:
                     except Exception:
                         pass
 
-                    off_chunk = await q.get()
+                    try:
+                        off_chunk = await asyncio.wait_for(q.get(), timeout=90.0)
+                    except asyncio.TimeoutError:
+                        LOGGER.error("Producer stall (90 s) for stream %s — aborting", stream_id)
+                        registry_entry["status"] = "error"
+                        registry_entry["error_reason"] = "producer_stall_90s"
+                        stop_event.set()
+                        break
                     if off_chunk is None:
                         break
 
@@ -1136,7 +1174,17 @@ class ByteStreamer:
                     "mbps": mbps,
                 }
             )
-            update_client_dc_metrics(self.client_index, target_dc, mbps, elapsed)
+            if limit >= 128 * 1024:
+                # Full-size probes are representative; keep the speed EMA.
+                update_client_dc_metrics(self.client_index, target_dc, mbps, elapsed)
+            else:
+                # Tiny TTFB probes: record latency only, don't pollute the
+                # speed averages with slow-start noise.
+                try:
+                    key = (self.client_index, target_dc)
+                    client_dc_ttfb_sec[key] = _ema(float(client_dc_ttfb_sec.get(key, 0.0) or 0.0), elapsed)
+                except Exception:
+                    pass
             return result
         except Exception as e:
             result["error"] = str(getattr(e, "args", e))

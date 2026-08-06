@@ -64,6 +64,22 @@ router = APIRouter(tags=["Streaming"])
 _streamer_by_client: Dict = {}
 _failure_decay_started: bool = False
 
+_title_cache: Dict[str, tuple] = {}
+_TITLE_CACHE_TTL = 300
+
+
+async def _lookup_title(stream_id_hash: str, decoded_name: str) -> str:
+    """Resolve a stream title from the TTL cache, DB, or the decoded URL name."""
+    if not stream_id_hash:
+        return decoded_name
+    now = time.time()
+    cached = _title_cache.get(stream_id_hash)
+    if cached and now < cached[1]:
+        return cached[0] or decoded_name
+    db_title = await db.get_title_by_stream_id(stream_id_hash)
+    _title_cache[stream_id_hash] = (db_title, now + _TITLE_CACHE_TTL)
+    return db_title or decoded_name
+
 
 def _content_disposition(file_name, disposition="inline"):
     ascii_fallback = str(file_name).encode("ascii", "ignore").decode("ascii").replace('"', "").strip() or "file"
@@ -171,6 +187,20 @@ def parse_range_header(range_header: str, file_size: int):
         )
 
     return start, end
+
+
+def should_probe_request(range_header: str, start: int) -> bool:
+    """
+    Decide whether a stream request should run the live smart-routing probe.
+
+    Session-open and suffixed-range requests still probe (the fastest route
+    matters for first-frame). Mid-file seeks (start > 0) and HEAD requests
+    skip the probe: the historical best-known client is used directly and the
+    per-chunk fallback machinery still rescues on failure.
+    """
+    if bool(range_header) and start > 0:
+        return False
+    return True
 
 
 async def stream_file_range_with_usage(
@@ -313,7 +343,7 @@ async def choose_smart_client(
         await streamer._get_media_session(file_id)
         return base_index, streamer, file_id, []
 
-    probe_size = int(getattr(Telegram, "SMART_ROUTING_PROBE_BYTES", 262144) or 262144)
+    probe_size = int(getattr(Telegram, "SMART_ROUTING_PROBE_BYTES", 32768) or 32768)
     probe_timeout = float(getattr(Telegram, "SMART_ROUTING_PROBE_TIMEOUT_SEC", 4.0) or 4.0)
     candidates = select_probe_candidates(target_dc or getattr(file_id, "dc_id", 0), base_index)
 
@@ -723,8 +753,7 @@ async def virtual_media_streamer(
 
     stream_id = secrets.token_hex(8)
     decoded_name = unquote(request.path_params.get("name", ""))
-    db_title = await db.get_title_by_stream_id(stream_id_hash) if stream_id_hash else None
-    final_title = db_title if db_title else decoded_name
+    final_title = await _lookup_title(stream_id_hash, decoded_name)
 
     configured_prefetch, configured_parallelism = get_configured_stream_concurrency()
     active_streams = count_active_telegram_streams()
@@ -988,9 +1017,12 @@ async def media_streamer(
     start, end = parse_range_header(range_header, file_size)
     req_length = end - start + 1
 
-    probe_granularity = max(4096, min(int(getattr(Telegram, "SMART_ROUTING_PROBE_BYTES", 262144) or 262144), 1024 * 1024))
+    probe_granularity = max(4096, min(int(getattr(Telegram, "SMART_ROUTING_PROBE_BYTES", 32768) or 32768), 1024 * 1024))
     probe_offset = start - (start % probe_granularity)
-    if forced_client_index is not None:
+    if forced_client_index is not None or not should_probe_request(range_header, start):
+        # Seek/range requests and forced-client streams skip the live probe:
+        # the historical best-known client is used directly, and the per-chunk
+        # fallback machinery still rescues on failure.
         index, streamer, probe_results = base_index, base_streamer, []
     else:
         index, streamer, file_id, probe_results = await choose_smart_client(
@@ -1031,12 +1063,7 @@ async def media_streamer(
     decoded_name = unquote(request.path_params.get("name", ""))
 
     # Look up the real title from the database using the Stremio stream_id_hash
-    db_title = None
-    if stream_id_hash:
-        db_title = await db.get_title_by_stream_id(stream_id_hash)
-        LOGGER.info(f"Stream lookup for hash '{stream_id_hash}' returned title: {db_title}")
-
-    final_title = db_title if db_title else decoded_name
+    final_title = await _lookup_title(stream_id_hash, decoded_name)
 
     meta = {
         "request_path": str(request.url.path),
@@ -1193,6 +1220,40 @@ async def media_streamer(
             headers=headers,
         )
 
+    extra_clients_for_stream = []
+    if parallelism > 1 and len(multi_clients) > 1:
+        # Build a multi-client chunk pool: other healthy helpers feed the same
+        # file in parallel (round-robin by chunk), multiplying per-stream
+        # throughput. Cooldowns are respected; failures are skipped.
+        other_indices = sorted(
+            (i for i in multi_clients if i != index and not is_client_cooled_down(i, target_dc or real_dc)),
+            key=lambda i: work_loads.get(i, 0),
+        )
+        want = parallelism - 1
+
+        async def _get_extra_file_id(ec_idx: int):
+            ec_streamer = get_streamer(ec_idx)
+            try:
+                ec_fid = await ec_streamer.get_file_properties(chat_id=chat_id, message_id=msg_id)
+                return (ec_idx, ec_streamer, ec_fid)
+            except Exception as e:
+                LOGGER.debug("Extra client %s file_id fetch failed: %s", ec_idx, e)
+                return None
+
+        results = await asyncio.gather(*[_get_extra_file_id(i) for i in other_indices[:want]], return_exceptions=True)
+        extra_clients_for_stream = [r for r in results if r is not None]
+        LOGGER.info(
+            "Stream %s pool: primary=%s extras=%s effective_parallelism=%s",
+            stream_id, index, [ec[0] for ec in extra_clients_for_stream], parallelism,
+        )
+
+    meta["stream_pool"] = {
+        "primary": index,
+        "extras": [ec[0] for ec in extra_clients_for_stream],
+        "pool_size": 1 + len(extra_clients_for_stream),
+        "effective_parallelism": parallelism,
+    }
+
     body_gen = await streamer.prefetch_stream(
         file_id=file_id,
         client_index=index,
@@ -1208,6 +1269,7 @@ async def media_streamer(
         request=request,
         chat_id=chat_id,
         message_id=msg_id,
+        extra_clients=extra_clients_for_stream,
     )
 
     asyncio.create_task(track_usage_from_stats(stream_id, token, token_data))

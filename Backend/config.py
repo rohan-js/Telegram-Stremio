@@ -70,9 +70,9 @@ class Telegram:
     except Exception:
         SMART_ROUTING_PROBE_CLIENTS = 3
     try:
-        SMART_ROUTING_PROBE_BYTES = int(getenv("SMART_ROUTING_PROBE_BYTES", "262144") or 262144)
+        SMART_ROUTING_PROBE_BYTES = int(getenv("SMART_ROUTING_PROBE_BYTES", "32768") or 32768)
     except Exception:
-        SMART_ROUTING_PROBE_BYTES = 262144
+        SMART_ROUTING_PROBE_BYTES = 32768
     try:
         SMART_ROUTING_PROBE_TIMEOUT_SEC = float(getenv("SMART_ROUTING_PROBE_TIMEOUT_SEC", "4") or 4)
     except Exception:

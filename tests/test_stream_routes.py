@@ -7,6 +7,7 @@ from Backend.fastapi.routes.stream_routes import (
     get_configured_stream_concurrency,
     resolve_video_mime_type,
     select_telegram_chunk_size,
+    should_probe_request,
 )
 from Backend.helper import custom_dl
 
@@ -118,6 +119,60 @@ class TelegramChunkSizeTests(unittest.TestCase):
     def test_full_stream_uses_throughput_chunk_size(self):
         self.assertEqual(select_telegram_chunk_size(""), 1024 * 1024)
         self.assertEqual(select_telegram_chunk_size(None), 1024 * 1024)
+
+
+class ShouldProbeRequestTests(unittest.TestCase):
+    def test_open_session_request_probes(self):
+        self.assertTrue(should_probe_request("", 0))
+        self.assertTrue(should_probe_request(None, 0))
+
+    def test_suffix_range_probes(self):
+        self.assertTrue(should_probe_request("bytes=-2048", 0))
+
+    def test_full_from_start_range_probes(self):
+        self.assertTrue(should_probe_request("bytes=0-", 0))
+
+    def test_mid_file_seek_skips_probe(self):
+        self.assertFalse(should_probe_request("bytes=1048576-", 1048576))
+        self.assertFalse(should_probe_request("bytes=1024-2048", 1024))
+
+
+class LookupTitleCacheTests(unittest.TestCase):
+    def tearDown(self):
+        stream_routes._title_cache.clear()
+
+    def test_first_lookup_is_miss_second_is_hit(self):
+        import asyncio
+
+        with patch.object(stream_routes.db, "get_title_by_stream_id", side_effect=["Alpha"]) as mocked:
+            first = asyncio.run(stream_routes._lookup_title("hash1", "fallback"))
+            second = asyncio.run(stream_routes._lookup_title("hash1", "fallback"))
+
+        self.assertEqual(first, "Alpha")
+        self.assertEqual(second, "Alpha")
+        self.assertEqual(mocked.call_count, 1)
+
+    def test_cache_expires_after_ttl(self):
+        import asyncio
+
+        with patch.object(stream_routes.db, "get_title_by_stream_id", side_effect=["One", "Two"]) as mocked:
+            first = asyncio.run(stream_routes._lookup_title("hash2", "fallback"))
+            cached_title, cached_expiry = stream_routes._title_cache["hash2"]
+            stream_routes._title_cache["hash2"] = (cached_title, cached_expiry - stream_routes._TITLE_CACHE_TTL - 1)
+            second = asyncio.run(stream_routes._lookup_title("hash2", "fallback"))
+
+        self.assertEqual(first, "One")
+        self.assertEqual(second, "Two")
+        self.assertEqual(mocked.call_count, 2)
+
+    def test_fallback_name_used_when_db_has_no_title(self):
+        import asyncio
+
+        with patch.object(stream_routes.db, "get_title_by_stream_id", return_value=None):
+            self.assertEqual(
+                asyncio.run(stream_routes._lookup_title("hash3", "Fallback Name")),
+                "Fallback Name",
+            )
 
 
 if __name__ == "__main__":
