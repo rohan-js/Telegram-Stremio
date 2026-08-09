@@ -5,6 +5,7 @@ from Backend.fastapi.routes import stream_routes
 from Backend.fastapi.routes.stream_routes import (
     _client_route_trusted,
     choose_effective_prefetch,
+    choose_smart_client,
     get_configured_stream_concurrency,
     resolve_video_mime_type,
     select_telegram_chunk_size,
@@ -180,6 +181,127 @@ class ClientRouteTrustTests(unittest.TestCase):
             with patch.object(stream_routes, "time") as fake_time:
                 fake_time.time.return_value = 1_000_001.0
                 self.assertFalse(_client_route_trusted(0, 3))
+
+
+class ProbeStampsTrustWindowTests(unittest.TestCase):
+    """A successful probe must stamp every candidate route as recently-seen,
+    otherwise repeat opens keep re-probing because the base client itself never
+    streams chunks and therefore never gets a client_dc_last_seen entry."""
+
+    def setUp(self):
+        custom_dl.client_dc_last_seen.clear()
+
+    def tearDown(self):
+        custom_dl.client_dc_last_seen.clear()
+
+    def test_successful_probe_stamps_every_candidate_route(self):
+        import asyncio
+        from types import SimpleNamespace
+
+        class FakeFileId:
+            dc_id = 2
+            file_size = 1000
+            unique_id = "abc123"
+
+        def make_streamer(idx):
+            streamer = SimpleNamespace(client_index=idx)
+
+            async def get_file_properties(chat_id=None, message_id=None):
+                return FakeFileId()
+
+            async def probe_file(chat_id=None, message_id=None, offset=0, limit=0, timeout=0):
+                return {
+                    "ok": True,
+                    "file_id": FakeFileId(),
+                    "client_index": idx,
+                    "ttfb_sec": 0.3,
+                    "mbps": 10.0,
+                }
+
+            async def _get_media_session(file_id=None):
+                return None
+
+            streamer.get_file_properties = get_file_properties
+            streamer.probe_file = probe_file
+            streamer._get_media_session = _get_media_session
+            return streamer
+
+        import time as real_time
+
+        with (
+            patch.object(stream_routes, "select_probe_candidates", return_value=[2, 0, 5]),
+            patch.object(stream_routes, "get_streamer", side_effect=make_streamer),
+            patch.dict(stream_routes.multi_clients, {0: object(), 2: object(), 5: object()}),
+        ):
+            asyncio.run(
+                stream_routes.choose_smart_client(
+                    request=SimpleNamespace(method="GET"),
+                    chat_id=1,
+                    msg_id=2,
+                    target_dc=2,
+                    base_index=2,
+                    probe_offset=0,
+                )
+            )
+
+        for idx in (2, 0, 5):
+            stamp = custom_dl.client_dc_last_seen.get((idx, 2))
+            self.assertIsNotNone(stamp, f"no trust stamp for probed client {idx}")
+            self.assertLessEqual(real_time.time() - float(stamp), 5)
+
+    def test_failed_probe_leaves_no_stamp(self):
+        import asyncio
+        from types import SimpleNamespace
+
+        class FakeFileId:
+            dc_id = 2
+            file_size = 1000
+            unique_id = "abc123"
+
+        def make_streamer(idx):
+            streamer = SimpleNamespace(client_index=idx)
+
+            async def get_file_properties(chat_id=None, message_id=None):
+                return FakeFileId()
+
+            async def probe_file(chat_id=None, message_id=None, offset=0, limit=0, timeout=0):
+                if idx == 2:
+                    return {"ok": False, "client_index": idx, "error": "boom"}
+                return {
+                    "ok": True,
+                    "file_id": FakeFileId(),
+                    "client_index": idx,
+                    "ttfb_sec": 0.3,
+                    "mbps": 10.0,
+                }
+
+            async def _get_media_session(file_id=None):
+                return None
+
+            streamer.get_file_properties = get_file_properties
+            streamer.probe_file = probe_file
+            streamer._get_media_session = _get_media_session
+            return streamer
+
+        with (
+            patch.object(stream_routes, "select_probe_candidates", return_value=[2, 0, 5]),
+            patch.object(stream_routes, "get_streamer", side_effect=make_streamer),
+            patch.dict(stream_routes.multi_clients, {0: object(), 2: object(), 5: object()}),
+        ):
+            asyncio.run(
+                stream_routes.choose_smart_client(
+                    request=SimpleNamespace(method="GET"),
+                    chat_id=1,
+                    msg_id=2,
+                    target_dc=2,
+                    base_index=2,
+                    probe_offset=0,
+                )
+            )
+
+        self.assertNotIn((2, 2), custom_dl.client_dc_last_seen)
+        self.assertIsNotNone(custom_dl.client_dc_last_seen.get((0, 2)))
+        self.assertIsNotNone(custom_dl.client_dc_last_seen.get((5, 2)))
 
 
 class LookupTitleCacheTests(unittest.TestCase):

@@ -499,6 +499,17 @@ async def choose_smart_client(
         await streamer._get_media_session(file_id)
         return base_index, streamer, file_id, clean_results
 
+    # A successful probe is itself proof the (client, DC) route works, so stamp
+    # every probed helper as recently-seen. Without this the trust window only
+    # knows about the client that actually streamed chunks, which is rarely the
+    # base client picked on the next open — so repeat opens kept re-probing.
+    now = time.time()
+    for r in ok_results:
+        try:
+            client_dc_last_seen[(int(r["client_index"]), int(target_dc or 0))] = now
+        except Exception:
+            pass
+
     best = min(
         ok_results,
         key=lambda r: (
