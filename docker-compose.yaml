@@ -23,23 +23,21 @@ services:
       - qbittorrent
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Pin a public resolver for Atlas SRV lookups. Containers created when the
-    # host resolv.conf points at systemd-resolved (127.0.0.53) get 21s Atlas
-    # timeouts and crash-loop at startup, and the Oracle metadata DNS
-    # (169.254.169.254) is unreachable from inside wgcf_kernel's network
-    # namespace that tg_stremio shares. 1.1.1.1 resolves instantly there
-    # (verified from the runtime topology).
-    dns:
-      - 1.1.1.1
-    ports:
-      - "8000:8000"
+    # Pin DNS for Atlas SRV lookups via a bind-mounted resolv.conf: Docker's
+    # `dns:` option is incompatible with network_mode: service:wgcf_kernel
+    # (set by docker-compose.wgkernel.yml), and without a pin the container
+    # inherits a resolver that 21s-timeouts or is unreachable (127.0.0.53 /
+    # 169.254.169.254) from the shared netns. 1.1.1.1 resolves instantly.
     volumes:
+      - ./deploy/resolv.conf:/etc/resolv.conf:ro
       - ./config.env:/app/config.env
       - ./cache:/app/cache
       - /mnt/stremio-downloads/torrents/completed:/downloads/completed:ro
       - /var/log/nginx:/host/var/log/nginx:ro
       - /sys/class/net/ens3/statistics/tx_bytes:/host/ens3_tx_bytes:ro
       - /proc/net:/host/proc/net:ro
+    ports:
+      - "8000:8000"
     restart: unless-stopped
     mem_limit: 768m
     memswap_limit: 1536m
