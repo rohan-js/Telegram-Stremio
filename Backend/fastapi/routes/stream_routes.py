@@ -20,6 +20,7 @@ from Backend.helper.custom_dl import (
     RECENT_STREAMS,
     client_dc_avg_mbps,
     client_dc_ttfb_sec,
+    client_dc_last_seen,
     smart_client_score,
     get_client_cooldown_state,
     is_client_cooled_down,
@@ -30,10 +31,17 @@ from Backend.helper.zip_stream import resolve_zip_entry
 from Backend.helper.disk_cache import (
     disk_cache_enabled,
     cache_abspath,
+    cache_root_dir,
     is_complete_cache_file,
     touch_cache_file,
     nginx_accel_enabled,
     nginx_accel_redirect_uri,
+    first_cache_bytes,
+    first_cache_enabled,
+    first_cache_relpath,
+    first_cache_abspath,
+    is_complete_first_cache,
+    evict_lru,
 )
 from Backend.helper.torrent_downloads import (
     download_root_dir,
@@ -203,6 +211,23 @@ def should_probe_request(range_header: str, start: int) -> bool:
     return True
 
 
+def _client_route_trusted(client_index: int, target_dc: int) -> bool:
+    """True when (client, DC) recently produced a successful fetch — skip the live probe.
+
+    The probe costs up to SMART_ROUTING_PROBE_TIMEOUT_SEC on a cold route; for
+    repeat opens (same helper already streaming this DC) the historical route is
+    trusted instead so the first frame arrives after a single round-trip.
+    """
+    try:
+        trust_sec = float(getattr(Telegram, "SMART_ROUTING_PROBE_TRUST_SEC", 60.0))
+    except Exception:
+        trust_sec = 60.0
+    if trust_sec <= 0:
+        return False
+    last_seen = client_dc_last_seen.get((int(client_index), int(target_dc or 0)))
+    return last_seen is not None and (time.time() - float(last_seen)) <= trust_sec
+
+
 async def stream_file_range_with_usage(
     path: Path | str,
     start_pos: int,
@@ -230,6 +255,91 @@ async def stream_file_range_with_usage(
         finally:
             if token and pending_usage > 0:
                 await db.update_token_usage(token, pending_usage)
+
+
+# In-flight first-N-MiB head-cache fills (dedup by cache relpath).
+_first_fill_inflight: set = set()
+
+
+async def _fill_first_cache_head(
+    chat_id: int,
+    msg_id: int,
+    unique_id: str,
+    expected_bytes: int,
+    client_index: int,
+) -> None:
+    """Download the file's head (first expected_bytes) from Telegram to disk.
+
+    Runs fully in the background — a failure never affects the live stream.
+    The prefix file lives under the same LRU-bounded cache root, so the shared
+    DISK_CACHE_MAX_BYTES budget and eviction apply.
+    """
+    rel = first_cache_relpath(chat_id, msg_id, unique_id)
+    if rel in _first_fill_inflight:
+        return
+    _first_fill_inflight.add(rel)
+    try:
+        streamer = get_streamer(client_index)
+        fid = await streamer.get_file_properties(chat_id=chat_id, message_id=msg_id)
+        size = int(getattr(fid, "file_size", 0) or 0)
+        if size <= 0:
+            return
+        want = min(int(expected_bytes), size)
+        if want <= 0:
+            return
+        dest = first_cache_abspath(chat_id, msg_id, unique_id)
+        if is_complete_first_cache(dest, want):
+            return
+        location = await streamer._get_location(fid)
+        media_session = await streamer._get_media_session(fid)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        try:
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        written = 0
+        chunk_size = 512 * 1024
+        try:
+            with open(str(tmp), "wb") as f:
+                while written < want:
+                    limit = min(chunk_size, want - written)
+                    data = await streamer._fetch_file_bytes(
+                        media_session,
+                        location,
+                        offset=written,
+                        limit=limit,
+                    )
+                    if not data:
+                        break
+                    f.write(data)
+                    written += len(data)
+            if written == want:
+                tmp.replace(dest)
+                touch_cache_file(dest)
+                LOGGER.info(
+                    "First-cache filled chat_id=%s msg_id=%s (%s bytes)",
+                    chat_id, msg_id, written,
+                )
+                await evict_lru()
+            else:
+                LOGGER.debug("First-cache fill short chat_id=%s msg_id=%s (%s/%s)", chat_id, msg_id, written, want)
+                try:
+                    tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        except Exception as exc:
+            LOGGER.warning("First-cache fill failed chat_id=%s msg_id=%s: %s", chat_id, msg_id, exc)
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+    except Exception as exc:
+        LOGGER.debug("First-cache fill skipped chat_id=%s msg_id=%s: %s", chat_id, msg_id, exc)
+    finally:
+        _first_fill_inflight.discard(rel)
 
 
 @router.get("/sub/{token}/{id}/{name}")
@@ -1019,20 +1129,65 @@ async def media_streamer(
 
     probe_granularity = max(4096, min(int(getattr(Telegram, "SMART_ROUTING_PROBE_BYTES", 32768) or 32768), 1024 * 1024))
     probe_offset = start - (start % probe_granularity)
-    if forced_client_index is not None or not should_probe_request(range_header, start):
-        # Seek/range requests and forced-client streams skip the live probe:
-        # the historical best-known client is used directly, and the per-chunk
-        # fallback machinery still rescues on failure.
+    # -- Instant-start client selection ---------------------------------------
+    # The live probe can cost up to SMART_ROUTING_PROBE_TIMEOUT_SEC on a cold
+    # route. Three ways to avoid holding the first frame hostage:
+    #   1) forced/seek/HEAD requests never probe;
+    #   2) trust window: if this (client, DC) route succeeded within the last
+    #      SMART_ROUTING_PROBE_TRUST_SEC a repeat open skips the probe entirely
+    #      and the first byte arrives after one Telegram round-trip;
+    #   3) overlap: a real probe starts the stream on the best-known base client
+    #      immediately; if the probe finishes within SMART_ROUTING_PROBE_OVERLAP_SEC
+    #      its pick is used instead, otherwise it continues in the background and
+    #      only sharpens future route choices.
+    probe_decision = "probe"
+    if forced_client_index is not None:
+        probe_decision = "forced"
+    elif request.method == "HEAD":
+        probe_decision = "head"
+    elif not should_probe_request(range_header, start):
+        probe_decision = "seek"
+    elif _client_route_trusted(base_index, target_dc or real_dc):
+        probe_decision = "trust_window"
+
+    if probe_decision != "probe":
         index, streamer, probe_results = base_index, base_streamer, []
     else:
-        index, streamer, file_id, probe_results = await choose_smart_client(
-            request=request,
-            chat_id=chat_id,
-            msg_id=msg_id,
-            target_dc=target_dc or real_dc,
-            base_index=base_index,
-            probe_offset=probe_offset,
-        )
+        overlap_sec = max(0.0, float(getattr(Telegram, "SMART_ROUTING_PROBE_OVERLAP_SEC", 0.4) or 0.4))
+
+        async def _choose_with_overlap() -> tuple:
+            return await choose_smart_client(
+                request=request,
+                chat_id=chat_id,
+                msg_id=msg_id,
+                target_dc=target_dc or real_dc,
+                base_index=base_index,
+                probe_offset=probe_offset,
+            )
+
+        probe_task = asyncio.create_task(_choose_with_overlap())
+
+        def _probe_done(t: asyncio.Task) -> None:
+            # Consume late probe results so a background failure isn't reported
+            # as an unretrieved task exception; metrics were already updated.
+            try:
+                t.exception()
+            except Exception:
+                pass
+
+        probe_task.add_done_callback(_probe_done)
+        try:
+            index, streamer, file_id, probe_results = await asyncio.wait_for(
+                asyncio.shield(probe_task),
+                timeout=max(overlap_sec, 0.05),
+            )
+        except asyncio.TimeoutError:
+            index, streamer, probe_results = base_index, base_streamer, []
+            probe_decision = "overlap_base"
+            LOGGER.debug(
+                "Smart-routing probe still running after %.2fs — streaming starts on base client %s (DC %s)",
+                overlap_sec, base_index, target_dc or real_dc,
+            )
 
     if secure_hash != "SKIP_HASH_CHECK":
         if file_id.unique_id[:6] != secure_hash:
@@ -1082,6 +1237,7 @@ async def media_streamer(
         "smart_routing": {
             "target_dc": real_dc,
             "selected_client": index,
+            "decision": probe_decision,
             "probe_results": [
                 {
                     "client": r.get("client_index"),
@@ -1166,6 +1322,93 @@ async def media_streamer(
                 )
         except Exception as e:
             LOGGER.debug("Disk cache lookup failed: %s", e)
+
+    # ------------------------------------------------------------------
+    # Fast-start head cache (first N MiB on disk, LRU-bounded) — optional
+    # ------------------------------------------------------------------
+    # Serves only requests fully inside the cached head; anything beyond falls
+    # through to Telegram. A completed head is byte-identical (exact-size match)
+    # and starts the opening of repeat streams from local disk.
+    first_cache_hit = False
+    first_cache_fill = False
+    try:
+        if first_cache_enabled() and start < first_cache_bytes():
+            unique_id = getattr(file_id, "unique_id", None) or ""
+            if unique_id:
+                fc_bytes = min(first_cache_bytes(), file_size)
+                fc_path = first_cache_abspath(chat_id, msg_id, unique_id)
+                if end < fc_bytes and is_complete_first_cache(fc_path, fc_bytes):
+                    first_cache_hit = True
+                    touch_cache_file(fc_path)
+
+                    asyncio.create_task(
+                        db.log_stream_stats(
+                            {
+                                "stream_id": stream_id,
+                                "msg_id": msg_id,
+                                "chat_id": chat_id,
+                                "dc_id": file_id.dc_id,
+                                "client_index": index,
+                                "total_bytes": req_length,
+                                "duration": 0.0,
+                                "avg_mbps": 0.0,
+                                "peak_mbps": 0.0,
+                                "status": "finished",
+                                "parallelism": 0,
+                                "chunk_size": 0,
+                                "ttfb_sec": 0.0,
+                                "chunk_timeouts": 0,
+                                "chunk_errors": 0,
+                                "fallback_chunks": 0,
+                                "zero_pad_chunks": 0,
+                                "cached": True,
+                                "served_via": "head_cache",
+                                "usage_accounted": True,
+                                "meta": meta,
+                            }
+                        )
+                    )
+
+                    from fastapi.responses import Response as PlainResponse
+
+                    headers = {
+                        "Content-Type": mime_type,
+                        "Content-Disposition": _content_disposition(file_name),
+                        "Accept-Ranges": "bytes",
+                        "Cache-Control": "public, max-age=3600",
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+                    }
+                    if range_header:
+                        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+                    if range_header or request.method == "HEAD":
+                        headers["Content-Length"] = str(req_length)
+
+                    if request.method == "HEAD":
+                        return PlainResponse(status_code=206 if range_header else 200, headers=headers)
+
+                    return StreamingResponse(
+                        stream_file_range_with_usage(str(fc_path), start, end, token),
+                        headers=headers,
+                        status_code=206 if range_header else 200,
+                        media_type=mime_type,
+                    )
+                elif start == 0:
+                    # Front-load the head in the background while the stream
+                    # starts from Telegram — nothing waits on the cache.
+                    first_cache_fill = True
+                    asyncio.create_task(
+                        _fill_first_cache_head(chat_id, msg_id, unique_id, int(fc_bytes), base_index)
+                    )
+    except Exception as e:
+        LOGGER.debug("First-cache lookup failed: %s", e)
+
+    meta["first_cache"] = {
+        "enabled": first_cache_enabled(),
+        "cached_bytes": min(first_cache_bytes(), file_size) if first_cache_enabled() else 0,
+        "hit": first_cache_hit,
+        "fill_started": first_cache_fill,
+    }
 
     configured_prefetch, configured_parallelism = get_configured_stream_concurrency()
     active_streams = count_active_telegram_streams()
@@ -1370,6 +1613,7 @@ async def get_stream_stats():
                 "cdn_chunks": info.get("cdn_chunks", 0),
                 "cdn_bytes": info.get("cdn_bytes", 0),
                 "cdn_errors": info.get("cdn_errors", 0),
+                "cdn_fallbacks": info.get("cdn_fallbacks", 0),
                 "cdn_dc": info.get("cdn_dc"),
                 "error_reason": info.get("error_reason"),
                 "route_attempts": info.get("route_attempts", []),
@@ -1410,6 +1654,7 @@ async def get_stream_stats():
                 "cdn_chunks": info.get("cdn_chunks", 0),
                 "cdn_bytes": info.get("cdn_bytes", 0),
                 "cdn_errors": info.get("cdn_errors", 0),
+                "cdn_fallbacks": info.get("cdn_fallbacks", 0),
                 "cdn_dc": info.get("cdn_dc"),
                 "error_reason": info.get("error_reason"),
                 "route_attempts": info.get("route_attempts", []),

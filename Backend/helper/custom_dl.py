@@ -8,7 +8,7 @@ import traceback
 from fastapi import Request
 from pyrogram import Client, raw, utils
 from pyrogram.crypto import aes
-from pyrogram.errors import AuthBytesInvalid
+from pyrogram.errors import AuthBytesInvalid, RPCError
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from pyrogram.session import Session, Auth
 from Backend.logger import LOGGER
@@ -31,10 +31,32 @@ ACTIVE_STREAMS: Dict[str, Dict] = {}
 RECENT_STREAMS = deque(maxlen=20)
 client_dc_avg_mbps: Dict[Tuple[int, int], float] = {}
 client_dc_ttfb_sec: Dict[Tuple[int, int], float] = {}
+# Last time a (client, DC) pair produced a successful fetch/probe. Lets the
+# smart-routing trust window skip a live probe on repeat opens.
+client_dc_last_seen: Dict[Tuple[int, int], float] = {}
+
+# Per-file Telegram CDN blacklist (in-memory only): a file whose CDN path keeps
+# failing is served from its master DC until the short TTL expires, instead of
+# erroring every chunk. Keyed by (location.id, location.access_hash).
+_cdn_file_failures: Dict[Tuple[int, int], int] = {}
+_cdn_file_disabled_until: Dict[Tuple[int, int], float] = {}
+_MAX_CDN_BLACKLIST_ENTRIES = 2048
 
 
 class TelegramCdnFetchError(RuntimeError):
     """Raised when a Telegram CDN redirect cannot be fetched safely."""
+
+
+def _cdn_location_key(location: Any) -> Optional[Tuple[int, int]]:
+    """Stable in-memory key for a file; None when the location carries no id."""
+    try:
+        loc_id = int(getattr(location, "id", 0) or 0)
+        loc_access = int(getattr(location, "access_hash", 0) or 0)
+    except Exception:
+        return None
+    if loc_id <= 0:
+        return None
+    return (loc_id, loc_access)
 
 
 def _ema(previous: float, current: float, weight: float = 0.3) -> float:
@@ -58,6 +80,7 @@ def update_client_dc_metrics(
 
         key = (int(client_index), target_dc)
         client_dc_avg_mbps[key] = _ema(float(client_dc_avg_mbps.get(key, 0.0) or 0.0), mbps)
+        client_dc_last_seen[key] = time.time()
 
         if ttfb_sec is not None:
             ttfb_sec = float(ttfb_sec)
@@ -279,14 +302,19 @@ class ByteStreamer:
         ],
         offset: int,
         limit: int,
+        cdn_supported: Optional[bool] = None,
     ) -> Any:
+        # cdn_supported=None → follow config + per-file blacklist; True/False
+        # forces the flag (used by the master-DC fallback in _fetch_file_bytes).
         if bool(getattr(Telegram, "TELEGRAM_CDN_ENABLED", True)) and self._cdn_getfile_supported:
+            if cdn_supported is None:
+                cdn_supported = not self._cdn_file_disabled(location)
             try:
                 request = raw.functions.upload.GetFile(
                     location=location,
                     offset=offset,
                     limit=limit,
-                    cdn_supported=True,
+                    cdn_supported=cdn_supported,
                 )
             except TypeError:
                 self._cdn_getfile_supported = False
@@ -313,15 +341,79 @@ class ByteStreamer:
     ) -> Optional[bytes]:
         response = await self._send_upload_get_file(media_session, location, offset, limit)
         if isinstance(response, raw.types.upload.FileCdnRedirect):
-            return await self._fetch_cdn_redirect(
-                origin_session=media_session,
-                redirect=response,
-                offset=offset,
-                limit=limit,
-                route_event=route_event,
-                stream_stats=stream_stats,
-            )
+            try:
+                return await self._fetch_cdn_redirect(
+                    origin_session=media_session,
+                    redirect=response,
+                    offset=offset,
+                    limit=limit,
+                    route_event=route_event,
+                    stream_stats=stream_stats,
+                )
+            except (TelegramCdnFetchError, RPCError) as exc:
+                # A broken CDN path must never kill a stream. Remember the
+                # failure, blacklist the file after a few misses, and serve this
+                # chunk straight from the master DC.
+                self._record_file_cdn_failure(location)
+                LOGGER.warning(
+                    "CDN fetch failed (dc=%s offset=%s): %s — falling back to master DC",
+                    int(getattr(response, "dc_id", 0) or 0),
+                    offset,
+                    exc,
+                )
+                self._record_cdn_stat(stream_stats, "cdn_fallbacks", 1)
+                fallback = await self._send_upload_get_file(
+                    media_session,
+                    location,
+                    offset,
+                    limit,
+                    cdn_supported=False,
+                )
+                return getattr(fallback, "bytes", None) if fallback else None
         return getattr(response, "bytes", None) if response else None
+
+    def _cdn_file_disabled(self, location: Any) -> bool:
+        key = _cdn_location_key(location)
+        if key is None:
+            return False
+        disabled_until = _cdn_file_disabled_until.get(key, 0.0)
+        if disabled_until <= time.time():
+            if key in _cdn_file_disabled_until:
+                del _cdn_file_disabled_until[key]
+                _cdn_file_failures.pop(key, None)
+            return False
+        return True
+
+    def _record_file_cdn_failure(self, location: Any) -> None:
+        key = _cdn_location_key(location)
+        if key is None or not bool(getattr(Telegram, "TELEGRAM_CDN_ENABLED", True)):
+            return
+        max_failures = max(1, int(getattr(Telegram, "TELEGRAM_CDN_MAX_FILE_FAILURES", 2) or 2))
+        ttl_sec = max(10, int(getattr(Telegram, "TELEGRAM_CDN_FILE_DISABLE_TTL_SEC", 300) or 300))
+
+        _cdn_file_failures[key] = int(_cdn_file_failures.get(key, 0) or 0) + 1
+        if int(_cdn_file_failures.get(key, 0)) >= max_failures:
+            _cdn_file_disabled_until[key] = time.time() + ttl_sec
+            LOGGER.warning(
+                "File %s hit %s CDN failures — CDN disabled for %ss",
+                key,
+                max_failures,
+                ttl_sec,
+            )
+            _cdn_file_failures.pop(key, None)
+
+        # Keep the blacklist bounded: drop expired entries, then the oldest.
+        if len(_cdn_file_disabled_until) > _MAX_CDN_BLACKLIST_ENTRIES:
+            now = time.time()
+            for k in [k for k, t in _cdn_file_disabled_until.items() if t <= now]:
+                del _cdn_file_disabled_until[k]
+                _cdn_file_failures.pop(k, None)
+        if len(_cdn_file_disabled_until) > _MAX_CDN_BLACKLIST_ENTRIES:
+            try:
+                oldest = next(iter(_cdn_file_disabled_until))
+                del _cdn_file_disabled_until[oldest]
+            except (StopIteration, KeyError):
+                pass
 
     async def _get_cdn_session(self, dc_id: int) -> Session:
         dc_id = int(dc_id)
@@ -370,15 +462,35 @@ class ByteStreamer:
         cdn_session = await self._get_cdn_session(cdn_dc)
         max_reuploads = max(0, int(getattr(Telegram, "TELEGRAM_CDN_MAX_REUPLOAD_ATTEMPTS", 2) or 2))
         reuploads = 0
+        session_recreated = False
 
         while True:
-            response = await cdn_session.send(
-                raw.functions.upload.GetCdnFile(
-                    file_token=redirect.file_token,
-                    offset=offset,
-                    limit=limit,
+            try:
+                response = await cdn_session.send(
+                    raw.functions.upload.GetCdnFile(
+                        file_token=redirect.file_token,
+                        offset=offset,
+                        limit=limit,
+                    )
                 )
-            )
+            except RPCError as exc:
+                # -404 means the CDN auth key was deleted — generate a fresh one
+                # and retry once with a recreated CDN session (per CDN spec).
+                code = int(getattr(exc, "CODE", 0) or 0)
+                err_id = str(getattr(exc, "ID", "") or "")
+                if code == -404 or "AUTH_KEY" in err_id.upper():
+                    if session_recreated:
+                        raise
+                    session_recreated = True
+                    self._cdn_sessions.pop(cdn_dc, None)
+                    try:
+                        await cdn_session.stop()
+                    except Exception:
+                        pass
+                    cdn_session = await self._get_cdn_session(cdn_dc)
+                    LOGGER.warning("CDN auth key deleted for DC %s — recreated session", cdn_dc)
+                    continue
+                raise
 
             if isinstance(response, raw.types.upload.CdnFileReuploadNeeded):
                 self._emit_cdn_event(
@@ -568,6 +680,7 @@ class ByteStreamer:
             "cdn_chunks": 0,
             "cdn_bytes": 0,
             "cdn_errors": 0,
+            "cdn_fallbacks": 0,
             "cdn_dc": None,
             "error_reason": None,
             "route_attempts": [],

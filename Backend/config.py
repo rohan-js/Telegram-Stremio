@@ -61,6 +61,17 @@ class Telegram:
         TELEGRAM_CDN_MAX_REUPLOAD_ATTEMPTS = int(getenv("TELEGRAM_CDN_MAX_REUPLOAD_ATTEMPTS", "2") or 2)
     except Exception:
         TELEGRAM_CDN_MAX_REUPLOAD_ATTEMPTS = 2
+    # How many CDN failures for the same file before we stop asking its master DC
+    # for CDN redirects and fall back to the plain master-DC upload.getFile path.
+    try:
+        TELEGRAM_CDN_MAX_FILE_FAILURES = int(getenv("TELEGRAM_CDN_MAX_FILE_FAILURES", "2") or 2)
+    except Exception:
+        TELEGRAM_CDN_MAX_FILE_FAILURES = 2
+    # After this many seconds, a temporarily blacklisted file is retried through CDN again.
+    try:
+        TELEGRAM_CDN_FILE_DISABLE_TTL_SEC = int(getenv("TELEGRAM_CDN_FILE_DISABLE_TTL_SEC", "300") or 300)
+    except Exception:
+        TELEGRAM_CDN_FILE_DISABLE_TTL_SEC = 300
     TELEGRAM_CDN_DEBUG_LOGS = getenv("TELEGRAM_CDN_DEBUG_LOGS", "false").lower() == "true"
 
     SMART_ROUTING_ENABLED = getenv("SMART_ROUTING_ENABLED", "true").lower() == "true"
@@ -85,6 +96,19 @@ class Telegram:
         SMART_ROUTING_CHUNK_TIMEOUT_SEC = float(getenv("SMART_ROUTING_CHUNK_TIMEOUT_SEC", "15") or 15)
     except Exception:
         SMART_ROUTING_CHUNK_TIMEOUT_SEC = 15.0
+    try:
+        # Skip the live probe when the (client, DC) route produced a successful
+        # fetch within this many seconds — repeat opens start without probe lag.
+        SMART_ROUTING_PROBE_TRUST_SEC = float(getenv("SMART_ROUTING_PROBE_TRUST_SEC", "60") or 60)
+    except Exception:
+        SMART_ROUTING_PROBE_TRUST_SEC = 60.0
+    try:
+        # While the probe runs, stream start begins on the best-known base
+        # client. If the probe finishes within this budget its pick is used;
+        # beyond it the probe is left running in the background.
+        SMART_ROUTING_PROBE_OVERLAP_SEC = float(getenv("SMART_ROUTING_PROBE_OVERLAP_SEC", "0.4") or 0.4)
+    except Exception:
+        SMART_ROUTING_PROBE_OVERLAP_SEC = 0.4
 
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
     MANUAL_CHANNELS = [channel.strip() for channel in (getenv("MANUAL_CHANNELS") or "").split(",") if channel.strip()]
@@ -285,6 +309,13 @@ class Telegram:
 
     DISK_CACHE_CONCURRENCY = int(getenv("DISK_CACHE_CONCURRENCY", "1") or 1)
     DISK_CACHE_PRECACHE_ON_INGEST = getenv("DISK_CACHE_PRECACHE_ON_INGEST", "false").lower() == "true"
+    # Optional fast-start prefix cache: cache only the first N MiB of a file so
+    # the opening of repeat streams is served from local disk while the rest
+    # continues from Telegram. 0 = disabled.
+    try:
+        DISK_CACHE_FIRST_MB = float(getenv("DISK_CACHE_FIRST_MB", "0") or 0)
+    except Exception:
+        DISK_CACHE_FIRST_MB = 0.0
 
     NGINX_ACCEL_REDIRECT_ENABLED = getenv("NGINX_ACCEL_REDIRECT_ENABLED", "false").lower() == "true"
     NGINX_ACCEL_REDIRECT_LOCATION = getenv("NGINX_ACCEL_REDIRECT_LOCATION", "/_cache/")

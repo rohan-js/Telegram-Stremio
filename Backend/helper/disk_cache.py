@@ -103,6 +103,39 @@ def is_complete_cache_file(path: Path, expected_size: Optional[int] = None) -> b
         return False
 
 
+def first_cache_bytes() -> int:
+    """Head bytes to cache per file (DISK_CACHE_FIRST_MB); 0 = feature off."""
+    try:
+        mb = float(getattr(Telegram, "DISK_CACHE_FIRST_MB", 0.0) or 0.0)
+    except Exception:
+        mb = 0.0
+    if mb <= 0:
+        return 0
+    size = int(mb * 1024 * 1024)
+    budget = _cache_max_bytes()
+    if budget > 0:
+        size = min(size, budget)
+    return max(0, size)
+
+
+def first_cache_enabled() -> bool:
+    """First-N-MiB fast-start cache is only active under the bounded disk cache."""
+    return disk_cache_enabled() and first_cache_bytes() > 0
+
+
+def first_cache_relpath(chat_id: int, msg_id: int, unique_id: str) -> str:
+    h = _hash_key(chat_id, msg_id, unique_id)
+    return f"{h[:2]}/{h}.first.bin"
+
+
+def first_cache_abspath(chat_id: int, msg_id: int, unique_id: str) -> Path:
+    return cache_root_dir() / first_cache_relpath(chat_id, msg_id, unique_id)
+
+
+def is_complete_first_cache(path: Path, expected_bytes: Optional[int] = None) -> bool:
+    return is_complete_cache_file(path, expected_size=expected_bytes)
+
+
 def touch_cache_file(path: Path) -> None:
     try:
         os.utime(path, None)

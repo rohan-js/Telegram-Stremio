@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from Backend.fastapi.routes import stream_routes
 from Backend.fastapi.routes.stream_routes import (
+    _client_route_trusted,
     choose_effective_prefetch,
     get_configured_stream_concurrency,
     resolve_video_mime_type,
@@ -135,6 +136,50 @@ class ShouldProbeRequestTests(unittest.TestCase):
     def test_mid_file_seek_skips_probe(self):
         self.assertFalse(should_probe_request("bytes=1048576-", 1048576))
         self.assertFalse(should_probe_request("bytes=1024-2048", 1024))
+
+
+class ClientRouteTrustTests(unittest.TestCase):
+    """Instant-start trust window: a fresh (client, DC) route skips the probe."""
+
+    def setUp(self):
+        custom_dl.client_dc_last_seen.clear()
+
+    def tearDown(self):
+        custom_dl.client_dc_last_seen.clear()
+
+    def test_fresh_route_is_trusted(self):
+        custom_dl.client_dc_last_seen[(0, 2)] = 1_000_000.0
+        with patch.object(stream_routes.Telegram, "SMART_ROUTING_PROBE_TRUST_SEC", 60.0):
+            with patch.object(stream_routes, "time") as fake_time:
+                fake_time.time.return_value = 1_000_010.0
+                self.assertTrue(_client_route_trusted(0, 2))
+
+    def test_stale_route_is_not_trusted(self):
+        custom_dl.client_dc_last_seen[(0, 2)] = 1_000_000.0
+        with patch.object(stream_routes.Telegram, "SMART_ROUTING_PROBE_TRUST_SEC", 60.0):
+            with patch.object(stream_routes, "time") as fake_time:
+                fake_time.time.return_value = 1_000_061.0
+                self.assertFalse(_client_route_trusted(0, 2))
+
+    def test_unknown_route_is_not_trusted(self):
+        with patch.object(stream_routes.Telegram, "SMART_ROUTING_PROBE_TRUST_SEC", 60.0):
+            with patch.object(stream_routes, "time") as fake_time:
+                fake_time.time.return_value = 1_000_000.0
+                self.assertFalse(_client_route_trusted(3, 2))
+
+    def test_zero_trust_window_disables_skip(self):
+        custom_dl.client_dc_last_seen[(0, 2)] = 1_000_000.0
+        with patch.object(stream_routes.Telegram, "SMART_ROUTING_PROBE_TRUST_SEC", 0.0):
+            with patch.object(stream_routes, "time") as fake_time:
+                fake_time.time.return_value = 1_000_001.0
+                self.assertFalse(_client_route_trusted(0, 2))
+
+    def test_wrong_dc_is_never_trusted(self):
+        custom_dl.client_dc_last_seen[(0, 2)] = 1_000_000.0
+        with patch.object(stream_routes.Telegram, "SMART_ROUTING_PROBE_TRUST_SEC", 60.0):
+            with patch.object(stream_routes, "time") as fake_time:
+                fake_time.time.return_value = 1_000_001.0
+                self.assertFalse(_client_route_trusted(0, 3))
 
 
 class LookupTitleCacheTests(unittest.TestCase):
