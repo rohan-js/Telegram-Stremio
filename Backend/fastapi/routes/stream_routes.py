@@ -224,8 +224,21 @@ def _client_route_trusted(client_index: int, target_dc: int) -> bool:
         trust_sec = 60.0
     if trust_sec <= 0:
         return False
+    now = time.time()
     last_seen = client_dc_last_seen.get((int(client_index), int(target_dc or 0)))
-    return last_seen is not None and (time.time() - float(last_seen)) <= trust_sec
+    if last_seen is not None and (now - float(last_seen)) <= trust_sec:
+        return True
+    # DC-level fallback: if ANY helper recently proved this file's DC is
+    # reachable, skip re-probing. The base client itself may simply carry a
+    # colder session — one session handshake is cheaper than 3 fresh probes,
+    # and this closes the fresh-boot gap where the first open's background
+    # probe hasn't finished stamping the base client yet.
+    dc = int(target_dc or 0)
+    if dc > 0:
+        for (_, seen_dc), seen in client_dc_last_seen.items():
+            if int(seen_dc or 0) == dc and (now - float(seen)) <= trust_sec:
+                return True
+    return False
 
 
 async def stream_file_range_with_usage(

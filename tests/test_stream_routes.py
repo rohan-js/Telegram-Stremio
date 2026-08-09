@@ -182,6 +182,22 @@ class ClientRouteTrustTests(unittest.TestCase):
                 fake_time.time.return_value = 1_000_001.0
                 self.assertFalse(_client_route_trusted(0, 3))
 
+    def test_any_fresh_route_for_dc_skips_probe(self):
+        # A different client proved DC 2 reachable; the base client itself has
+        # no stamp yet (fresh-boot case) but re-probing is still unnecessary.
+        custom_dl.client_dc_last_seen[(5, 2)] = 1_000_000.0
+        with patch.object(stream_routes.Telegram, "SMART_ROUTING_PROBE_TRUST_SEC", 60.0):
+            with patch.object(stream_routes, "time") as fake_time:
+                fake_time.time.return_value = 1_000_010.0
+                self.assertTrue(_client_route_trusted(0, 2))
+
+    def test_stale_any_route_for_dc_still_probes(self):
+        custom_dl.client_dc_last_seen[(5, 2)] = 1_000_000.0
+        with patch.object(stream_routes.Telegram, "SMART_ROUTING_PROBE_TRUST_SEC", 60.0):
+            with patch.object(stream_routes, "time") as fake_time:
+                fake_time.time.return_value = 1_000_061.0
+                self.assertFalse(_client_route_trusted(0, 2))
+
 
 class ProbeStampsTrustWindowTests(unittest.TestCase):
     """A successful probe must stamp every candidate route as recently-seen,
