@@ -23,6 +23,12 @@ services:
       - qbittorrent
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Pin Oracle's instance DNS: containers created when the host resolv.conf
+    # points at systemd-resolved (127.0.0.53) get 21s Atlas SRV timeouts on
+    # every DB call and crash-loop at startup. The metadata DNS resolves
+    # immediately (verified against the baseline container).
+    dns:
+      - 169.254.169.254
     ports:
       - "8000:8000"
     volumes:
