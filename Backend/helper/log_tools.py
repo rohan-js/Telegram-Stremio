@@ -4,6 +4,11 @@ from pathlib import Path
 from Backend.config import Telegram
 
 LOG_PATHS = [
+    # The app's logger writes here (Backend/logger.py FileHandler("log.txt")).
+    Path("log.txt"),
+    # Repo/app-root anchored fallback for processes whose CWD isn't the app dir.
+    Path(__file__).resolve().parents[1] / "log.txt",
+    # Kept for upstream (botlog-based) compatibility.
     Path("botlog.txt"),
     Path("logs/bot.log"),
     Path("Backend/botlog.txt"),
