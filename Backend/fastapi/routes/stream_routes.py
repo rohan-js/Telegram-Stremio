@@ -1160,6 +1160,62 @@ async def media_streamer(
     start, end = parse_range_header(range_header, file_size)
     req_length = end - start + 1
 
+    file_name = file_id.file_name or f"{secrets.token_hex(4)}.bin"
+    mime_type = resolve_video_mime_type(file_name, file_id.mime_type)
+
+    if "." not in file_name and "/" in mime_type:
+        file_name = f"{file_name}.{mime_type.split('/')[1]}"
+
+    # ------------------------------------------------------------------
+    # Tail cache hit path (instant MKV Cues / MP4 Moov for ExoPlayer)
+    # ------------------------------------------------------------------
+    if bool(getattr(Telegram, "TELEGRAM_TAIL_CACHE_ENABLED", True)) and file_size > 524288 and chat_id and msg_id:
+        tail_cache_kb = max(64, int(getattr(Telegram, "TELEGRAM_TAIL_CACHE_SIZE_KB", 256) or 256))
+        tail_threshold = max(0, file_size - tail_cache_kb * 1024)
+        if start >= tail_threshold:
+            cached_tail = await TAIL_CACHE.get_tail(chat_id, msg_id, start, req_length)
+            if cached_tail is not None and len(cached_tail) == req_length:
+                LOGGER.debug("TailCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, len(cached_tail))
+                from fastapi.responses import Response as PlainResponse
+                return PlainResponse(
+                    content=cached_tail,
+                    status_code=206,
+                    headers={
+                        "Content-Range": f"bytes {start}-{end}/{file_size}",
+                        "Content-Length": str(len(cached_tail)),
+                        "Content-Type": mime_type,
+                        "Accept-Ranges": "bytes",
+                        "Content-Disposition": _content_disposition(file_name),
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+                    },
+                )
+
+    # ------------------------------------------------------------------
+    # Head cache hit path (instant Chunk 0 playback from Stream Picker pre-buffering)
+    # ------------------------------------------------------------------
+    if bool(getattr(Telegram, "STREAM_PICKER_PREBUFFER_ENABLED", True)) and chat_id and msg_id:
+        head_cache_kb = max(64, int(getattr(Telegram, "STREAM_PICKER_PREBUFFER_SIZE_KB", 256) or 256))
+        head_ceiling = head_cache_kb * 1024
+        if start < head_ceiling and (req_length <= head_ceiling or end < head_ceiling):
+            cached_head = await HEAD_CACHE.get_head(chat_id, msg_id, start, req_length)
+            if cached_head is not None and len(cached_head) == req_length:
+                LOGGER.info("HeadCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, len(cached_head))
+                from fastapi.responses import Response as PlainResponse
+                return PlainResponse(
+                    content=cached_head,
+                    status_code=206,
+                    headers={
+                        "Content-Range": f"bytes {start}-{end}/{file_size}",
+                        "Content-Length": str(len(cached_head)),
+                        "Content-Type": mime_type,
+                        "Accept-Ranges": "bytes",
+                        "Content-Disposition": _content_disposition(file_name),
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+                    },
+                )
+
     probe_granularity = max(4096, min(int(getattr(Telegram, "SMART_ROUTING_PROBE_BYTES", 32768) or 32768), 1024 * 1024))
     probe_offset = start - (start % probe_granularity)
     # -- Instant-start client selection ---------------------------------------
@@ -1230,62 +1286,6 @@ async def media_streamer(
     file_size = file_id.file_size
     start, end = parse_range_header(range_header, file_size)
     req_length = end - start + 1
-
-    file_name = file_id.file_name or f"{secrets.token_hex(4)}.bin"
-    mime_type = resolve_video_mime_type(file_name, file_id.mime_type)
-
-    if "." not in file_name and "/" in mime_type:
-        file_name = f"{file_name}.{mime_type.split('/')[1]}"
-
-    # ------------------------------------------------------------------
-    # Tail cache hit path (instant MKV Cues / MP4 Moov for ExoPlayer)
-    # ------------------------------------------------------------------
-    if bool(getattr(Telegram, "TELEGRAM_TAIL_CACHE_ENABLED", True)) and file_size > 524288 and chat_id and msg_id:
-        tail_cache_kb = max(64, int(getattr(Telegram, "TELEGRAM_TAIL_CACHE_SIZE_KB", 256) or 256))
-        tail_threshold = max(0, file_size - tail_cache_kb * 1024)
-        if start >= tail_threshold:
-            cached_tail = await TAIL_CACHE.get_tail(chat_id, msg_id, start, req_length)
-            if cached_tail is not None and len(cached_tail) == req_length:
-                LOGGER.debug("TailCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, len(cached_tail))
-                from fastapi.responses import Response as PlainResponse
-                return PlainResponse(
-                    content=cached_tail,
-                    status_code=206,
-                    headers={
-                        "Content-Range": f"bytes {start}-{end}/{file_size}",
-                        "Content-Length": str(len(cached_tail)),
-                        "Content-Type": mime_type,
-                        "Accept-Ranges": "bytes",
-                        "Content-Disposition": _content_disposition(file_name),
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
-                    },
-                )
-
-    # ------------------------------------------------------------------
-    # Head cache hit path (instant Chunk 0 playback from Stream Picker pre-buffering)
-    # ------------------------------------------------------------------
-    if bool(getattr(Telegram, "STREAM_PICKER_PREBUFFER_ENABLED", True)) and chat_id and msg_id:
-        head_cache_kb = max(64, int(getattr(Telegram, "STREAM_PICKER_PREBUFFER_SIZE_KB", 256) or 256))
-        head_ceiling = head_cache_kb * 1024
-        if start < head_ceiling and (req_length <= head_ceiling or end < head_ceiling):
-            cached_head = await HEAD_CACHE.get_head(chat_id, msg_id, start, req_length)
-            if cached_head is not None and len(cached_head) == req_length:
-                LOGGER.info("HeadCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, len(cached_head))
-                from fastapi.responses import Response as PlainResponse
-                return PlainResponse(
-                    content=cached_head,
-                    status_code=206,
-                    headers={
-                        "Content-Range": f"bytes {start}-{end}/{file_size}",
-                        "Content-Length": str(len(cached_head)),
-                        "Content-Type": mime_type,
-                        "Accept-Ranges": "bytes",
-                        "Content-Disposition": _content_disposition(file_name),
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
-                    },
-                )
 
     chunk_size = select_telegram_chunk_size(range_header, start=start, req_length=req_length)
     offset = start - (start % chunk_size)
