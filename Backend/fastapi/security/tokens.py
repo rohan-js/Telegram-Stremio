@@ -37,8 +37,31 @@ def enforce_playback_token(token_data: dict):
         raise HTTPException(status_code=429, detail=f"Streaming limit reached: {token_data.get('limit_exceeded')}")
 
 
+import time
+from typing import Optional
+
+_TOKEN_CACHE: dict[str, tuple[float, dict]] = {}
+_TOKEN_CACHE_TTL = 30.0
+
+
+async def get_cached_api_token(token: str) -> Optional[dict]:
+    now = time.time()
+    if token in _TOKEN_CACHE:
+        cached_time, data = _TOKEN_CACHE[token]
+        if now - cached_time < _TOKEN_CACHE_TTL:
+            return data.copy() if isinstance(data, dict) else data
+    data = await db.get_api_token(token)
+    if data:
+        _TOKEN_CACHE[token] = (now, data.copy())
+    return data
+
+
+def invalidate_api_token_cache(token: str) -> None:
+    _TOKEN_CACHE.pop(token, None)
+
+
 async def verify_token(token: str):
-    token_data = await db.get_api_token(token)
+    token_data = await get_cached_api_token(token)
     if not token_data:
         raise HTTPException(status_code=401, detail="Invalid or expired API token")
 
