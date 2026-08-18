@@ -132,6 +132,22 @@ class Telegram:
         TELEGRAM_PREWARM_DCS = [1, 2, 4, 5]
         TELEGRAM_KEEPALIVE_INTERVAL_SEC = 45
 
+    try:
+        # MKV/MP4 Tail & Cues RAM cache for instant seek index lookups on Android TV / ExoPlayer.
+        TELEGRAM_TAIL_CACHE_ENABLED = getenv("TELEGRAM_TAIL_CACHE_ENABLED", "true").lower() == "true"
+        TELEGRAM_TAIL_CACHE_SIZE_KB = int(getenv("TELEGRAM_TAIL_CACHE_SIZE_KB", "256") or 256)
+        TELEGRAM_TAIL_CACHE_MAX_ENTRIES = int(getenv("TELEGRAM_TAIL_CACHE_MAX_ENTRIES", "64") or 64)
+        # Slices initial header probe to 256 KB for ultra-fast codec negotiation.
+        STREAM_RAMP_UP_CHUNK_KB = int(getenv("STREAM_RAMP_UP_CHUNK_KB", "256") or 256)
+        # Saturates the multi-bot pool immediately on stream open to pre-fill ExoPlayer buffer in ~250ms.
+        STREAM_BURST_PREFILL_ENABLED = getenv("STREAM_BURST_PREFILL_ENABLED", "true").lower() == "true"
+    except Exception:
+        TELEGRAM_TAIL_CACHE_ENABLED = True
+        TELEGRAM_TAIL_CACHE_SIZE_KB = 256
+        TELEGRAM_TAIL_CACHE_MAX_ENTRIES = 64
+        STREAM_RAMP_UP_CHUNK_KB = 256
+        STREAM_BURST_PREFILL_ENABLED = True
+
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
     MANUAL_CHANNELS = [channel.strip() for channel in (getenv("MANUAL_CHANNELS") or "").split(",") if channel.strip()]
     ANIME_CHANNELS = [channel.strip() for channel in (getenv("ANIME_CHANNELS") or "").split(",") if channel.strip()]

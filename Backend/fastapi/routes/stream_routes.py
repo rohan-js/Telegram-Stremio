@@ -18,6 +18,8 @@ from Backend.helper.custom_dl import (
     ByteStreamer,
     ACTIVE_STREAMS,
     RECENT_STREAMS,
+    TAIL_CACHE,
+    prefetch_file_tail,
     client_dc_avg_mbps,
     client_dc_ttfb_sec,
     client_dc_last_seen,
@@ -596,9 +598,12 @@ def get_configured_stream_concurrency() -> tuple[int, int]:
     return prefetch, parallelism
 
 
-def select_telegram_chunk_size(range_header: str | None) -> int:
-    """Use smaller chunks for seek/range requests and 1 MB for full streams."""
+def select_telegram_chunk_size(range_header: str | None, start: int = 0, req_length: int | None = None) -> int:
+    """Use smaller chunks for probe/seek requests and 1 MB for full streams."""
     if range_header:
+        ramp_up_kb = max(64, int(getattr(Telegram, "STREAM_RAMP_UP_CHUNK_KB", 256) or 256))
+        if start == 0 and req_length is not None and req_length <= ramp_up_kb * 1024:
+            return ramp_up_kb * 1024
         return 512 * 1024
     return ByteStreamer.CHUNK_SIZE
 
@@ -1222,17 +1227,42 @@ async def media_streamer(
     start, end = parse_range_header(range_header, file_size)
     req_length = end - start + 1
 
-    chunk_size = select_telegram_chunk_size(range_header)
-    offset = start - (start % chunk_size)
-    first_part_cut = start - offset
-    last_part_cut = (end % chunk_size) + 1
-    part_count = (end // chunk_size) - (offset // chunk_size) + 1
-
     file_name = file_id.file_name or f"{secrets.token_hex(4)}.bin"
     mime_type = resolve_video_mime_type(file_name, file_id.mime_type)
 
     if "." not in file_name and "/" in mime_type:
         file_name = f"{file_name}.{mime_type.split('/')[1]}"
+
+    # ------------------------------------------------------------------
+    # Tail cache hit path (instant MKV Cues / MP4 Moov for ExoPlayer)
+    # ------------------------------------------------------------------
+    if bool(getattr(Telegram, "TELEGRAM_TAIL_CACHE_ENABLED", True)) and file_size > 524288 and chat_id and msg_id:
+        tail_cache_kb = max(64, int(getattr(Telegram, "TELEGRAM_TAIL_CACHE_SIZE_KB", 256) or 256))
+        tail_threshold = max(0, file_size - tail_cache_kb * 1024)
+        if start >= tail_threshold:
+            cached_tail = await TAIL_CACHE.get_tail(chat_id, msg_id, start, req_length)
+            if cached_tail is not None and len(cached_tail) == req_length:
+                LOGGER.debug("TailCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, len(cached_tail))
+                from fastapi.responses import Response as PlainResponse
+                return PlainResponse(
+                    content=cached_tail,
+                    status_code=206,
+                    headers={
+                        "Content-Range": f"bytes {start}-{end}/{file_size}",
+                        "Content-Length": str(len(cached_tail)),
+                        "Content-Type": mime_type,
+                        "Accept-Ranges": "bytes",
+                        "Content-Disposition": _content_disposition(file_name),
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+                    },
+                )
+
+    chunk_size = select_telegram_chunk_size(range_header, start=start, req_length=req_length)
+    offset = start - (start % chunk_size)
+    first_part_cut = start - offset
+    last_part_cut = (end % chunk_size) + 1
+    part_count = (end // chunk_size) - (offset // chunk_size) + 1
 
     from urllib.parse import unquote
 
@@ -1520,6 +1550,9 @@ async def media_streamer(
         "pool_size": 1 + len(extra_clients_for_stream),
         "effective_parallelism": parallelism,
     }
+
+    if start == 0 and file_size > 524288 and chat_id and msg_id:
+        asyncio.create_task(prefetch_file_tail(file_id, streamer, extra_clients_for_stream))
 
     body_gen = await streamer.prefetch_stream(
         file_id=file_id,

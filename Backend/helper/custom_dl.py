@@ -2,7 +2,7 @@ import asyncio
 import time
 import secrets
 from hashlib import sha256
-from collections import deque
+from collections import deque, OrderedDict
 from typing import Any, Callable, Dict, List, Union, Optional, Tuple
 import traceback
 from fastapi import Request
@@ -34,6 +34,49 @@ client_dc_ttfb_sec: Dict[Tuple[int, int], float] = {}
 # Last time a (client, DC) pair produced a successful fetch/probe. Lets the
 # smart-routing trust window skip a live probe on repeat opens.
 client_dc_last_seen: Dict[Tuple[int, int], float] = {}
+
+
+class TailCache:
+    """Bounded in-memory LRU cache for the final N KB (MKV Cues / MP4 Moov atom) of media files.
+    Satisfies ExoPlayer duration & seek index lookups in <5ms without a Telegram round-trip."""
+
+    def __init__(self, max_entries: int = 64):
+        self.max_entries = max_entries
+        self._cache: OrderedDict[Tuple[int, int], Tuple[int, bytes]] = OrderedDict()
+        self._lock = asyncio.Lock()
+
+    async def get_tail(self, chat_id: int, message_id: int, start_offset: int, length: int) -> Optional[bytes]:
+        key = (int(chat_id), int(message_id))
+        async with self._lock:
+            if key not in self._cache:
+                return None
+            tail_offset, tail_bytes = self._cache[key]
+            self._cache.move_to_end(key)
+
+        tail_end = tail_offset + len(tail_bytes)
+        req_end = start_offset + length
+        if start_offset >= tail_offset and req_end <= tail_end:
+            rel_start = start_offset - tail_offset
+            rel_end = rel_start + length
+            return tail_bytes[rel_start:rel_end]
+        return None
+
+    async def put_tail(self, chat_id: int, message_id: int, tail_offset: int, tail_bytes: bytes) -> None:
+        if not tail_bytes:
+            return
+        key = (int(chat_id), int(message_id))
+        max_entries = self.max_entries or max(8, int(getattr(Telegram, "TELEGRAM_TAIL_CACHE_MAX_ENTRIES", 64) or 64))
+        async with self._lock:
+            self._cache[key] = (int(tail_offset), tail_bytes)
+            self._cache.move_to_end(key)
+            while len(self._cache) > max_entries:
+                self._cache.popitem(last=False)
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+
+TAIL_CACHE = TailCache()
 
 # Per-file Telegram CDN blacklist (in-memory only): a file whose CDN path keeps
 # failing is served from its master DC until the short TTL expires, instead of
@@ -1019,6 +1062,9 @@ class ByteStreamer:
                 max_parallel = max(1, parallelism)
 
                 initial = min(part_count, max_parallel)
+                burst_enabled = bool(getattr(Telegram, "STREAM_BURST_PREFILL_ENABLED", True))
+                if burst_enabled and offset == 0:
+                    initial = min(part_count, max(max_parallel, len(session_pool)))
                 for i in range(initial):
                     seq = next_to_schedule
                     off = offset + seq * chunk_size
@@ -1678,3 +1724,53 @@ def initialize_all_streamers():
         if idx not in ByteStreamer._instances and client is not None:
             ByteStreamer(client, idx)
     start_dc_keepalive_service()
+
+
+async def prefetch_file_tail(
+    file_id: FileId,
+    streamer: "ByteStreamer",
+    session_pool: Optional[list] = None,
+) -> None:
+    """Asynchronously fetch the last 256 KB of a media file into TailCache to pre-empt ExoPlayer seek index requests."""
+    try:
+        if not bool(getattr(Telegram, "TELEGRAM_TAIL_CACHE_ENABLED", True)):
+            return
+        chat_id = getattr(file_id, "chat_id", None)
+        message_id = getattr(file_id, "message_id", None)
+        file_size = int(getattr(file_id, "file_size", 0) or 0)
+        if not chat_id or not message_id or file_size <= 524288:
+            return
+
+        tail_size_kb = max(64, int(getattr(Telegram, "TELEGRAM_TAIL_CACHE_SIZE_KB", 256) or 256))
+        tail_bytes_count = tail_size_kb * 1024
+        tail_offset = max(0, file_size - tail_bytes_count)
+
+        existing = await TAIL_CACHE.get_tail(chat_id, message_id, tail_offset, tail_bytes_count)
+        if existing:
+            return
+
+        fetch_session = None
+        fetch_location = None
+        fetch_streamer = streamer
+
+        if session_pool and len(session_pool) > 1:
+            _, fetch_session, loc_box, fetch_streamer = session_pool[-1]
+            fetch_location = loc_box[0]
+        else:
+            fetch_session = await streamer._get_media_session(file_id)
+            fetch_location = await streamer._get_location(file_id)
+
+        tail_data = await fetch_streamer._fetch_file_bytes(
+            media_session=fetch_session,
+            location=fetch_location,
+            offset=tail_offset,
+            limit=tail_bytes_count,
+        )
+        if tail_data:
+            await TAIL_CACHE.put_tail(chat_id, message_id, tail_offset, tail_data)
+            LOGGER.debug(
+                "TailCache: pre-fetched %d bytes for (%s, %s) offset=%d",
+                len(tail_data), chat_id, message_id, tail_offset,
+            )
+    except Exception as e:
+        LOGGER.debug("TailCache prefetch error: %s", e)
