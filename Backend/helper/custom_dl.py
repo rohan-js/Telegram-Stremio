@@ -8,7 +8,7 @@ import traceback
 from fastapi import Request
 from pyrogram import Client, raw, utils
 from pyrogram.crypto import aes
-from pyrogram.errors import AuthBytesInvalid, RPCError
+from pyrogram.errors import AuthBytesInvalid, RPCError, FloodWait
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from pyrogram.session import Session, Auth
 from Backend.logger import LOGGER
@@ -34,6 +34,50 @@ client_dc_ttfb_sec: Dict[Tuple[int, int], float] = {}
 # Last time a (client, DC) pair produced a successful fetch/probe. Lets the
 # smart-routing trust window skip a live probe on repeat opens.
 client_dc_last_seen: Dict[Tuple[int, int], float] = {}
+
+_client_semaphores: Dict[int, asyncio.Semaphore] = {}
+_global_chunk_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def get_client_semaphore(client_index: int) -> asyncio.Semaphore:
+    """Return the per-client MTProto request concurrency semaphore."""
+    idx = int(client_index)
+    if idx not in _client_semaphores:
+        max_concurrent = max(1, int(getattr(Telegram, "TELEGRAM_MAX_CONCURRENT_PER_CLIENT", 6) or 6))
+        _client_semaphores[idx] = asyncio.Semaphore(max_concurrent)
+    return _client_semaphores[idx]
+
+
+def get_global_chunk_semaphore() -> asyncio.Semaphore:
+    """Return the global concurrent chunk semaphore protecting total VPS socket load."""
+    global _global_chunk_semaphore
+    if _global_chunk_semaphore is None:
+        max_global = max(1, int(getattr(Telegram, "TELEGRAM_MAX_GLOBAL_CONCURRENT_CHUNKS", 24) or 24))
+        _global_chunk_semaphore = asyncio.Semaphore(max_global)
+    return _global_chunk_semaphore
+
+
+def record_client_floodwait(client_index: int, target_dc: int, wait_sec: int) -> None:
+    """Put a client on cooldown when Telegram issues FloodWait(x)."""
+    try:
+        if not bool(getattr(Telegram, "TELEGRAM_FLOODWAIT_AUTO_COOLDOWN", True)):
+            return
+        client_index = int(client_index)
+        target_dc = int(target_dc or 0)
+        wait_sec = max(1, int(wait_sec or 1))
+        until = time.time() + wait_sec + 2
+        client_cooldowns[client_index] = until
+        if target_dc:
+            client_dc_cooldowns[(client_index, target_dc)] = until
+        LOGGER.warning(
+            "Telegram FloodWait protection: client=%s target_dc=%s wait=%ss cooldown_until=%s",
+            client_index,
+            target_dc,
+            wait_sec,
+            round(until, 1),
+        )
+    except Exception as e:
+        LOGGER.debug("Error recording client floodwait: %s", e)
 
 
 class TailCache:
@@ -358,27 +402,32 @@ class ByteStreamer:
         limit: int,
         cdn_supported: Optional[bool] = None,
     ) -> Any:
-        # cdn_supported=None → follow config + per-file blacklist; True/False
-        # forces the flag (used by the master-DC fallback in _fetch_file_bytes).
-        if bool(getattr(Telegram, "TELEGRAM_CDN_ENABLED", True)) and self._cdn_getfile_supported:
-            if cdn_supported is None:
-                cdn_supported = not self._cdn_file_disabled(location)
-            try:
-                request = raw.functions.upload.GetFile(
-                    location=location,
-                    offset=offset,
-                    limit=limit,
-                    cdn_supported=cdn_supported,
-                )
-            except TypeError:
-                self._cdn_getfile_supported = False
-                LOGGER.warning("Telegram CDN disabled for this streamer: PyroFork GetFile has no cdn_supported flag")
-            else:
-                return await media_session.send(request)
+        client_sem = get_client_semaphore(self.client_index)
+        global_sem = get_global_chunk_semaphore()
 
-        return await media_session.send(
-            raw.functions.upload.GetFile(location=location, offset=offset, limit=limit)
-        )
+        async with global_sem:
+            async with client_sem:
+                # cdn_supported=None → follow config + per-file blacklist; True/False
+                # forces the flag (used by the master-DC fallback in _fetch_file_bytes).
+                if bool(getattr(Telegram, "TELEGRAM_CDN_ENABLED", True)) and self._cdn_getfile_supported:
+                    if cdn_supported is None:
+                        cdn_supported = not self._cdn_file_disabled(location)
+                    try:
+                        request = raw.functions.upload.GetFile(
+                            location=location,
+                            offset=offset,
+                            limit=limit,
+                            cdn_supported=cdn_supported,
+                        )
+                    except TypeError:
+                        self._cdn_getfile_supported = False
+                        LOGGER.warning("Telegram CDN disabled for this streamer: PyroFork GetFile has no cdn_supported flag")
+                    else:
+                        return await media_session.send(request)
+
+                return await media_session.send(
+                    raw.functions.upload.GetFile(location=location, offset=offset, limit=limit)
+                )
 
     async def _fetch_file_bytes(
         self,
@@ -1014,21 +1063,34 @@ class ByteStreamer:
                     })
                 except Exception as e:
                     tries += 1
-                    record_route_failure(
-                        use_client_idx,
-                        target_dc,
-                        f"chunk_error:{type(e).__name__}",
-                        stream_id=stream_id,
-                        offset=off,
-                        attempt=tries,
-                    )
+                    err_str = str(getattr(e, "args", e) or e)
+                    is_flood = isinstance(e, FloodWait) or "FLOOD_WAIT" in err_str
+                    if is_flood:
+                        wait_sec = getattr(e, "value", getattr(e, "x", 30))
+                        try:
+                            if not isinstance(wait_sec, (int, float)):
+                                import re
+                                match = re.search(r'FLOOD_WAIT_(\d+)', err_str)
+                                wait_sec = int(match.group(1)) if match else 30
+                        except Exception:
+                            wait_sec = 30
+                        record_client_floodwait(use_client_idx, target_dc, int(wait_sec))
+                    else:
+                        record_route_failure(
+                            use_client_idx,
+                            target_dc,
+                            f"chunk_error:{type(e).__name__}",
+                            stream_id=stream_id,
+                            offset=off,
+                            attempt=tries,
+                        )
                     registry_entry["chunk_errors"] = registry_entry.get("chunk_errors", 0) + 1
                     LOGGER.debug(
                         "Fetch chunk error stream=%s seq=%s off=%s try=%s client=%s target_dc=%s err=%s",
                         stream_id, seq_idx, off, tries, use_client_idx, target_dc, getattr(e, "args", e),
                     )
                     remember_route_attempt({
-                        "event": "chunk_error",
+                        "event": "chunk_floodwait" if is_flood else "chunk_error",
                         "seq": seq_idx,
                         "offset": off,
                         "attempt": tries,
@@ -1036,12 +1098,15 @@ class ByteStreamer:
                         "target_dc": target_dc,
                         "error": str(e)[:240],
                     })
-                    err_str = str(getattr(e, "args", e) or e)
                     if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
                         await refresh_slot_location(slot)
 
                 # Exponential back-off: 0.5 s, 1 s, 2 s, 4 s, 8 s, 10 s (cap)
-                await asyncio.sleep(min(0.5 * (2 ** (tries - 1)), 10.0))
+                if not is_flood:
+                    await asyncio.sleep(min(0.5 * (2 ** (tries - 1)), 10.0))
+                else:
+                    # On floodwait, immediately try next healthy bot in pool
+                    await asyncio.sleep(0.05)
 
             reason = f"failed_after_retries seq={seq_idx} offset={off} client={client_index} target_dc={target_dc}"
             registry_entry["status"] = "error"
@@ -1675,11 +1740,14 @@ _keepalive_task: Optional[asyncio.Task] = None
 
 async def _dc_keepalive_loop():
     """Periodically ping active media sessions across all multi_clients to keep
-    MTProto connections hot and prevent cold socket reconnection latency."""
+    MTProto connections hot with jitter and staggered pings to prevent Telegram connection pressure."""
+    import random
     while True:
         try:
-            interval = max(15, int(getattr(Telegram, "TELEGRAM_KEEPALIVE_INTERVAL_SEC", 45) or 45))
-            await asyncio.sleep(interval)
+            base_interval = max(15, int(getattr(Telegram, "TELEGRAM_KEEPALIVE_INTERVAL_SEC", 45) or 45))
+            jitter = float(getattr(Telegram, "TELEGRAM_KEEPALIVE_JITTER_SEC", 3.0) or 0.0)
+            sleep_time = max(10.0, base_interval + random.uniform(-jitter, jitter))
+            await asyncio.sleep(sleep_time)
             if not bool(getattr(Telegram, "TELEGRAM_PREWARM_ENABLED", True)):
                 continue
 
@@ -1692,6 +1760,8 @@ async def _dc_keepalive_loop():
                     try:
                         # MTProto ping keeps connection alive
                         await session.send(raw.functions.Ping(ping_id=secrets.randbits(63)))
+                        # Stagger pings by 50ms to avoid simultaneous burst across bots
+                        await asyncio.sleep(0.05)
                     except Exception as e:
                         LOGGER.debug("DC keepalive ping error for client %s DC %s: %s", idx, dc_id, e)
                         client.media_sessions.pop(dc_id, None)
@@ -1726,12 +1796,14 @@ def initialize_all_streamers():
     start_dc_keepalive_service()
 
 
-async def prefetch_file_tail(
+_in_flight_tail_fetches: Dict[Tuple[int, int], asyncio.Task] = {}
+
+
+async def _do_prefetch_file_tail(
     file_id: FileId,
     streamer: "ByteStreamer",
     session_pool: Optional[list] = None,
 ) -> None:
-    """Asynchronously fetch the last 256 KB of a media file into TailCache to pre-empt ExoPlayer seek index requests."""
     try:
         if not bool(getattr(Telegram, "TELEGRAM_TAIL_CACHE_ENABLED", True)):
             return
@@ -1774,3 +1846,30 @@ async def prefetch_file_tail(
             )
     except Exception as e:
         LOGGER.debug("TailCache prefetch error: %s", e)
+
+
+async def prefetch_file_tail(
+    file_id: FileId,
+    streamer: "ByteStreamer",
+    session_pool: Optional[list] = None,
+) -> None:
+    """Asynchronously fetch the last 256 KB of a media file into TailCache with single-flight deduplication."""
+    chat_id = getattr(file_id, "chat_id", None)
+    message_id = getattr(file_id, "message_id", None)
+    if not chat_id or not message_id:
+        return
+    key = (int(chat_id), int(message_id))
+
+    if key in _in_flight_tail_fetches and not _in_flight_tail_fetches[key].done():
+        try:
+            await _in_flight_tail_fetches[key]
+        except Exception:
+            pass
+        return
+
+    task = asyncio.create_task(_do_prefetch_file_tail(file_id, streamer, session_pool))
+    _in_flight_tail_fetches[key] = task
+    try:
+        await task
+    finally:
+        _in_flight_tail_fetches.pop(key, None)

@@ -141,12 +141,21 @@ class Telegram:
         STREAM_RAMP_UP_CHUNK_KB = int(getenv("STREAM_RAMP_UP_CHUNK_KB", "256") or 256)
         # Saturates the multi-bot pool immediately on stream open to pre-fill ExoPlayer buffer in ~250ms.
         STREAM_BURST_PREFILL_ENABLED = getenv("STREAM_BURST_PREFILL_ENABLED", "true").lower() == "true"
+        # Connection pressure & MTProto rate limit protection
+        TELEGRAM_MAX_CONCURRENT_PER_CLIENT = int(getenv("TELEGRAM_MAX_CONCURRENT_PER_CLIENT", "6") or 6)
+        TELEGRAM_MAX_GLOBAL_CONCURRENT_CHUNKS = int(getenv("TELEGRAM_MAX_GLOBAL_CONCURRENT_CHUNKS", "24") or 24)
+        TELEGRAM_FLOODWAIT_AUTO_COOLDOWN = getenv("TELEGRAM_FLOODWAIT_AUTO_COOLDOWN", "true").lower() == "true"
+        TELEGRAM_KEEPALIVE_JITTER_SEC = float(getenv("TELEGRAM_KEEPALIVE_JITTER_SEC", "3.0") or 3.0)
     except Exception:
         TELEGRAM_TAIL_CACHE_ENABLED = True
         TELEGRAM_TAIL_CACHE_SIZE_KB = 256
         TELEGRAM_TAIL_CACHE_MAX_ENTRIES = 64
         STREAM_RAMP_UP_CHUNK_KB = 256
         STREAM_BURST_PREFILL_ENABLED = True
+        TELEGRAM_MAX_CONCURRENT_PER_CLIENT = 6
+        TELEGRAM_MAX_GLOBAL_CONCURRENT_CHUNKS = 24
+        TELEGRAM_FLOODWAIT_AUTO_COOLDOWN = True
+        TELEGRAM_KEEPALIVE_JITTER_SEC = 3.0
 
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
     MANUAL_CHANNELS = [channel.strip() for channel in (getenv("MANUAL_CHANNELS") or "").split(",") if channel.strip()]
