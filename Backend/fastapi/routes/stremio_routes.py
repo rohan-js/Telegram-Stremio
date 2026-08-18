@@ -1344,10 +1344,12 @@ async def _trigger_picker_prebuffer(quality_id: str) -> None:
             return
 
         chat_id = int(raw_chat_id) if str(raw_chat_id).startswith("-") else int(f"-100{raw_chat_id}")
-        streamer = ByteStreamer._instances.get(0) or ByteStreamer(StreamBot, 0)
-        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=int(msg_id))
+        msg_id_int = int(msg_id)
+        from Backend.fastapi.routes.stream_routes import get_streamer
+        streamer = get_streamer(0)
+        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=msg_id_int)
         if file_id:
-            await prefetch_stream_head(file_id, streamer)
+            await prefetch_stream_head(file_id, streamer, chat_id=chat_id, message_id=msg_id_int)
     except Exception as e:
         LOGGER.debug("Picker prebuffer failed for quality_id=%s: %s", quality_id, e)
 

@@ -1579,7 +1579,7 @@ async def media_streamer(
     }
 
     if start == 0 and file_size > 524288 and chat_id and msg_id:
-        asyncio.create_task(prefetch_file_tail(file_id, streamer, extra_clients_for_stream))
+        asyncio.create_task(prefetch_file_tail(file_id, streamer, extra_clients_for_stream, chat_id=chat_id, message_id=msg_id))
 
     body_gen = await streamer.prefetch_stream(
         file_id=file_id,

@@ -1845,21 +1845,23 @@ async def _do_prefetch_file_tail(
     file_id: FileId,
     streamer: "ByteStreamer",
     session_pool: Optional[list] = None,
+    chat_id: Optional[int] = None,
+    message_id: Optional[int] = None,
 ) -> None:
     try:
         if not bool(getattr(Telegram, "TELEGRAM_TAIL_CACHE_ENABLED", True)):
             return
-        chat_id = getattr(file_id, "chat_id", None)
-        message_id = getattr(file_id, "message_id", None)
+        c_id = chat_id if chat_id is not None else getattr(file_id, "chat_id", None)
+        m_id = message_id if message_id is not None else getattr(file_id, "message_id", None)
         file_size = int(getattr(file_id, "file_size", 0) or 0)
-        if not chat_id or not message_id or file_size <= 524288:
+        if not c_id or not m_id or file_size <= 524288:
             return
 
         tail_size_kb = max(64, int(getattr(Telegram, "TELEGRAM_TAIL_CACHE_SIZE_KB", 256) or 256))
         tail_bytes_count = tail_size_kb * 1024
         tail_offset = max(0, file_size - tail_bytes_count)
 
-        existing = await TAIL_CACHE.get_tail(chat_id, message_id, tail_offset, tail_bytes_count)
+        existing = await TAIL_CACHE.get_tail(c_id, m_id, tail_offset, tail_bytes_count)
         if existing:
             return
 
@@ -1881,10 +1883,10 @@ async def _do_prefetch_file_tail(
             limit=tail_bytes_count,
         )
         if tail_data:
-            await TAIL_CACHE.put_tail(chat_id, message_id, tail_offset, tail_data)
+            await TAIL_CACHE.put_tail(c_id, m_id, tail_offset, tail_data)
             LOGGER.debug(
                 "TailCache: pre-fetched %d bytes for (%s, %s) offset=%d",
-                len(tail_data), chat_id, message_id, tail_offset,
+                len(tail_data), c_id, m_id, tail_offset,
             )
     except Exception as e:
         LOGGER.debug("TailCache prefetch error: %s", e)
@@ -1894,13 +1896,15 @@ async def prefetch_file_tail(
     file_id: FileId,
     streamer: "ByteStreamer",
     session_pool: Optional[list] = None,
+    chat_id: Optional[int] = None,
+    message_id: Optional[int] = None,
 ) -> None:
     """Asynchronously fetch the last 256 KB of a media file into TailCache with single-flight deduplication."""
-    chat_id = getattr(file_id, "chat_id", None)
-    message_id = getattr(file_id, "message_id", None)
-    if not chat_id or not message_id:
+    c_id = chat_id if chat_id is not None else getattr(file_id, "chat_id", None)
+    m_id = message_id if message_id is not None else getattr(file_id, "message_id", None)
+    if not c_id or not m_id:
         return
-    key = (int(chat_id), int(message_id))
+    key = (int(c_id), int(m_id))
 
     if key in _in_flight_tail_fetches and not _in_flight_tail_fetches[key].done():
         try:
@@ -1909,7 +1913,7 @@ async def prefetch_file_tail(
             pass
         return
 
-    task = asyncio.create_task(_do_prefetch_file_tail(file_id, streamer, session_pool))
+    task = asyncio.create_task(_do_prefetch_file_tail(file_id, streamer, session_pool, chat_id=c_id, message_id=m_id))
     _in_flight_tail_fetches[key] = task
     try:
         await task
@@ -1925,20 +1929,22 @@ async def _do_prefetch_stream_head(
     streamer: "ByteStreamer",
     session_pool: Optional[list] = None,
     size_kb: Optional[int] = None,
+    chat_id: Optional[int] = None,
+    message_id: Optional[int] = None,
 ) -> None:
     try:
         if not bool(getattr(Telegram, "STREAM_PICKER_PREBUFFER_ENABLED", True)):
             return
-        chat_id = getattr(file_id, "chat_id", None)
-        message_id = getattr(file_id, "message_id", None)
+        c_id = chat_id if chat_id is not None else getattr(file_id, "chat_id", None)
+        m_id = message_id if message_id is not None else getattr(file_id, "message_id", None)
         file_size = int(getattr(file_id, "file_size", 0) or 0)
-        if not chat_id or not message_id or file_size <= 0:
+        if not c_id or not m_id or file_size <= 0:
             return
 
         head_size_kb = size_kb or max(64, int(getattr(Telegram, "STREAM_PICKER_PREBUFFER_SIZE_KB", 256) or 256))
         head_bytes_count = min(file_size, head_size_kb * 1024)
 
-        existing = await HEAD_CACHE.get_head(chat_id, message_id, 0, head_bytes_count)
+        existing = await HEAD_CACHE.get_head(c_id, m_id, 0, head_bytes_count)
         if existing and len(existing) == head_bytes_count:
             return
 
@@ -1960,10 +1966,10 @@ async def _do_prefetch_stream_head(
             limit=head_bytes_count,
         )
         if head_data:
-            await HEAD_CACHE.put_head(chat_id, message_id, head_data)
+            await HEAD_CACHE.put_head(c_id, m_id, head_data)
             LOGGER.debug(
                 "HeadCache: pre-buffered %d bytes for (%s, %s)",
-                len(head_data), chat_id, message_id,
+                len(head_data), c_id, m_id,
             )
     except Exception as e:
         LOGGER.debug("HeadCache pre-buffering error: %s", e)
@@ -1974,13 +1980,15 @@ async def prefetch_stream_head(
     streamer: "ByteStreamer",
     session_pool: Optional[list] = None,
     size_kb: Optional[int] = None,
+    chat_id: Optional[int] = None,
+    message_id: Optional[int] = None,
 ) -> None:
     """Asynchronously fetch the first 256 KB of a media file into HeadCache with single-flight deduplication."""
-    chat_id = getattr(file_id, "chat_id", None)
-    message_id = getattr(file_id, "message_id", None)
-    if not chat_id or not message_id:
+    c_id = chat_id if chat_id is not None else getattr(file_id, "chat_id", None)
+    m_id = message_id if message_id is not None else getattr(file_id, "message_id", None)
+    if not c_id or not m_id:
         return
-    key = (int(chat_id), int(message_id))
+    key = (int(c_id), int(m_id))
 
     if key in _in_flight_head_fetches and not _in_flight_head_fetches[key].done():
         try:
@@ -1989,7 +1997,7 @@ async def prefetch_stream_head(
             pass
         return
 
-    task = asyncio.create_task(_do_prefetch_stream_head(file_id, streamer, session_pool, size_kb))
+    task = asyncio.create_task(_do_prefetch_stream_head(file_id, streamer, session_pool, size_kb, chat_id=c_id, message_id=m_id))
     _in_flight_head_fetches[key] = task
     try:
         await task
