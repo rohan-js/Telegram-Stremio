@@ -1349,9 +1349,10 @@ async def _trigger_picker_prebuffer(quality_id: str) -> None:
         streamer = get_streamer(0)
         file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=msg_id_int)
         if file_id:
+            LOGGER.info("Picker prebuffer: starting prefetch for (%s, %s)", chat_id, msg_id_int)
             await prefetch_stream_head(file_id, streamer, chat_id=chat_id, message_id=msg_id_int)
     except Exception as e:
-        LOGGER.debug("Picker prebuffer failed for quality_id=%s: %s", quality_id, e)
+        LOGGER.warning("Picker prebuffer failed for quality_id=%s: %s", quality_id, e)
 
 @router.head("/{token}/install")
 async def stremio_install_head(token: str, token_data: dict = Depends(verify_token)):

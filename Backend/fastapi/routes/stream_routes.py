@@ -1269,7 +1269,7 @@ async def media_streamer(
         if start < head_ceiling and (req_length <= head_ceiling or end < head_ceiling):
             cached_head = await HEAD_CACHE.get_head(chat_id, msg_id, start, req_length)
             if cached_head is not None and len(cached_head) == req_length:
-                LOGGER.debug("HeadCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, len(cached_head))
+                LOGGER.info("HeadCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, len(cached_head))
                 from fastapi.responses import Response as PlainResponse
                 return PlainResponse(
                     content=cached_head,
@@ -1776,6 +1776,11 @@ async def get_stream_stats():
             "client_dc_ttfb_sec": {
                 f"{idx}->dc{dc}": round(float(v or 0.0), 3)
                 for (idx, dc), v in client_dc_ttfb_sec.items()
+            },
+            "head_cache": {
+                "size": len(HEAD_CACHE._cache),
+                "max_entries": HEAD_CACHE.max_entries,
+                "entries": [f"({c},{m})" for (c, m) in HEAD_CACHE._cache.keys()],
             },
         }
     )

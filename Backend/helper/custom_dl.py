@@ -1967,12 +1967,12 @@ async def _do_prefetch_stream_head(
         )
         if head_data:
             await HEAD_CACHE.put_head(c_id, m_id, head_data)
-            LOGGER.debug(
+            LOGGER.info(
                 "HeadCache: pre-buffered %d bytes for (%s, %s)",
                 len(head_data), c_id, m_id,
             )
     except Exception as e:
-        LOGGER.debug("HeadCache pre-buffering error: %s", e)
+        LOGGER.warning("HeadCache pre-buffering error: %s", e)
 
 
 async def prefetch_stream_head(
