@@ -1302,12 +1302,54 @@ async def get_streams(
             seen[s["name"]] = seen.get(s["name"], 0) + 1
             s["name"] = f"{s['name']} ({seen[s['name']]})"
 
+    # ------------------------------------------------------------------
+    # Stream Picker Pre-Buffering ("The YouTube 0ms Click")
+    # Pre-buffers Chunk 0 (256 KB) of the top-ranked stream into HeadCache
+    # while the user is browsing the quality picker modal.
+    # ------------------------------------------------------------------
+    if bool(getattr(Telegram, "STREAM_PICKER_PREBUFFER_ENABLED", True)) and streams:
+        try:
+            top_url = str(streams[0].get("url") or "")
+            if "/dl/" in top_url:
+                parts = [p for p in top_url.split("/") if p]
+                if "dl" in parts:
+                    dl_idx = parts.index("dl")
+                    if len(parts) > dl_idx + 2:
+                        quality_id = parts[dl_idx + 2]
+                        asyncio.create_task(_trigger_picker_prebuffer(quality_id))
+        except Exception as e:
+            LOGGER.debug("Stream picker pre-buffer dispatch error: %s", e)
+
     return {
         "streams": streams,
         "cacheMaxAge": 0,
         "staleRevalidate": 0,
         "staleError": 0,
     }
+
+
+async def _trigger_picker_prebuffer(quality_id: str) -> None:
+    """Asynchronously pre-fetch Chunk 0 of the selected stream while user is on the picker screen."""
+    try:
+        from Backend.helper.encrypt import decode_string
+        from Backend.helper.custom_dl import prefetch_stream_head, ByteStreamer
+        from Backend.pyrofork.bot import StreamBot
+
+        decoded = await decode_string(quality_id)
+        if not decoded or decoded.get("parts") or decoded.get("zip"):
+            return
+        msg_id = decoded.get("msg_id")
+        raw_chat_id = decoded.get("chat_id")
+        if not msg_id or not raw_chat_id:
+            return
+
+        chat_id = int(raw_chat_id) if str(raw_chat_id).startswith("-") else int(f"-100{raw_chat_id}")
+        streamer = ByteStreamer._instances.get(0) or ByteStreamer(StreamBot, 0)
+        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=int(msg_id))
+        if file_id:
+            await prefetch_stream_head(file_id, streamer)
+    except Exception as e:
+        LOGGER.debug("Picker prebuffer failed for quality_id=%s: %s", quality_id, e)
 
 @router.head("/{token}/install")
 async def stremio_install_head(token: str, token_data: dict = Depends(verify_token)):

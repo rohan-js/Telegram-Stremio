@@ -122,6 +122,48 @@ class TailCache:
 
 TAIL_CACHE = TailCache()
 
+
+class HeadCache:
+    """Bounded in-memory LRU cache for the first N KB (Chunk 0 / container headers) of top-ranked media streams.
+    Pre-buffered during the stream picker screen to achieve sub-5ms click-to-play latency."""
+
+    def __init__(self, max_entries: int = 32):
+        self.max_entries = max_entries
+        self._cache: OrderedDict[Tuple[int, int], bytes] = OrderedDict()
+        self._lock = asyncio.Lock()
+
+    async def get_head(self, chat_id: int, message_id: int, start_offset: int, length: int) -> Optional[bytes]:
+        key = (int(chat_id), int(message_id))
+        async with self._lock:
+            if key not in self._cache:
+                return None
+            head_bytes = self._cache[key]
+            self._cache.move_to_end(key)
+
+        head_len = len(head_bytes)
+        req_end = start_offset + length
+        if start_offset < head_len:
+            end = min(req_end, head_len)
+            return head_bytes[start_offset:end]
+        return None
+
+    async def put_head(self, chat_id: int, message_id: int, head_bytes: bytes) -> None:
+        if not head_bytes:
+            return
+        key = (int(chat_id), int(message_id))
+        max_entries = self.max_entries or max(8, int(getattr(Telegram, "STREAM_PICKER_PREBUFFER_MAX_ENTRIES", 32) or 32))
+        async with self._lock:
+            self._cache[key] = head_bytes
+            self._cache.move_to_end(key)
+            while len(self._cache) > max_entries:
+                self._cache.popitem(last=False)
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+
+HEAD_CACHE = HeadCache()
+
 # Per-file Telegram CDN blacklist (in-memory only): a file whose CDN path keeps
 # failing is served from its master DC until the short TTL expires, instead of
 # erroring every chunk. Keyed by (location.id, location.access_hash).
@@ -1873,3 +1915,83 @@ async def prefetch_file_tail(
         await task
     finally:
         _in_flight_tail_fetches.pop(key, None)
+
+
+_in_flight_head_fetches: Dict[Tuple[int, int], asyncio.Task] = {}
+
+
+async def _do_prefetch_stream_head(
+    file_id: FileId,
+    streamer: "ByteStreamer",
+    session_pool: Optional[list] = None,
+    size_kb: Optional[int] = None,
+) -> None:
+    try:
+        if not bool(getattr(Telegram, "STREAM_PICKER_PREBUFFER_ENABLED", True)):
+            return
+        chat_id = getattr(file_id, "chat_id", None)
+        message_id = getattr(file_id, "message_id", None)
+        file_size = int(getattr(file_id, "file_size", 0) or 0)
+        if not chat_id or not message_id or file_size <= 0:
+            return
+
+        head_size_kb = size_kb or max(64, int(getattr(Telegram, "STREAM_PICKER_PREBUFFER_SIZE_KB", 256) or 256))
+        head_bytes_count = min(file_size, head_size_kb * 1024)
+
+        existing = await HEAD_CACHE.get_head(chat_id, message_id, 0, head_bytes_count)
+        if existing and len(existing) == head_bytes_count:
+            return
+
+        fetch_session = None
+        fetch_location = None
+        fetch_streamer = streamer
+
+        if session_pool and len(session_pool) > 0:
+            _, fetch_session, loc_box, fetch_streamer = session_pool[0]
+            fetch_location = loc_box[0]
+        else:
+            fetch_session = await streamer._get_media_session(file_id)
+            fetch_location = await streamer._get_location(file_id)
+
+        head_data = await fetch_streamer._fetch_file_bytes(
+            media_session=fetch_session,
+            location=fetch_location,
+            offset=0,
+            limit=head_bytes_count,
+        )
+        if head_data:
+            await HEAD_CACHE.put_head(chat_id, message_id, head_data)
+            LOGGER.debug(
+                "HeadCache: pre-buffered %d bytes for (%s, %s)",
+                len(head_data), chat_id, message_id,
+            )
+    except Exception as e:
+        LOGGER.debug("HeadCache pre-buffering error: %s", e)
+
+
+async def prefetch_stream_head(
+    file_id: FileId,
+    streamer: "ByteStreamer",
+    session_pool: Optional[list] = None,
+    size_kb: Optional[int] = None,
+) -> None:
+    """Asynchronously fetch the first 256 KB of a media file into HeadCache with single-flight deduplication."""
+    chat_id = getattr(file_id, "chat_id", None)
+    message_id = getattr(file_id, "message_id", None)
+    if not chat_id or not message_id:
+        return
+    key = (int(chat_id), int(message_id))
+
+    if key in _in_flight_head_fetches and not _in_flight_head_fetches[key].done():
+        try:
+            await _in_flight_head_fetches[key]
+        except Exception:
+            pass
+        return
+
+    task = asyncio.create_task(_do_prefetch_stream_head(file_id, streamer, session_pool, size_kb))
+    _in_flight_head_fetches[key] = task
+    try:
+        await task
+    finally:
+        _in_flight_head_fetches.pop(key, None)

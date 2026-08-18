@@ -146,6 +146,10 @@ class Telegram:
         TELEGRAM_MAX_GLOBAL_CONCURRENT_CHUNKS = int(getenv("TELEGRAM_MAX_GLOBAL_CONCURRENT_CHUNKS", "24") or 24)
         TELEGRAM_FLOODWAIT_AUTO_COOLDOWN = getenv("TELEGRAM_FLOODWAIT_AUTO_COOLDOWN", "true").lower() == "true"
         TELEGRAM_KEEPALIVE_JITTER_SEC = float(getenv("TELEGRAM_KEEPALIVE_JITTER_SEC", "3.0") or 3.0)
+        # Stream Picker Pre-Buffering (0ms click-to-play)
+        STREAM_PICKER_PREBUFFER_ENABLED = getenv("STREAM_PICKER_PREBUFFER_ENABLED", "true").lower() == "true"
+        STREAM_PICKER_PREBUFFER_SIZE_KB = int(getenv("STREAM_PICKER_PREBUFFER_SIZE_KB", "256") or 256)
+        STREAM_PICKER_PREBUFFER_MAX_ENTRIES = int(getenv("STREAM_PICKER_PREBUFFER_MAX_ENTRIES", "32") or 32)
     except Exception:
         TELEGRAM_TAIL_CACHE_ENABLED = True
         TELEGRAM_TAIL_CACHE_SIZE_KB = 256
@@ -156,6 +160,9 @@ class Telegram:
         TELEGRAM_MAX_GLOBAL_CONCURRENT_CHUNKS = 24
         TELEGRAM_FLOODWAIT_AUTO_COOLDOWN = True
         TELEGRAM_KEEPALIVE_JITTER_SEC = 3.0
+        STREAM_PICKER_PREBUFFER_ENABLED = True
+        STREAM_PICKER_PREBUFFER_SIZE_KB = 256
+        STREAM_PICKER_PREBUFFER_MAX_ENTRIES = 32
 
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
     MANUAL_CHANNELS = [channel.strip() for channel in (getenv("MANUAL_CHANNELS") or "").split(",") if channel.strip()]

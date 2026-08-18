@@ -20,6 +20,8 @@ from Backend.helper.custom_dl import (
     RECENT_STREAMS,
     TAIL_CACHE,
     prefetch_file_tail,
+    HEAD_CACHE,
+    prefetch_stream_head,
     client_dc_avg_mbps,
     client_dc_ttfb_sec,
     client_dc_last_seen,
@@ -1250,6 +1252,31 @@ async def media_streamer(
                     headers={
                         "Content-Range": f"bytes {start}-{end}/{file_size}",
                         "Content-Length": str(len(cached_tail)),
+                        "Content-Type": mime_type,
+                        "Accept-Ranges": "bytes",
+                        "Content-Disposition": _content_disposition(file_name),
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+                    },
+                )
+
+    # ------------------------------------------------------------------
+    # Head cache hit path (instant Chunk 0 playback from Stream Picker pre-buffering)
+    # ------------------------------------------------------------------
+    if bool(getattr(Telegram, "STREAM_PICKER_PREBUFFER_ENABLED", True)) and chat_id and msg_id:
+        head_cache_kb = max(64, int(getattr(Telegram, "STREAM_PICKER_PREBUFFER_SIZE_KB", 256) or 256))
+        head_ceiling = head_cache_kb * 1024
+        if start < head_ceiling and (req_length <= head_ceiling or end < head_ceiling):
+            cached_head = await HEAD_CACHE.get_head(chat_id, msg_id, start, req_length)
+            if cached_head is not None and len(cached_head) == req_length:
+                LOGGER.debug("HeadCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, len(cached_head))
+                from fastapi.responses import Response as PlainResponse
+                return PlainResponse(
+                    content=cached_head,
+                    status_code=206,
+                    headers={
+                        "Content-Range": f"bytes {start}-{end}/{file_size}",
+                        "Content-Length": str(len(cached_head)),
                         "Content-Type": mime_type,
                         "Accept-Ranges": "bytes",
                         "Content-Disposition": _content_disposition(file_name),
