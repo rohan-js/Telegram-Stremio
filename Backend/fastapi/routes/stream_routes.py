@@ -834,20 +834,22 @@ async def stream_handler(
         message = await Userbot.get_messages(chat_id, int(msg_id))
         source_type = "global_search"
         forced_client_index = USERBOT_CLIENT_INDEX
+        file = message.video or message.document
+        if not file:
+            raise HTTPException(status_code=404, detail="No media found")
+        secure_hash = file.file_unique_id[:6]
+        try:
+            target_dc = FileId.decode(file.file_id).dc_id
+        except Exception:
+            target_dc = None
     else:
         chat_id = int(f"-100{decoded['chat_id']}")
-        message = await StreamBot.get_messages(chat_id, int(msg_id))
         source_type = "telegram"
         forced_client_index = None
-    file = message.video or message.document
-    if not file:
-        raise HTTPException(status_code=404, detail="No media found")
-    secure_hash = file.file_unique_id[:6]
-
-    try:
-        target_dc = FileId.decode(file.file_id).dc_id
-    except Exception:
-        target_dc = None
+        base_streamer = get_streamer(0)
+        file_id = await base_streamer.get_file_properties(chat_id=chat_id, message_id=int(msg_id))
+        secure_hash = getattr(file_id, "unique_id", "")[:6]
+        target_dc = getattr(file_id, "dc_id", None)
 
     return await media_streamer(
         request=request,
