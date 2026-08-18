@@ -109,6 +109,28 @@ class Telegram:
         SMART_ROUTING_PROBE_OVERLAP_SEC = float(getenv("SMART_ROUTING_PROBE_OVERLAP_SEC", "0.4") or 0.4)
     except Exception:
         SMART_ROUTING_PROBE_OVERLAP_SEC = 0.4
+    try:
+        # When a chunk fetch stalls beyond this delay, race a parallel fetch on
+        # another healthy helper bot to eliminate micro-freezes.
+        SMART_ROUTING_HEDGE_ENABLED = getenv("SMART_ROUTING_HEDGE_ENABLED", "true").lower() == "true"
+        SMART_ROUTING_HEDGE_DELAY_SEC = float(getenv("SMART_ROUTING_HEDGE_DELAY_SEC", "0.8") or 0.8)
+    except Exception:
+        SMART_ROUTING_HEDGE_ENABLED = True
+        SMART_ROUTING_HEDGE_DELAY_SEC = 0.8
+    try:
+        # Pre-warm MTProto sessions to common Telegram DCs at boot and maintain
+        # periodic keep-alive pings so cold opens take <1s instead of ~4.8s.
+        TELEGRAM_PREWARM_ENABLED = getenv("TELEGRAM_PREWARM_ENABLED", "true").lower() == "true"
+        TELEGRAM_PREWARM_DCS = [
+            int(x.strip())
+            for x in (getenv("TELEGRAM_PREWARM_DCS", "1,2,4,5") or "1,2,4,5").split(",")
+            if x.strip().isdigit()
+        ]
+        TELEGRAM_KEEPALIVE_INTERVAL_SEC = int(getenv("TELEGRAM_KEEPALIVE_INTERVAL_SEC", "45") or 45)
+    except Exception:
+        TELEGRAM_PREWARM_ENABLED = True
+        TELEGRAM_PREWARM_DCS = [1, 2, 4, 5]
+        TELEGRAM_KEEPALIVE_INTERVAL_SEC = 45
 
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
     MANUAL_CHANNELS = [channel.strip() for channel in (getenv("MANUAL_CHANNELS") or "").split(",") if channel.strip()]

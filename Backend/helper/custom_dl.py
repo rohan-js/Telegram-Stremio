@@ -227,60 +227,71 @@ class ByteStreamer:
         # Register this streamer so fallback logic can reuse it
         if client_index >= 0:
             ByteStreamer._instances[client_index] = self
-        asyncio.create_task(self._clean_cache())
-        asyncio.create_task(self._prewarm_sessions())
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._clean_cache())
+            loop.create_task(self._prewarm_sessions())
+        except RuntimeError:
+            pass
 
-    async def _prewarm_sessions(self):
-        common_dcs = [1, 2, 4, 5]  # Main Telegram DCs
-        LOGGER.debug("Pre-warming media sessions for common DCs...")
-        
-        for dc in common_dcs:
-            try:
-                if dc in self.client.media_sessions:
-                    LOGGER.debug(f"Media session for DC {dc} already exists, skipping")
-                    continue
+    async def get_or_create_media_session(self, dc: int) -> Session:
+        dc = int(dc)
+        media_session = self.client.media_sessions.get(dc)
+        if media_session:
+            return media_session
 
-                test_mode = await self.client.storage.test_mode()
-                current_dc = await self.client.storage.dc_id()
- 
-                if dc == current_dc:
-                    continue
-                
+        async with self._session_lock:
+            media_session = self.client.media_sessions.get(dc)
+            if media_session:
+                return media_session
+
+            test_mode = await self.client.storage.test_mode()
+            current_dc = await self.client.storage.dc_id()
+
+            if dc != current_dc:
                 auth_key = await Auth(self.client, dc, test_mode).create()
-                session = Session(self.client, dc, auth_key, test_mode, is_media=True)
-                session.no_updates = True
-                session.timeout = 30
-                session.sleep_threshold = 60
-                
-                await session.start()
-                
-                for attempt in range(6):
+            else:
+                auth_key = await self.client.storage.auth_key()
+
+            session = Session(self.client, dc, auth_key, test_mode, is_media=True)
+            session.no_updates = True
+            session.timeout = 30
+            session.sleep_threshold = 60
+
+            await session.start()
+
+            if dc != current_dc:
+                for _ in range(6):
                     try:
-                        exported = await self.client.invoke(
-                            raw.functions.auth.ExportAuthorization(dc_id=dc)
-                        )
-                        await session.send(
-                            raw.functions.auth.ImportAuthorization(
-                                id=exported.id, bytes=exported.bytes
-                            )
-                        )
+                        exported = await self.client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc))
+                        await session.send(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes))
                         break
                     except AuthBytesInvalid:
-                        LOGGER.debug(f"AuthBytesInvalid during pre-warm for DC {dc}; retrying...")
+                        LOGGER.debug("AuthBytesInvalid during media session import for client %s DC %s; retrying...", self.client_index, dc)
                         await asyncio.sleep(0.5)
                     except OSError:
-                        LOGGER.debug(f"OSError during pre-warm for DC {dc}; retrying...")
+                        LOGGER.debug("OSError during media session import for client %s DC %s; retrying...", self.client_index, dc)
                         await asyncio.sleep(1)
                     except Exception as e:
-                        LOGGER.debug(f"Error during pre-warm for DC {dc}: {e}")
+                        LOGGER.debug("Error during media session import for client %s DC %s: %s", self.client_index, dc, e)
                         break
-                
-                self.client.media_sessions[dc] = session
-                LOGGER.debug(f"Pre-warmed media session for DC {dc}")
-                
+
+            self.client.media_sessions[dc] = session
+            LOGGER.debug("Created media session for client %s DC %s", self.client_index, dc)
+            return session
+
+    async def _prewarm_sessions(self):
+        if not bool(getattr(Telegram, "TELEGRAM_PREWARM_ENABLED", True)):
+            return
+        common_dcs = list(getattr(Telegram, "TELEGRAM_PREWARM_DCS", [1, 2, 4, 5]) or [1, 2, 4, 5])
+        LOGGER.debug("Pre-warming media sessions for client %s on DCs %s...", self.client_index, common_dcs)
+
+        for dc in common_dcs:
+            try:
+                await self.get_or_create_media_session(dc)
+                LOGGER.debug("Pre-warmed media session for client %s DC %s", self.client_index, dc)
             except Exception as e:
-                LOGGER.debug(f"Could not pre-warm DC {dc}: {e}")
-                continue
+                LOGGER.debug("Could not pre-warm client %s DC %s: %s", self.client_index, dc, e)
 
     async def get_file_properties(self, chat_id: int, message_id: int) -> FileId:
         cache_key = (int(chat_id), int(message_id))
@@ -675,6 +686,7 @@ class ByteStreamer:
             "chunk_timeouts": 0,
             "chunk_errors": 0,
             "fallback_chunks": 0,
+            "hedge_rescues": 0,
             "zero_pad_chunks": 0,
             "cdn_redirects": 0,
             "cdn_chunks": 0,
@@ -687,7 +699,7 @@ class ByteStreamer:
         }
 
         ACTIVE_STREAMS[stream_id] = registry_entry
-        work_loads[client_index] += 1
+        work_loads[client_index] = work_loads.get(client_index, 0) + 1
 
         queue_maxsize = max(1, prefetch)
         q: asyncio.Queue = asyncio.Queue(maxsize=queue_maxsize)
@@ -794,7 +806,7 @@ class ByteStreamer:
                             use_location = location
                             use_client_idx = client_index
 
-                # --- attempt the fetch with a hard timeout ---
+                # --- attempt the fetch with a hard timeout and anti-stall hedge racing ---
                 try:
                     base_timeout = float(getattr(Telegram, "SMART_ROUTING_CHUNK_TIMEOUT_SEC", 15.0) or 15.0)
                     first_timeout = float(getattr(Telegram, "SMART_ROUTING_FIRST_CHUNK_TIMEOUT_SEC", 4.0) or 4.0)
@@ -811,27 +823,108 @@ class ByteStreamer:
                         "client": use_client_idx,
                         "target_dc": target_dc,
                     })
-                    chunk_bytes = await asyncio.wait_for(
-                        self._fetch_file_bytes(
+
+                    hedge_enabled = (
+                        bool(getattr(Telegram, "SMART_ROUTING_HEDGE_ENABLED", True))
+                        and len(session_pool) > 1
+                        and tries == 0
+                    )
+                    hedge_delay = float(getattr(Telegram, "SMART_ROUTING_HEDGE_DELAY_SEC", 0.8) or 0.8)
+
+                    primary_task = asyncio.create_task(
+                        _slot_streamer._fetch_file_bytes(
                             media_session=use_session,
                             location=use_location,
                             offset=off,
                             limit=chunk_size,
                             route_event=remember_route_attempt,
                             stream_stats=registry_entry,
-                        ),
-                        timeout=timeout,
+                        )
                     )
+
+                    chunk_bytes = None
+                    actual_client_idx = use_client_idx
+
+                    if hedge_enabled and timeout > hedge_delay:
+                        try:
+                            chunk_bytes = await asyncio.wait_for(
+                                asyncio.shield(primary_task),
+                                timeout=hedge_delay,
+                            )
+                        except asyncio.TimeoutError:
+                            # Primary is taking > hedge_delay — launch hedged race on another helper bot!
+                            hedge_slot = (slot + 1) % len(session_pool)
+                            hedge_client_idx, hedge_session, hedge_loc_box, hedge_streamer = session_pool[hedge_slot]
+                            hedge_location = hedge_loc_box[0]
+
+                            remember_route_attempt({
+                                "event": "hedge_race_started",
+                                "seq": seq_idx,
+                                "offset": off,
+                                "primary_client": use_client_idx,
+                                "hedge_client": hedge_client_idx,
+                                "delay_sec": hedge_delay,
+                                "target_dc": target_dc,
+                            })
+
+                            hedge_task = asyncio.create_task(
+                                hedge_streamer._fetch_file_bytes(
+                                    media_session=hedge_session,
+                                    location=hedge_location,
+                                    offset=off,
+                                    limit=chunk_size,
+                                    route_event=remember_route_attempt,
+                                    stream_stats=registry_entry,
+                                )
+                            )
+
+                            remaining_timeout = max(0.5, timeout - hedge_delay)
+                            done, pending = await asyncio.wait(
+                                [primary_task, hedge_task],
+                                timeout=remaining_timeout,
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+
+                            for p in pending:
+                                p.cancel()
+
+                            if not done:
+                                raise asyncio.TimeoutError()
+
+                            winner_task = next(iter(done))
+                            try:
+                                chunk_bytes = winner_task.result()
+                            except Exception:
+                                other_task = primary_task if winner_task is hedge_task else hedge_task
+                                if other_task in done:
+                                    chunk_bytes = other_task.result()
+                                else:
+                                    raise
+
+                            if winner_task is hedge_task:
+                                actual_client_idx = hedge_client_idx
+                                registry_entry["hedge_rescues"] = int(registry_entry.get("hedge_rescues", 0) or 0) + 1
+                                remember_route_attempt({
+                                    "event": "hedge_race_won",
+                                    "seq": seq_idx,
+                                    "offset": off,
+                                    "primary_client": use_client_idx,
+                                    "winner_client": hedge_client_idx,
+                                    "target_dc": target_dc,
+                                })
+                    else:
+                        chunk_bytes = await asyncio.wait_for(primary_task, timeout=timeout)
+
                     elapsed = max(time.perf_counter() - fetch_started, 1e-6)
-                    
+
                     if chunk_bytes == b"":
-                        reason = f"empty_chunk client={use_client_idx} seq={seq_idx} offset={off}"
+                        reason = f"empty_chunk client={actual_client_idx} seq={seq_idx} offset={off}"
                         remember_route_attempt({
                             "event": "chunk_empty",
                             "seq": seq_idx,
                             "offset": off,
                             "attempt": tries + 1,
-                            "client": use_client_idx,
+                            "client": actual_client_idx,
                             "target_dc": target_dc,
                             "reason": reason,
                         })
@@ -839,10 +932,10 @@ class ByteStreamer:
 
                     if chunk_bytes:
                         mbps = (len(chunk_bytes) / (1024 * 1024)) / elapsed
-                        update_client_dc_metrics(use_client_idx, target_dc, mbps, elapsed)
+                        update_client_dc_metrics(actual_client_idx, target_dc, mbps, elapsed)
 
-                    # If we succeeded via a fallback, mark primary as degraded
-                    if use_client_idx != client_index:
+                    # If we succeeded via a fallback or hedge bot, mark primary as degraded
+                    if actual_client_idx != client_index:
                         record_route_failure(
                             client_index,
                             target_dc,
@@ -1304,48 +1397,7 @@ class ByteStreamer:
             return result
 
     async def _get_media_session(self, file_id: FileId) -> Session:
-        dc = file_id.dc_id
-        media_session = self.client.media_sessions.get(dc)
-
-        if media_session:
-            return media_session
-
-        async with self._session_lock:
-            media_session = self.client.media_sessions.get(dc)
-            if media_session:
-                return media_session
-
-            test_mode = await self.client.storage.test_mode()
-            current_dc = await self.client.storage.dc_id()
-
-            if dc != current_dc:
-                auth_key = await Auth(self.client, dc, test_mode).create()
-            else:
-                auth_key = await self.client.storage.auth_key()
-
-            session = Session(self.client, dc, auth_key, test_mode, is_media=True)
-            session.no_updates = True
-            session.timeout = 30 
-            session.sleep_threshold = 60 
-
-            await session.start()
-
-            if dc != current_dc:
-                for _ in range(6):
-                    try:
-                        exported = await self.client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc))
-                        await session.send(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes))
-                        break
-                    except AuthBytesInvalid:
-                        LOGGER.debug("AuthBytesInvalid during media session import; retrying...")
-                        await asyncio.sleep(0.5)
-                    except OSError:
-                        LOGGER.debug("OSError during media session import; retrying...")
-                        await asyncio.sleep(1)
-
-            self.client.media_sessions[dc] = session
-            LOGGER.debug("Created media session for DC %s", dc)
-            return session
+        return await self.get_or_create_media_session(file_id.dc_id)
 
     @staticmethod
     async def _get_location(file_id: FileId) -> Union[
@@ -1570,3 +1622,59 @@ async def run_speed_test(chat_id: int, message_id: int) -> List[dict]:
         reverse=True,
     )
     return list(results)
+
+
+_keepalive_task: Optional[asyncio.Task] = None
+
+
+async def _dc_keepalive_loop():
+    """Periodically ping active media sessions across all multi_clients to keep
+    MTProto connections hot and prevent cold socket reconnection latency."""
+    while True:
+        try:
+            interval = max(15, int(getattr(Telegram, "TELEGRAM_KEEPALIVE_INTERVAL_SEC", 45) or 45))
+            await asyncio.sleep(interval)
+            if not bool(getattr(Telegram, "TELEGRAM_PREWARM_ENABLED", True)):
+                continue
+
+            for idx, streamer in list(ByteStreamer._instances.items()):
+                client = streamer.client
+                if not getattr(client, "is_connected", False):
+                    continue
+
+                for dc_id, session in list(client.media_sessions.items()):
+                    try:
+                        # MTProto ping keeps connection alive
+                        await session.send(raw.functions.Ping(ping_id=secrets.randbits(63)))
+                    except Exception as e:
+                        LOGGER.debug("DC keepalive ping error for client %s DC %s: %s", idx, dc_id, e)
+                        client.media_sessions.pop(dc_id, None)
+                        try:
+                            await session.stop()
+                        except Exception:
+                            pass
+                        asyncio.create_task(streamer.get_or_create_media_session(dc_id))
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            LOGGER.debug("Exception in DC keepalive loop: %s", exc)
+
+
+def start_dc_keepalive_service() -> Optional[asyncio.Task]:
+    """Start the periodic MTProto DC session keep-alive service."""
+    global _keepalive_task
+    if _keepalive_task is None or _keepalive_task.done():
+        _keepalive_task = asyncio.create_task(_dc_keepalive_loop())
+        LOGGER.info(
+            "MTProto DC Keep-Alive service started (interval=%ss)",
+            getattr(Telegram, "TELEGRAM_KEEPALIVE_INTERVAL_SEC", 45),
+        )
+    return _keepalive_task
+
+
+def initialize_all_streamers():
+    """Eagerly instantiate ByteStreamer for all initialized multi_clients and pre-warm sessions."""
+    for idx, client in list(multi_clients.items()):
+        if idx not in ByteStreamer._instances and client is not None:
+            ByteStreamer(client, idx)
+    start_dc_keepalive_service()

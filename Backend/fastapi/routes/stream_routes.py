@@ -423,7 +423,7 @@ def get_streamer(index: int) -> ByteStreamer:
         return _streamer_by_client[Userbot]
     tg_client = multi_clients[index]
     if tg_client not in _streamer_by_client:
-        _streamer_by_client[tg_client] = ByteStreamer(tg_client, index)
+        _streamer_by_client[tg_client] = ByteStreamer._instances.get(index) or ByteStreamer(tg_client, index)
     return _streamer_by_client[tg_client]
 
 
@@ -1632,6 +1632,7 @@ async def get_stream_stats():
                 "chunk_timeouts": info.get("chunk_timeouts", 0),
                 "chunk_errors": info.get("chunk_errors", 0),
                 "fallback_chunks": info.get("fallback_chunks", 0),
+                "hedge_rescues": info.get("hedge_rescues", 0),
                 "zero_pad_chunks": info.get("zero_pad_chunks", 0),
                 "cdn_redirects": info.get("cdn_redirects", 0),
                 "cdn_chunks": info.get("cdn_chunks", 0),
@@ -1673,6 +1674,7 @@ async def get_stream_stats():
                 "chunk_timeouts": info.get("chunk_timeouts", 0),
                 "chunk_errors": info.get("chunk_errors", 0),
                 "fallback_chunks": info.get("fallback_chunks", 0),
+                "hedge_rescues": info.get("hedge_rescues", 0),
                 "zero_pad_chunks": info.get("zero_pad_chunks", 0),
                 "cdn_redirects": info.get("cdn_redirects", 0),
                 "cdn_chunks": info.get("cdn_chunks", 0),

@@ -12,6 +12,7 @@ from Backend.helper.pyro import restart_notification, setup_bot_commands
 from Backend.helper.settings_manager import SettingsManager
 from Backend.pyrofork.bot import Helper, StreamBot, USERBOT_CLIENT_INDEX, Userbot, build_userbot, client_dc_map, client_failures, client_avg_mbps, work_loads
 from Backend.pyrofork.clients import initialize_clients
+from Backend.helper.custom_dl import initialize_all_streamers
 from Backend.pyrofork.plugins.channels import _load_channels_from_db
 from Backend.helper.subscription_checker import subscription_checker_loop
 from Backend.helper.link_checker import DeadLinkChecker
@@ -72,6 +73,7 @@ async def start_telegram_services():
 
             LOGGER.info("Initializing Multi Clients...")
             await initialize_clients()
+            initialize_all_streamers()
             await asleep(2)
 
             await _load_channels_from_db()
