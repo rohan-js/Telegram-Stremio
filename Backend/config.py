@@ -348,9 +348,9 @@ class Telegram:
     SHOW_PROXY_AND_NON_PROXY_BOTH = getenv("SHOW_ProxyAndNonProxyBoth", "false").lower() == "true"
 
     # -------------------------------
-    # Disk cache + nginx offload (optional)
+    # Disk cache + nginx offload (Tier 2 fast-start buffer)
     # -------------------------------
-    DISK_CACHE_ENABLED = getenv("DISK_CACHE_ENABLED", "false").lower() == "true"
+    DISK_CACHE_ENABLED = getenv("DISK_CACHE_ENABLED", "true").lower() == "true"
     DISK_CACHE_DIR = getenv("DISK_CACHE_DIR", "cache")
     try:
         DISK_CACHE_MAX_GB = float(getenv("DISK_CACHE_MAX_GB", "0") or 0)
@@ -363,13 +363,17 @@ class Telegram:
 
     DISK_CACHE_CONCURRENCY = int(getenv("DISK_CACHE_CONCURRENCY", "1") or 1)
     DISK_CACHE_PRECACHE_ON_INGEST = getenv("DISK_CACHE_PRECACHE_ON_INGEST", "false").lower() == "true"
-    # Optional fast-start prefix cache: cache only the first N MiB of a file so
-    # the opening of repeat streams is served from local disk while the rest
-    # continues from Telegram. 0 = disabled.
+    # Fast-start prefix cache: cache the first N MiB of a file so
+    # the opening of streams is served from local NVMe disk while the rest continues from Telegram.
     try:
         DISK_CACHE_FIRST_MB = float(getenv("DISK_CACHE_FIRST_MB", "0") or 0)
     except Exception:
         DISK_CACHE_FIRST_MB = 0.0
+
+    # ExoPlayer Seek & Scrub Micro-Range Coalescing
+    SEEK_COALESCING_ENABLED = getenv("SEEK_COALESCING_ENABLED", "true").lower() == "true"
+    SEEK_CACHE_MAX_ENTRIES = int(getenv("SEEK_CACHE_MAX_ENTRIES", "16") or 16)
+    SEEK_CACHE_TTL_SEC = float(getenv("SEEK_CACHE_TTL_SEC", "10.0") or 10.0)
 
     NGINX_ACCEL_REDIRECT_ENABLED = getenv("NGINX_ACCEL_REDIRECT_ENABLED", "false").lower() == "true"
     NGINX_ACCEL_REDIRECT_LOCATION = getenv("NGINX_ACCEL_REDIRECT_LOCATION", "/_cache/")

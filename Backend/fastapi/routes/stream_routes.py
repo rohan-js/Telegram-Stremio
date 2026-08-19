@@ -22,6 +22,8 @@ from Backend.helper.custom_dl import (
     prefetch_file_tail,
     HEAD_CACHE,
     prefetch_stream_head,
+    SEEK_CACHE,
+    prefetch_seek_window,
     client_dc_avg_mbps,
     client_dc_ttfb_sec,
     client_dc_last_seen,
@@ -1216,6 +1218,87 @@ async def media_streamer(
                     },
                 )
 
+    # ------------------------------------------------------------------
+    # First-MB Disk Cache hit path (Tier 2 fast-start from NVMe disk)
+    # ------------------------------------------------------------------
+    unique_id = getattr(file_id, "unique_id", None) or ""
+    if first_cache_enabled() and start < first_cache_bytes() and unique_id:
+        fc_bytes = min(first_cache_bytes(), file_size)
+        fc_path = first_cache_abspath(chat_id, msg_id, unique_id)
+        if end < fc_bytes and is_complete_first_cache(fc_path, fc_bytes):
+            touch_cache_file(fc_path)
+            LOGGER.info("FirstDiskCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, req_length)
+            from fastapi.responses import Response as PlainResponse
+            headers = {
+                "Content-Type": mime_type,
+                "Content-Disposition": _content_disposition(file_name),
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+            }
+            if range_header:
+                headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+            headers["Content-Length"] = str(req_length)
+
+            if request.method == "HEAD":
+                return PlainResponse(status_code=206 if range_header else 200, headers=headers)
+
+            return StreamingResponse(
+                stream_file_range_with_usage(str(fc_path), start, end, token),
+                headers=headers,
+                status_code=206 if range_header else 200,
+                media_type=mime_type,
+            )
+        elif start == 0:
+            # Populate Tier 2 NVMe disk in background while Tier 1 RAM serves Chunk 0
+            asyncio.create_task(
+                _fill_first_cache_head(chat_id, msg_id, unique_id, int(fc_bytes), base_index)
+            )
+
+    # ------------------------------------------------------------------
+    # Seek Cache hit path (ExoPlayer / VLC micro-range seek probes)
+    # ------------------------------------------------------------------
+    if bool(getattr(Telegram, "SEEK_COALESCING_ENABLED", True)) and req_length <= 131072 and start > 0 and chat_id and msg_id:
+        cached_seek = await SEEK_CACHE.get_seek_range(chat_id, msg_id, start, req_length)
+        if cached_seek is not None and len(cached_seek) == req_length:
+            LOGGER.debug("SeekCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, len(cached_seek))
+            from fastapi.responses import Response as PlainResponse
+            return PlainResponse(
+                content=cached_seek,
+                status_code=206,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(len(cached_seek)),
+                    "Content-Type": mime_type,
+                    "Accept-Ranges": "bytes",
+                    "Content-Disposition": _content_disposition(file_name),
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+                },
+            )
+        else:
+            # Fetch aligned 512 KB seek window and satisfy micro-probe immediately
+            window_data = await prefetch_seek_window(file_id, base_streamer, None, chat_id=chat_id, message_id=msg_id, start_offset=start)
+            if window_data:
+                cached_seek = await SEEK_CACHE.get_seek_range(chat_id, msg_id, start, req_length)
+                if cached_seek is not None and len(cached_seek) == req_length:
+                    LOGGER.debug("SeekCache FETCHED (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, len(cached_seek))
+                    from fastapi.responses import Response as PlainResponse
+                    return PlainResponse(
+                        content=cached_seek,
+                        status_code=206,
+                        headers={
+                            "Content-Range": f"bytes {start}-{end}/{file_size}",
+                            "Content-Length": str(len(cached_seek)),
+                            "Content-Type": mime_type,
+                            "Accept-Ranges": "bytes",
+                            "Content-Disposition": _content_disposition(file_name),
+                            "Access-Control-Allow-Origin": "*",
+                            "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+                        },
+                    )
+
     probe_granularity = max(4096, min(int(getattr(Telegram, "SMART_ROUTING_PROBE_BYTES", 32768) or 32768), 1024 * 1024))
     probe_offset = start - (start % probe_granularity)
     # -- Instant-start client selection ---------------------------------------
@@ -1783,6 +1866,15 @@ async def get_stream_stats():
                 "size": len(HEAD_CACHE._cache),
                 "max_entries": HEAD_CACHE.max_entries,
                 "entries": [f"({c},{m})" for (c, m) in HEAD_CACHE._cache.keys()],
+            },
+            "seek_cache": {
+                "size": len(SEEK_CACHE._cache),
+                "max_entries": SEEK_CACHE.max_entries,
+                "entries": [f"({c},{m})" for (c, m) in SEEK_CACHE._cache.keys()],
+            },
+            "first_cache": {
+                "enabled": first_cache_enabled(),
+                "head_mb": first_cache_bytes() / (1024 * 1024),
             },
         }
     )

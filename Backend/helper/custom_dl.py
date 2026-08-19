@@ -164,6 +164,57 @@ class HeadCache:
 
 HEAD_CACHE = HeadCache()
 
+
+class SeekCache:
+    """Bounded in-memory LRU seek window cache.
+    Coalesces ExoPlayer / VLC micro-range seek probes (16KB, 32KB, 64KB) into a single 512KB aligned fetch,
+    enabling instant (<150ms) seeking and scrubbing without firing repeated MTProto requests."""
+
+    def __init__(self, max_entries: Optional[int] = None, ttl_sec: Optional[float] = None):
+        self.max_entries = max_entries
+        self.ttl_sec = ttl_sec
+        self._cache: OrderedDict[Tuple[int, int], Tuple[int, int, bytes, float]] = OrderedDict()
+        self._lock = asyncio.Lock()
+
+    async def get_seek_range(self, chat_id: int, message_id: int, start_offset: int, length: int) -> Optional[bytes]:
+        key = (int(chat_id), int(message_id))
+        now = time.time()
+        ttl = self.ttl_sec if self.ttl_sec is not None else float(getattr(Telegram, "SEEK_CACHE_TTL_SEC", 10.0) or 10.0)
+        async with self._lock:
+            if key not in self._cache:
+                return None
+            block_start, block_end, block_bytes, ts = self._cache[key]
+            if now - ts > ttl:
+                self._cache.pop(key, None)
+                return None
+            self._cache.move_to_end(key)
+
+        req_end = start_offset + length
+        if start_offset >= block_start and req_end <= block_end:
+            rel_start = start_offset - block_start
+            rel_end = rel_start + length
+            return block_bytes[rel_start:rel_end]
+        return None
+
+    async def put_seek_block(self, chat_id: int, message_id: int, block_start: int, block_bytes: bytes) -> None:
+        if not block_bytes:
+            return
+        key = (int(chat_id), int(message_id))
+        block_end = block_start + len(block_bytes)
+        now = time.time()
+        max_entries = self.max_entries if self.max_entries is not None else max(4, int(getattr(Telegram, "SEEK_CACHE_MAX_ENTRIES", 16) or 16))
+        async with self._lock:
+            self._cache[key] = (int(block_start), int(block_end), block_bytes, now)
+            self._cache.move_to_end(key)
+            while len(self._cache) > max_entries:
+                self._cache.popitem(last=False)
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+
+SEEK_CACHE = SeekCache()
+
 # Per-file Telegram CDN blacklist (in-memory only): a file whose CDN path keeps
 # failing is served from its master DC until the short TTL expires, instead of
 # erroring every chunk. Keyed by (location.id, location.access_hash).
@@ -2003,3 +2054,100 @@ async def prefetch_stream_head(
         await task
     finally:
         _in_flight_head_fetches.pop(key, None)
+
+
+_in_flight_seek_fetches: Dict[Tuple[int, int, int], asyncio.Task] = {}
+
+
+async def _do_prefetch_seek_window(
+    file_id: FileId,
+    streamer: "ByteStreamer",
+    session_pool: Optional[list] = None,
+    chat_id: Optional[int] = None,
+    message_id: Optional[int] = None,
+    start_offset: int = 0,
+    window_bytes: int = 512 * 1024,
+) -> Optional[bytes]:
+    try:
+        if not bool(getattr(Telegram, "SEEK_COALESCING_ENABLED", True)):
+            return None
+        c_id = chat_id if chat_id is not None else getattr(file_id, "chat_id", None)
+        m_id = message_id if message_id is not None else getattr(file_id, "message_id", None)
+        file_size = int(getattr(file_id, "file_size", 0) or 0)
+        if not c_id or not m_id or file_size <= 0:
+            return None
+
+        aligned_start = max(0, start_offset - (start_offset % window_bytes))
+        aligned_limit = min(window_bytes, file_size - aligned_start)
+        if aligned_limit <= 0:
+            return None
+
+        fetch_session = None
+        fetch_location = None
+        fetch_streamer = streamer
+
+        if session_pool and len(session_pool) > 0:
+            _, fetch_session, loc_box, fetch_streamer = session_pool[0]
+            fetch_location = loc_box[0]
+        else:
+            fetch_session = await streamer._get_media_session(file_id)
+            fetch_location = await streamer._get_location(file_id)
+
+        block_data = await fetch_streamer._fetch_file_bytes(
+            media_session=fetch_session,
+            location=fetch_location,
+            offset=aligned_start,
+            limit=aligned_limit,
+        )
+        if block_data:
+            await SEEK_CACHE.put_seek_block(c_id, m_id, aligned_start, block_data)
+            LOGGER.debug(
+                "SeekCache: cached seek window %d bytes for (%s, %s) offset=%d",
+                len(block_data), c_id, m_id, aligned_start,
+            )
+            return block_data
+        return None
+    except Exception as e:
+        LOGGER.debug("SeekCache window fetch error: %s", e)
+        return None
+
+
+async def prefetch_seek_window(
+    file_id: FileId,
+    streamer: "ByteStreamer",
+    session_pool: Optional[list] = None,
+    chat_id: Optional[int] = None,
+    message_id: Optional[int] = None,
+    start_offset: int = 0,
+    window_bytes: int = 512 * 1024,
+) -> Optional[bytes]:
+    """Fetch aligned 512 KB seek window into SeekCache with single-flight deduplication."""
+    c_id = chat_id if chat_id is not None else getattr(file_id, "chat_id", None)
+    m_id = message_id if message_id is not None else getattr(file_id, "message_id", None)
+    if not c_id or not m_id:
+        return None
+    aligned_start = max(0, start_offset - (start_offset % window_bytes))
+    key = (int(c_id), int(m_id), int(aligned_start))
+
+    if key in _in_flight_seek_fetches and not _in_flight_seek_fetches[key].done():
+        try:
+            return await _in_flight_seek_fetches[key]
+        except Exception:
+            pass
+
+    task = asyncio.create_task(
+        _do_prefetch_seek_window(
+            file_id,
+            streamer,
+            session_pool,
+            chat_id=c_id,
+            message_id=m_id,
+            start_offset=aligned_start,
+            window_bytes=window_bytes,
+        )
+    )
+    _in_flight_seek_fetches[key] = task
+    try:
+        return await task
+    finally:
+        _in_flight_seek_fetches.pop(key, None)

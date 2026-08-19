@@ -24,20 +24,20 @@ def _as_bool(val) -> bool:
 
 def _cache_max_bytes() -> int:
     # Prefer bytes if provided; else GB.
-    max_bytes = getattr(Telegram, "DISK_CACHE_MAX_BYTES", 0) or 0
+    max_bytes = getattr(Telegram, "DISK_CACHE_MAX_BYTES", 0)
     try:
-        max_bytes = int(max_bytes)
+        max_bytes = int(max_bytes or 0)
     except Exception:
         max_bytes = 0
 
     if max_bytes > 0:
         return max_bytes
 
-    max_gb = getattr(Telegram, "DISK_CACHE_MAX_GB", 0) or 0
+    max_gb = getattr(Telegram, "DISK_CACHE_MAX_GB", 0)
     try:
-        max_gb = float(max_gb)
+        max_gb = float(max_gb or 0.0)
     except Exception:
-        max_gb = 0
+        max_gb = 0.0
 
     if max_gb <= 0:
         return 0
@@ -119,7 +119,7 @@ def first_cache_bytes() -> int:
 
 
 def first_cache_enabled() -> bool:
-    """First-N-MiB fast-start cache is only active under the bounded disk cache."""
+    """First-N-MiB fast-start cache is active under the bounded disk cache."""
     return disk_cache_enabled() and first_cache_bytes() > 0
 
 
@@ -134,6 +134,15 @@ def first_cache_abspath(chat_id: int, msg_id: int, unique_id: str) -> Path:
 
 def is_complete_first_cache(path: Path, expected_bytes: Optional[int] = None) -> bool:
     return is_complete_cache_file(path, expected_size=expected_bytes)
+
+
+def get_first_cache_available_bytes(path: Path) -> int:
+    try:
+        if path.exists() and path.is_file():
+            return path.stat().st_size
+    except Exception:
+        pass
+    return 0
 
 
 def touch_cache_file(path: Path) -> None:
