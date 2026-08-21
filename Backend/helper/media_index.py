@@ -645,9 +645,10 @@ def parse_mp4_index(
 # ---------------------------------------------------------------------------
 # Index cache + builder
 # ---------------------------------------------------------------------------
-_INDEX_CACHE: "OrderedDict[Tuple[int, int], Tuple[Optional[MediaIndex], float]]" = OrderedDict()
+_INDEX_CACHE: "OrderedDict[Tuple[int, int], Tuple[Optional[MediaIndex], float, Optional[str]]]" = OrderedDict()
 _INDEX_LOCK = asyncio.Lock()
 _INDEX_NEG_TTL_SEC = 1800.0
+_INDEX_NEG_TTL_FLOODWAIT_SEC = 60.0
 _in_flight_index_builds: "dict[Tuple[int, int], asyncio.Task]" = {}
 
 
@@ -666,8 +667,14 @@ async def get_media_index(chat_id: int, message_id: int) -> Optional[MediaIndex]
         entry = _INDEX_CACHE.get(key)
         if entry is None:
             return None
-        idx, ts = entry
-        if idx is None and (time.time() - ts) > _INDEX_NEG_TTL_SEC:
+        # Backward-compat: older (idx, ts) entries.
+        if len(entry) == 2:
+            idx, ts = entry  # type: ignore[misc]
+            cause = None
+        else:
+            idx, ts, cause = entry  # type: ignore[misc]
+        ttl = _INDEX_NEG_TTL_FLOODWAIT_SEC if cause == "floodwait" else _INDEX_NEG_TTL_SEC
+        if idx is None and (time.time() - ts) > ttl:
             _INDEX_CACHE.pop(key, None)
             return None
         _INDEX_CACHE.move_to_end(key)
@@ -676,6 +683,7 @@ async def get_media_index(chat_id: int, message_id: int) -> Optional[MediaIndex]
 
 def get_index_cache_stats() -> dict:
     positive = sum(1 for idx, _ in _INDEX_CACHE.values() if idx is not None)
+    # Back-compat with older tuple shape.
     return {
         "enabled": _index_enabled(),
         "entries": len(_INDEX_CACHE),
@@ -690,12 +698,19 @@ async def build_media_index(
     streamer,
     chat_id: Optional[int] = None,
     message_id: Optional[int] = None,
+    media_session=None,
+    location=None,
 ) -> Optional[MediaIndex]:
     """Parse (or return cached) seek index for a file. Single-flight per file.
 
     Uses already-cached HEAD_CACHE/TAIL_CACHE bytes when present; otherwise
     fetches one small head window and (if needed) a larger tail window with a
     single bounded ranged fetch. Never raises — returns None on any failure.
+
+    When the caller already holds a warm ``media_session``/``location`` for
+    the file's DC (e.g. the ``media_streamer`` probe path), passing them
+    reuses that session instead of creating a throwaway ``Client`` that hits
+    ``FloodWait`` on ``auth.ImportBotAuthorization``.
     """
     if not _index_enabled():
         return None
@@ -716,7 +731,7 @@ async def build_media_index(
         except Exception:
             return None
 
-    task = asyncio.create_task(_do_build_media_index(file_id, streamer, key))
+    task = asyncio.create_task(_do_build_media_index(file_id, streamer, key, media_session=media_session, location=location))
     _in_flight_index_builds[key] = task
     try:
         return await task
@@ -724,7 +739,9 @@ async def build_media_index(
         _in_flight_index_builds.pop(key, None)
 
 
-async def _do_build_media_index(file_id, streamer, key: Tuple[int, int]) -> Optional[MediaIndex]:
+async def _do_build_media_index(
+    file_id, streamer, key: Tuple[int, int], media_session=None, location=None
+) -> Optional[MediaIndex]:
     from Backend.helper.custom_dl import HEAD_CACHE, TAIL_CACHE  # lazy: avoid import cycle
 
     try:
@@ -733,26 +750,28 @@ async def _do_build_media_index(file_id, streamer, key: Tuple[int, int]) -> Opti
             await _store_index(key, None)
             return None
 
+        warm_session = media_session
+        warm_location = location
+
         async def _fetch(offset: int, limit: int) -> bytes:
-            # upload.getFile returns at most ~1 MiB per call and REJECTS
-            # offsets that are not 4096-aligned (OFFSET_INVALID) — fetch in
-            # <=512 KiB pieces from a 4096-aligned start, stop on short reads.
-            session = await streamer._get_media_session(file_id)
-            location = await streamer._get_location(file_id)
+            # Reuse the caller's already-warm MTProto session when available —
+            # avoids creating a throwaway Client that FloodWaits on ImportAuth.
+            # upload.getFile REJECTS offsets/limits that aren't 4096-aligned
+            # (OFFSET_INVALID/LIMIT_INVALID) and offset+limit beyond the real
+            # file end, so fetch in <=512 KiB 4096-aligned pieces.
+            session = warm_session if warm_session is not None else await streamer._get_media_session(file_id)
+            loc = warm_location if warm_location is not None else await streamer._get_location(file_id)
             end = int(offset) + int(limit)
             pos = int(offset)
             pos -= pos % 4096
             out = bytearray()
             while pos < end:
-                # Telegram requires 4096-aligned offsets AND limits that are
-                # 4096 multiples, with offset+limit <= real file size — clamp
-                # every piece accordingly (the <4KB tail remainder is skipped).
                 want = min(512 * 1024, end - pos, file_size - pos)
                 want -= want % 4096
                 if want <= 0:
                     break
                 piece = await streamer._fetch_file_bytes(
-                    media_session=session, location=location, offset=pos, limit=want
+                    media_session=session, location=loc, offset=pos, limit=want
                 )
                 if not piece:
                     break
@@ -840,9 +859,20 @@ async def _do_build_media_index(file_id, streamer, key: Tuple[int, int]) -> Opti
             )
         return idx
     except Exception as exc:
-        LOGGER.debug("MediaIndex build failed for %s: %s", key, exc)
+        is_floodwait = "FLOOD_WAIT" in str(exc) or " FloodWait" in str(type(exc))
         try:
-            await _store_index(key, None)
+            from pyrogram.errors import FloodWait as _FloodWait
+
+            if isinstance(exc, _FloodWait):
+                is_floodwait = True
+        except Exception:
+            pass
+        if is_floodwait:
+            LOGGER.info("MediaIndex build FloodWait for %s (%s) — short-TTL negative cache", key, exc)
+        else:
+            LOGGER.debug("MediaIndex build failed for %s: %s", key, exc)
+        try:
+            await _store_index(key, None, cause=("floodwait" if is_floodwait else None))
         except Exception:
             pass
         return None
@@ -856,9 +886,11 @@ def container_guess(head_bytes: bytes) -> str:
     return ""
 
 
-async def _store_index(key: Tuple[int, int], idx: Optional[MediaIndex]) -> None:
+async def _store_index(
+    key: Tuple[int, int], idx: Optional[MediaIndex], cause: Optional[str] = None
+) -> None:
     async with _INDEX_LOCK:
-        _INDEX_CACHE[key] = (idx, time.time())
+        _INDEX_CACHE[key] = (idx, time.time(), cause)
         _INDEX_CACHE.move_to_end(key)
         while len(_INDEX_CACHE) > _max_index_entries():
             _INDEX_CACHE.popitem(last=False)

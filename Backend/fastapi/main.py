@@ -520,6 +520,20 @@ async def admin_health(force: bool = False, _: bool = Depends(require_auth)):
 async def admin_restart(_: bool = Depends(require_auth)):
     return await restart_app_api()
 
+@app.get("/api/admin/spill")
+async def admin_spill_list(_: bool = Depends(require_auth)):
+    from Backend.helper.spill_cache import get_spill_file_list
+
+    return await get_spill_file_list()
+
+
+@app.delete("/api/admin/spill/{chat_id}/{msg_id}")
+async def admin_spill_delete(chat_id: int, msg_id: int, _: bool = Depends(require_auth)):
+    from Backend.helper.spill_cache import evict_spill_file
+
+    return await evict_spill_file(int(chat_id), int(msg_id))
+
+
 @app.get("/api/admin/logs")
 async def admin_logs(max_bytes: int = 200000, _: bool = Depends(require_auth)):
     return await get_admin_logs_api(max_bytes)

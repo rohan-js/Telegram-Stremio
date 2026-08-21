@@ -95,5 +95,87 @@ class SpillCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(keep.exists())
 
 
+
+class SpillCounterAndPinTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        import tempfile
+        from unittest.mock import patch
+        from Backend.config import Telegram
+        from Backend.helper import disk_cache
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._patches = [
+            patch.object(Telegram, "SPILL_CACHE_ENABLED", True),
+            patch.object(Telegram, "SPILL_CACHE_MAX_GB", 1.0),
+            patch.object(Telegram, "DISK_CACHE_ENABLED", True),
+            patch.object(disk_cache.Telegram, "DISK_CACHE_DIR", self._tmp.name),
+        ]
+        for pa in self._patches:
+            pa.start()
+            self.addCleanup(pa.stop)
+        from Backend.helper import spill_cache
+        spill_cache._extents.clear()
+        spill_cache._write_queue = None
+        spill_cache._writer_task = None
+        spill_cache._swept_at_startup = False
+        spill_cache._spill_hits = 0
+        spill_cache._spill_misses = 0
+        spill_cache._dropped_chunks = 0
+        spill_cache._pinned_keys.clear()
+
+    async def test_hit_miss_counters_and_hit_rate(self):
+        from Backend.helper import spill_cache
+        await spill_cache._handle_write((-100, 20, "u", 0, b"X" * 1024))
+        # hit
+        got = await spill_cache.read_spilled(-100, 20, "u", 0, 512)
+        self.assertIsNotNone(got)
+        stats = await spill_cache.get_spill_stats()
+        self.assertEqual(stats["hits"], 1)
+        self.assertEqual(stats["misses"], 0)
+        self.assertAlmostEqual(stats["hit_rate"], 1.0)
+        # miss
+        miss = await spill_cache.read_spilled(-100, 20, "u", 2000, 100)
+        self.assertIsNone(miss)
+        stats = await spill_cache.get_spill_stats()
+        self.assertEqual(stats["hits"], 1)
+        self.assertEqual(stats["misses"], 1)
+        self.assertAlmostEqual(stats["hit_rate"], 0.5)
+
+    async def test_has_spilled_range_does_not_count(self):
+        from Backend.helper import spill_cache
+        await spill_cache._handle_write((-100, 21, "u", 0, b"Y" * 512))
+        # has_spilled hit should not affect counters
+        ok = await spill_cache.has_spilled_range(-100, 21, "u", 0, 100)
+        self.assertTrue(ok)
+        stats = await spill_cache.get_spill_stats()
+        self.assertEqual(stats["hits"], 0)
+        self.assertEqual(stats["misses"], 0)
+
+    async def test_pinned_file_survives_eviction(self):
+        from unittest.mock import patch
+        from Backend.config import Telegram
+        from Backend.helper import spill_cache
+        # pin the first file, force eviction with tiny budget
+        await spill_cache._handle_write((-100, 30, "u", 0, b"A" * 4096))
+        await spill_cache._handle_write((-100, 31, "u", 0, b"B" * 4096))
+        async with spill_cache._pinned_lock:
+            spill_cache._pinned_keys.add((-100, 30, "u"))
+        with patch.object(Telegram, "SPILL_CACHE_MAX_GB", 0.000005):
+            # third write pushes over budget -> non-pinned 31 evicted, pinned 30 kept
+            await spill_cache._handle_write((-100, 32, "u", 0, b"C" * 4096))
+            self.assertIsNotNone(spill_cache._extents.get((-100, 30, "u")))
+            self.assertIsNone(spill_cache._extents.get((-100, 31, "u")))
+
+    async def test_admin_file_list_and_evict(self):
+        from Backend.helper import spill_cache
+        await spill_cache._handle_write((-100, 40, "u", 0, b"D" * 256))
+        listing = await spill_cache.get_spill_file_list()
+        self.assertIn("files", listing)
+        self.assertEqual(len(listing["files"]), 1)
+        res = await spill_cache.evict_spill_file(-100, 40)
+        self.assertEqual(res["deleted"], 1)
+        listing2 = await spill_cache.get_spill_file_list()
+        self.assertEqual(len(listing2["files"]), 0)
+
 if __name__ == "__main__":
     unittest.main()

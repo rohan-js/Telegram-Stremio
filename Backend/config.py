@@ -190,6 +190,8 @@ class Telegram:
             if x.strip()
         ]
         SKIP_PREWARM_MAX_INFLIGHT = int(getenv("SKIP_PREWARM_MAX_INFLIGHT", "2") or 2)
+        SPILL_CACHE_PIN_TOP_N = int(getenv("SPILL_CACHE_PIN_TOP_N", "5") or 5)
+        SPILL_CACHE_PIN_TTL_SEC = int(getenv("SPILL_CACHE_PIN_TTL_SEC", "3600") or 3600)
         # Multi-window seek cache + picker enhancements
         SEEK_CACHE_WINDOWS_PER_FILE = int(getenv("SEEK_CACHE_WINDOWS_PER_FILE", "4") or 4)
         STREAM_PICKER_PREBUFFER_CANDIDATES = int(getenv("STREAM_PICKER_PREBUFFER_CANDIDATES", "2") or 2)
@@ -200,6 +202,8 @@ class Telegram:
         STREAM_INDEX_MAX_KEYFRAMES = 4096
         SPILL_CACHE_ENABLED = True
         SPILL_CACHE_MAX_GB = 2.0
+        SPILL_CACHE_PIN_TOP_N = 5
+        SPILL_CACHE_PIN_TTL_SEC = 3600
         RUNWAY_PREFETCH_ENABLED = True
         RUNWAY_STARVE_RATIO = 1.15
         RUNWAY_RELAX_RATIO = 2.0

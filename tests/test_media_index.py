@@ -2,6 +2,7 @@
 
 import struct
 import unittest
+from unittest.mock import patch
 
 from Backend.helper.media_index import (
     MediaIndex,
@@ -226,5 +227,75 @@ class IndexCacheTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(await get_media_index(11, 11))
 
 
+class MediaIndexSessionAndTtlTests(unittest.IsolatedAsyncioTestCase):
+    """Session reuse (open uses the warm media_session) + FloodWait short negative TTL."""
+
+    async def asyncSetUp(self):
+        _INDEX_CACHE.clear()
+
+    async def test_session_reuse_no_extra_media_session_calls(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from Backend.helper import media_index as mi
+        from Backend.helper.media_index import build_media_index, get_media_index
+        _INDEX_CACHE.clear()
+        fake_fid = MagicMock()
+        fake_fid.file_size = 50 * 1024 * 1024
+        fake_fid.file_name = "t.mkv"
+        fake_session = object()
+        fake_loc = object()
+        fake_streamer = MagicMock()
+        # head so the MKV parser rejects quickly but still exercises the fetch path
+        fake_streamer._get_media_session = AsyncMock(return_value=fake_session)
+        fake_streamer._get_location = AsyncMock(return_value=fake_loc)
+        fake_streamer._fetch_file_bytes = AsyncMock(return_value=b"")
+        await build_media_index(fake_fid, fake_streamer, chat_id=1, message_id=1, media_session=fake_session, location=fake_loc)
+        # Warm session/location supplied -> no extra _get_media_session/_get_location calls
+        fake_streamer._get_media_session.assert_not_called()
+        fake_streamer._get_location.assert_not_called()
+        self.assertIsNone(await get_media_index(1, 1))
+
+    async def test_without_warm_session_calls_media_session(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from Backend.helper.media_index import build_media_index, get_media_index
+        _INDEX_CACHE.clear()
+        fake_fid = MagicMock()
+        fake_fid.file_size = 10 * 1024 * 1024
+        fake_streamer = MagicMock()
+        fake_streamer._get_media_session = AsyncMock(return_value=object())
+        fake_streamer._get_location = AsyncMock(return_value=object())
+        fake_streamer._fetch_file_bytes = AsyncMock(return_value=b"")
+        await build_media_index(fake_fid, fake_streamer, chat_id=9, message_id=9)
+        fake_streamer._get_media_session.assert_called()
+        self.assertIsNone(await get_media_index(9, 9))
+
+    async def test_floodwait_negative_expires_fast(self):
+        from Backend.helper.media_index import _store_index, get_media_index, _INDEX_CACHE
+        import time as _tm
+        _INDEX_CACHE.clear()
+        await _store_index((3, 3), None, cause="floodwait")
+        # Still cached after 30s
+        with patch("Backend.helper.media_index.time.time", return_value=_tm.time() + 30):
+            self.assertIsNone(await get_media_index(3, 3))
+            self.assertIn((3, 3), _INDEX_CACHE)
+        # Expired after 65s (short TTL 60s)
+        with patch("Backend.helper.media_index.time.time", return_value=_tm.time() + 65):
+            # get_media_index pops expired negatives and returns None (absent)
+            self.assertIsNone(await get_media_index(3, 3))
+            self.assertNotIn((3, 3), _INDEX_CACHE)
+
+    async def test_non_floodwait_negative_lives_30min(self):
+        from Backend.helper.media_index import _store_index, get_media_index, _INDEX_CACHE
+        import time as _tm
+        _INDEX_CACHE.clear()
+        await _store_index((4, 4), None)
+        with patch("Backend.helper.media_index.time.time", return_value=_tm.time() + 65):
+            self.assertIsNone(await get_media_index(4, 4))
+            self.assertIn((4, 4), _INDEX_CACHE)
+        with patch("Backend.helper.media_index.time.time", return_value=_tm.time() + 1801):
+            self.assertIsNone(await get_media_index(4, 4))
+            self.assertNotIn((4, 4), _INDEX_CACHE)
+
+
 if __name__ == "__main__":
     unittest.main()
+

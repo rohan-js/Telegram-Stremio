@@ -1365,11 +1365,21 @@ async def _trigger_picker_prebuffer(quality_id: str) -> None:
 
             # Tail + container-index pre-warm: Cues/moov parsing needs the file
             # tail, and the index powers exact skip pre-warm + runway math.
+            # Reuse the already-warm picker session to avoid FloodWait on auth.
             try:
                 from Backend.helper.custom_dl import prefetch_file_tail
                 from Backend.helper import media_index
                 await prefetch_file_tail(file_id, streamer, chat_id=chat_id, message_id=msg_id_int)
-                await media_index.build_media_index(file_id, streamer, chat_id=chat_id, message_id=msg_id_int)
+                try:
+                    _idx_sess = await streamer._get_media_session(file_id)
+                    _idx_loc = await streamer._get_location(file_id)
+                except Exception:
+                    _idx_sess = None
+                    _idx_loc = None
+                await media_index.build_media_index(
+                    file_id, streamer, chat_id=chat_id, message_id=msg_id_int,
+                    media_session=_idx_sess, location=_idx_loc,
+                )
             except Exception as e:
                 LOGGER.debug("Picker tail/index prewarm failed for (%s, %s): %s", chat_id, msg_id_int, e)
 

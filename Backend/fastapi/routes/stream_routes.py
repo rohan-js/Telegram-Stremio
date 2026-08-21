@@ -1753,9 +1753,23 @@ async def media_streamer(
         asyncio.create_task(prefetch_file_tail(file_id, streamer, extra_clients_for_stream, chat_id=chat_id, message_id=msg_id))
         if bool(getattr(Telegram, "STREAM_INDEX_ENABLED", True)):
             # Parse MKV Cues / MP4 moov once in the background — powers exact
-            # skip pre-warm and runway bitrate math for this file.
+            # skip pre-warm and runway bitrate math for this file. Reuse the
+            # already-warm DC session when available (no throwaway Client).
+            try:
+                _idx_sess = await streamer._get_media_session(file_id)
+                _idx_loc = await streamer._get_location(file_id)
+            except Exception:
+                _idx_sess = None
+                _idx_loc = None
             asyncio.create_task(
-                media_index.build_media_index(file_id, streamer, chat_id=chat_id, message_id=msg_id)
+                media_index.build_media_index(
+                    file_id,
+                    streamer,
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    media_session=_idx_sess,
+                    location=_idx_loc,
+                )
             )
 
     body_gen = await streamer.prefetch_stream(
