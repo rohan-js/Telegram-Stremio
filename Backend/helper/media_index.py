@@ -734,13 +734,15 @@ async def _do_build_media_index(file_id, streamer, key: Tuple[int, int]) -> Opti
             return None
 
         async def _fetch(offset: int, limit: int) -> bytes:
-            # upload.getFile returns at most ~1 MiB per call regardless of the
-            # requested limit — fetch in <=512 KiB pieces and stop on short reads.
+            # upload.getFile returns at most ~1 MiB per call and REJECTS
+            # offsets that are not 4096-aligned (OFFSET_INVALID) — fetch in
+            # <=512 KiB pieces from a 4096-aligned start, stop on short reads.
             session = await streamer._get_media_session(file_id)
             location = await streamer._get_location(file_id)
-            out = bytearray()
-            pos = int(offset)
             end = int(offset) + int(limit)
+            pos = int(offset)
+            pos -= pos % 4096
+            out = bytearray()
             while pos < end:
                 want = min(512 * 1024, end - pos)
                 piece = await streamer._fetch_file_bytes(
@@ -807,8 +809,10 @@ async def _do_build_media_index(file_id, streamer, key: Tuple[int, int]) -> Opti
             if cues_abs is not None and cues_abs >= len(head_bytes):
                 cues_buf = await _fetch(cues_abs, 1024 * 1024)
                 if cues_buf:
+                    # _fetch starts at a 4096-aligned offset <= cues_abs
+                    win_base = cues_abs - (cues_abs % 4096)
                     idx = parse_mkv_index(
-                        head_bytes, b"", file_size, cues_window=(cues_buf, cues_abs)
+                        head_bytes, b"", file_size, cues_window=(cues_buf, win_base)
                     )
 
         # MP4 retry: moov-at-end files may need a bigger tail window.
