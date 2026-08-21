@@ -744,7 +744,11 @@ async def _do_build_media_index(file_id, streamer, key: Tuple[int, int]) -> Opti
             pos -= pos % 4096
             out = bytearray()
             while pos < end:
-                want = min(512 * 1024, end - pos)
+                # Telegram rejects offset+limit beyond the real file end
+                # (LIMIT_INVALID) — clamp every piece to the file boundary.
+                want = min(512 * 1024, end - pos, file_size - pos)
+                if want <= 0:
+                    break
                 piece = await streamer._fetch_file_bytes(
                     media_session=session, location=location, offset=pos, limit=want
                 )
