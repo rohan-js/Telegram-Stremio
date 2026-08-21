@@ -1,7 +1,7 @@
 import secrets
 import mimetypes
 import time
-from typing import Dict
+from typing import Dict, Optional
 from pathlib import Path
 from urllib.parse import quote
 
@@ -47,8 +47,10 @@ from Backend.helper.disk_cache import (
     first_cache_relpath,
     first_cache_abspath,
     is_complete_first_cache,
+    get_first_cache_available_bytes,
     evict_lru,
 )
+from Backend.helper import media_index, spill_cache
 from Backend.helper.torrent_downloads import (
     download_root_dir,
     guess_mime_type,
@@ -286,12 +288,14 @@ async def _fill_first_cache_head(
     unique_id: str,
     expected_bytes: int,
     client_index: int,
+    target_bytes: Optional[int] = None,
 ) -> None:
     """Download the file's head (first expected_bytes) from Telegram to disk.
 
     Runs fully in the background — a failure never affects the live stream.
     The prefix file lives under the same LRU-bounded cache root, so the shared
-    DISK_CACHE_MAX_BYTES budget and eviction apply.
+    DISK_CACHE_MAX_BYTES budget and eviction apply. ``target_bytes`` (runway
+    head-boost) may raise the fill size above the default first-MB window.
     """
     rel = first_cache_relpath(chat_id, msg_id, unique_id)
     if rel in _first_fill_inflight:
@@ -303,11 +307,11 @@ async def _fill_first_cache_head(
         size = int(getattr(fid, "file_size", 0) or 0)
         if size <= 0:
             return
-        want = min(int(expected_bytes), size)
+        want = min(int(target_bytes or expected_bytes), size)
         if want <= 0:
             return
         dest = first_cache_abspath(chat_id, msg_id, unique_id)
-        if is_complete_first_cache(dest, want):
+        if get_first_cache_available_bytes(dest) >= want:
             return
         location = await streamer._get_location(fid)
         media_session = await streamer._get_media_session(fid)
@@ -1122,6 +1126,23 @@ async def db_zip_media_streamer(request: Request, parts_payload: list, token: st
         streamer, index, None, None,
     )
 
+def _dc_feed_capacity_bps(target_dc: int) -> Optional[float]:
+    """Best measured sustained feed speed (bytes/sec) for a DC, else global best."""
+    try:
+        best: Optional[float] = None
+        for (_idx, dc), mbps in client_dc_avg_mbps.items():
+            if int(dc) == int(target_dc) and mbps and mbps > 0:
+                best = max(best or 0.0, float(mbps))
+        if best is None:
+            vals = [float(v) for v in client_avg_mbps.values() if v and v > 0]
+            best = max(vals) if vals else None
+        if best is None or best <= 0:
+            return None
+        return best * 1024 * 1024
+    except Exception:
+        return None
+
+
 async def media_streamer(
     request: Request,
     chat_id: int,
@@ -1167,6 +1188,35 @@ async def media_streamer(
 
     if "." not in file_name and "/" in mime_type:
         file_name = f"{file_name}.{mime_type.split('/')[1]}"
+
+    # ------------------------------------------------------------------
+    # Runway bitrate guard — if the file's bitrate outruns the best known
+    # feed speed for its DC, boost the first-MB head fill (30s runway) so
+    # playback gets a buffer cushion instead of a minute-3 stall. Needs a
+    # parsed container index (built at picker time / first open).
+    # ------------------------------------------------------------------
+    starved_bitrate = False
+    head_fill_bytes: Optional[int] = None
+    bitrate_bps: Optional[float] = None
+    try:
+        if bool(getattr(Telegram, "RUNWAY_PREFETCH_ENABLED", True)) and chat_id and msg_id:
+            _idx = await media_index.get_media_index(chat_id, msg_id)
+            if _idx is not None and _idx.duration_sec:
+                bitrate_bps = float(file_size) / float(_idx.duration_sec)
+                _feed_cap = _dc_feed_capacity_bps(int(target_dc or real_dc or 0))
+                if _feed_cap and bitrate_bps * 1.3 > _feed_cap:
+                    starved_bitrate = True
+                    _boost_mb = min(
+                        float(getattr(Telegram, "RUNWAY_HEAD_BOOST_MAX_MB", 60) or 60),
+                        max(first_cache_bytes() / 1048576.0, (bitrate_bps * 30.0) / 1048576.0),
+                    )
+                    head_fill_bytes = int(_boost_mb * 1024 * 1024)
+                    LOGGER.info(
+                        "Runway guard: starved bitrate %.2f MB/s vs feed cap %.2f MB/s — head boost to %.0f MB",
+                        bitrate_bps / 1048576.0, _feed_cap / 1048576.0, _boost_mb,
+                    )
+    except Exception as exc:
+        LOGGER.debug("Runway guard skipped: %s", exc)
 
     # ------------------------------------------------------------------
     # Tail cache hit path (instant MKV Cues / MP4 Moov for ExoPlayer)
@@ -1225,7 +1275,7 @@ async def media_streamer(
     if first_cache_enabled() and start < first_cache_bytes() and unique_id:
         fc_bytes = min(first_cache_bytes(), file_size)
         fc_path = first_cache_abspath(chat_id, msg_id, unique_id)
-        if end < fc_bytes and is_complete_first_cache(fc_path, fc_bytes):
+        if end < fc_bytes and get_first_cache_available_bytes(fc_path) >= fc_bytes:
             touch_cache_file(fc_path)
             LOGGER.info("FirstDiskCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, req_length)
             from fastapi.responses import Response as PlainResponse
@@ -1251,10 +1301,41 @@ async def media_streamer(
                 media_type=mime_type,
             )
         elif start == 0:
-            # Populate Tier 2 NVMe disk in background while Tier 1 RAM serves Chunk 0
+            # Populate Tier 2 NVMe disk in background while Tier 1 RAM serves Chunk 0.
+            # A runway head-boost raises the fill target for starved-bitrate files.
             asyncio.create_task(
-                _fill_first_cache_head(chat_id, msg_id, unique_id, int(fc_bytes), base_index)
+                _fill_first_cache_head(
+                    chat_id, msg_id, unique_id, int(fc_bytes), base_index,
+                    target_bytes=head_fill_bytes,
+                )
             )
+
+    # ------------------------------------------------------------------
+    # Spill cache hit path (backward seeks / replays / 2nd viewer from NVMe
+    # disk, zero MTProto calls). Chunks delivered by any earlier stream of
+    # this file were persisted to a sparse range file.
+    # ------------------------------------------------------------------
+    if spill_cache.spill_enabled() and unique_id and chat_id and msg_id and req_length <= 8 * 1024 * 1024:
+        try:
+            spilled = await spill_cache.read_spilled(chat_id, msg_id, unique_id, start, req_length)
+            if spilled is not None and len(spilled) == req_length:
+                LOGGER.info("SpillCache HIT (%s, %s) range=%s-%s len=%d", chat_id, msg_id, start, end, req_length)
+                from fastapi.responses import Response as PlainResponse
+                return PlainResponse(
+                    content=spilled,
+                    status_code=206,
+                    headers={
+                        "Content-Range": f"bytes {start}-{end}/{file_size}",
+                        "Content-Length": str(len(spilled)),
+                        "Content-Type": mime_type,
+                        "Accept-Ranges": "bytes",
+                        "Content-Disposition": _content_disposition(file_name),
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+                    },
+                )
+        except Exception as exc:
+            LOGGER.debug("SpillCache read skipped: %s", exc)
 
     # ------------------------------------------------------------------
     # Seek Cache hit path (ExoPlayer / VLC micro-range seek probes)
@@ -1400,6 +1481,8 @@ async def media_streamer(
         "token": token,
         "token_user_id": token_data.get("user_id") if token_data else None,
         "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
+        "bitrate_bps": round(bitrate_bps, 1) if bitrate_bps else None,
+        "starved_bitrate": starved_bitrate,
         "smart_routing": {
             "target_dc": real_dc,
             "selected_client": index,
@@ -1503,7 +1586,7 @@ async def media_streamer(
             if unique_id:
                 fc_bytes = min(first_cache_bytes(), file_size)
                 fc_path = first_cache_abspath(chat_id, msg_id, unique_id)
-                if end < fc_bytes and is_complete_first_cache(fc_path, fc_bytes):
+                if end < fc_bytes and get_first_cache_available_bytes(fc_path) >= fc_bytes:
                     first_cache_hit = True
                     touch_cache_file(fc_path)
 
@@ -1564,7 +1647,10 @@ async def media_streamer(
                     # starts from Telegram — nothing waits on the cache.
                     first_cache_fill = True
                     asyncio.create_task(
-                        _fill_first_cache_head(chat_id, msg_id, unique_id, int(fc_bytes), base_index)
+                        _fill_first_cache_head(
+                            chat_id, msg_id, unique_id, int(fc_bytes), base_index,
+                            target_bytes=head_fill_bytes,
+                        )
                     )
     except Exception as e:
         LOGGER.debug("First-cache lookup failed: %s", e)
@@ -1665,6 +1751,12 @@ async def media_streamer(
 
     if start == 0 and file_size > 524288 and chat_id and msg_id:
         asyncio.create_task(prefetch_file_tail(file_id, streamer, extra_clients_for_stream, chat_id=chat_id, message_id=msg_id))
+        if bool(getattr(Telegram, "STREAM_INDEX_ENABLED", True)):
+            # Parse MKV Cues / MP4 moov once in the background — powers exact
+            # skip pre-warm and runway bitrate math for this file.
+            asyncio.create_task(
+                media_index.build_media_index(file_id, streamer, chat_id=chat_id, message_id=msg_id)
+            )
 
     body_gen = await streamer.prefetch_stream(
         file_id=file_id,
@@ -1876,6 +1968,8 @@ async def get_stream_stats():
                 "enabled": first_cache_enabled(),
                 "head_mb": first_cache_bytes() / (1024 * 1024),
             },
+            "index_cache": media_index.get_index_cache_stats(),
+            "spill_cache": await spill_cache.get_spill_stats(),
         }
     )
 

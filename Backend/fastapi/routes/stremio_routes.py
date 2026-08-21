@@ -1304,19 +1304,30 @@ async def get_streams(
 
     # ------------------------------------------------------------------
     # Stream Picker Pre-Buffering ("The YouTube 0ms Click")
-    # Pre-buffers Chunk 0 (256 KB) of the top-ranked stream into HeadCache
-    # while the user is browsing the quality picker modal.
+    # Pre-buffers Chunk 0 (256 KB) of the top-ranked stream(s) into HeadCache
+    # while the user is browsing the quality picker modal. Also warms the file
+    # tail + container index and the MTProto session on the likely route so
+    # the actual tap is instant even on a cold boot.
     # ------------------------------------------------------------------
     if bool(getattr(Telegram, "STREAM_PICKER_PREBUFFER_ENABLED", True)) and streams:
         try:
-            top_url = str(streams[0].get("url") or "")
-            if "/dl/" in top_url:
+            max_candidates = max(1, int(getattr(Telegram, "STREAM_PICKER_PREBUFFER_CANDIDATES", 2) or 2))
+            seen_quality_ids = set()
+            for s in streams[:max_candidates]:
+                top_url = str(s.get("url") or "")
+                if "/dl/" not in top_url:
+                    continue
                 parts = [p for p in top_url.split("/") if p]
-                if "dl" in parts:
-                    dl_idx = parts.index("dl")
-                    if len(parts) > dl_idx + 2:
-                        quality_id = parts[dl_idx + 2]
-                        asyncio.create_task(_trigger_picker_prebuffer(quality_id))
+                if "dl" not in parts:
+                    continue
+                dl_idx = parts.index("dl")
+                if len(parts) <= dl_idx + 2:
+                    continue
+                quality_id = parts[dl_idx + 2]
+                if quality_id in seen_quality_ids:
+                    continue
+                seen_quality_ids.add(quality_id)
+                asyncio.create_task(_trigger_picker_prebuffer(quality_id))
         except Exception as e:
             LOGGER.debug("Stream picker pre-buffer dispatch error: %s", e)
 
@@ -1351,6 +1362,30 @@ async def _trigger_picker_prebuffer(quality_id: str) -> None:
         if file_id:
             LOGGER.info("Picker prebuffer: starting prefetch for (%s, %s)", chat_id, msg_id_int)
             await prefetch_stream_head(file_id, streamer, chat_id=chat_id, message_id=msg_id_int)
+
+            # Tail + container-index pre-warm: Cues/moov parsing needs the file
+            # tail, and the index powers exact skip pre-warm + runway math.
+            try:
+                from Backend.helper.custom_dl import prefetch_file_tail
+                from Backend.helper import media_index
+                await prefetch_file_tail(file_id, streamer, chat_id=chat_id, message_id=msg_id_int)
+                await media_index.build_media_index(file_id, streamer, chat_id=chat_id, message_id=msg_id_int)
+            except Exception as e:
+                LOGGER.debug("Picker tail/index prewarm failed for (%s, %s): %s", chat_id, msg_id_int, e)
+
+            # MTProto session pre-warm on the likely smart-routed client —
+            # hides the cold Auth/ExportAuthorization cost behind picker time.
+            if bool(getattr(Telegram, "STREAM_PICKER_SESSION_PREWARM", True)):
+                try:
+                    from Backend.fastapi.routes.stream_routes import get_streamer, select_best_client
+                    dc = int(getattr(file_id, "dc_id", 0) or 0)
+                    if dc:
+                        best_idx = select_best_client(dc)
+                        if best_idx is not None:
+                            await get_streamer(best_idx).get_or_create_media_session(dc)
+                            LOGGER.debug("Picker session prewarm: client %s media session for DC %s ready", best_idx, dc)
+                except Exception as e:
+                    LOGGER.debug("Picker session prewarm failed for (%s, %s): %s", chat_id, msg_id_int, e)
     except Exception as e:
         LOGGER.warning("Picker prebuffer failed for quality_id=%s: %s", quality_id, e)
 

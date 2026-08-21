@@ -26,6 +26,7 @@ from Backend.pyrofork.bot import (
     client_last_errors,
 )
 from Backend.config import Telegram
+from Backend.helper import spill_cache
 
 ACTIVE_STREAMS: Dict[str, Dict] = {}
 RECENT_STREAMS = deque(maxlen=20)
@@ -168,33 +169,50 @@ HEAD_CACHE = HeadCache()
 class SeekCache:
     """Bounded in-memory LRU seek window cache.
     Coalesces ExoPlayer / VLC micro-range seek probes (16KB, 32KB, 64KB) into a single 512KB aligned fetch,
-    enabling instant (<150ms) seeking and scrubbing without firing repeated MTProto requests."""
+    enabling instant (<150ms) seeking and scrubbing without firing repeated MTProto requests.
+    Holds up to SEEK_CACHE_WINDOWS_PER_FILE windows per file so skip-target
+    pre-warm (+10s/+30s/-10s) can coexist with the window being watched."""
 
-    def __init__(self, max_entries: Optional[int] = None, ttl_sec: Optional[float] = None):
+    def __init__(self, max_entries: Optional[int] = None, ttl_sec: Optional[float] = None, windows_per_file: Optional[int] = None):
         self.max_entries = max_entries
         self.ttl_sec = ttl_sec
-        self._cache: OrderedDict[Tuple[int, int], Tuple[int, int, bytes, float]] = OrderedDict()
+        self.windows_per_file = windows_per_file
+        # (chat_id, message_id) -> OrderedDict[aligned_start -> (block_end, block_bytes, put_ts)]
+        self._cache: OrderedDict[Tuple[int, int], OrderedDict[int, Tuple[int, bytes, float]]] = OrderedDict()
         self._lock = asyncio.Lock()
+
+    def _windows_per_file_limit(self) -> int:
+        if self.windows_per_file is not None:
+            return max(1, int(self.windows_per_file))
+        return max(1, int(getattr(Telegram, "SEEK_CACHE_WINDOWS_PER_FILE", 4) or 4))
 
     async def get_seek_range(self, chat_id: int, message_id: int, start_offset: int, length: int) -> Optional[bytes]:
         key = (int(chat_id), int(message_id))
         now = time.time()
         ttl = self.ttl_sec if self.ttl_sec is not None else float(getattr(Telegram, "SEEK_CACHE_TTL_SEC", 10.0) or 10.0)
+        req_end = start_offset + length
         async with self._lock:
-            if key not in self._cache:
+            windows = self._cache.get(key)
+            if not windows:
                 return None
-            block_start, block_end, block_bytes, ts = self._cache[key]
-            if now - ts > ttl:
+            hit: Optional[bytes] = None
+            expired: list = []
+            for aligned, (block_end, block_bytes, ts) in windows.items():
+                if now - ts > ttl:
+                    expired.append(aligned)
+                    continue
+                if start_offset >= aligned and req_end <= block_end:
+                    rel_start = start_offset - aligned
+                    hit = block_bytes[rel_start : rel_start + length]
+                    windows.move_to_end(aligned)
+                    break
+            for a in expired:
+                windows.pop(a, None)
+            if not windows:
                 self._cache.pop(key, None)
                 return None
             self._cache.move_to_end(key)
-
-        req_end = start_offset + length
-        if start_offset >= block_start and req_end <= block_end:
-            rel_start = start_offset - block_start
-            rel_end = rel_start + length
-            return block_bytes[rel_start:rel_end]
-        return None
+            return hit
 
     async def put_seek_block(self, chat_id: int, message_id: int, block_start: int, block_bytes: bytes) -> None:
         if not block_bytes:
@@ -204,7 +222,15 @@ class SeekCache:
         now = time.time()
         max_entries = self.max_entries if self.max_entries is not None else max(4, int(getattr(Telegram, "SEEK_CACHE_MAX_ENTRIES", 16) or 16))
         async with self._lock:
-            self._cache[key] = (int(block_start), int(block_end), block_bytes, now)
+            windows = self._cache.get(key)
+            if windows is None:
+                windows = OrderedDict()
+                self._cache[key] = windows
+            windows[int(block_start)] = (int(block_end), block_bytes, now)
+            windows.move_to_end(int(block_start))
+            per_file = self._windows_per_file_limit()
+            while len(windows) > per_file:
+                windows.popitem(last=False)
             self._cache.move_to_end(key)
             while len(self._cache) > max_entries:
                 self._cache.popitem(last=False)
@@ -867,6 +893,10 @@ class ByteStreamer:
             "status": "active",
             "part_count": part_count,
             "prefetch": prefetch,
+            "effective_prefetch": int(prefetch),
+            "runway_reason": "hold",
+            "file_size": int(getattr(file_id, "file_size", 0) or 0),
+            "file_offset": int(offset or 0),
             "meta": meta or {},
             "chunk_timeouts": 0,
             "chunk_errors": 0,
@@ -886,7 +916,10 @@ class ByteStreamer:
         ACTIVE_STREAMS[stream_id] = registry_entry
         work_loads[client_index] = work_loads.get(client_index, 0) + 1
 
-        queue_maxsize = max(1, prefetch)
+        # Queue is sized to the parallelism ceiling so runway-mode can boost the
+        # prefetch distance at runtime; the producer enforces the *effective*
+        # prefetch limit (registry_entry["effective_prefetch"]) itself.
+        queue_maxsize = max(1, max(int(prefetch), int(parallelism)))
         q: asyncio.Queue = asyncio.Queue(maxsize=queue_maxsize)
         stop_event = asyncio.Event()
 
@@ -1235,6 +1268,12 @@ class ByteStreamer:
                         break
 
                     if not scheduled_tasks:
+                        eff_prefetch_0 = max(1, int(registry_entry.get("effective_prefetch") or prefetch))
+                        if (next_to_schedule - next_to_put) >= eff_prefetch_0:
+                            # Runway-limited: wait for the consumer to drain
+                            # before scheduling more (never blocks the stream).
+                            await asyncio.sleep(0.05)
+                            continue
                         seq = next_to_schedule
                         off = offset + seq * chunk_size
                         task = asyncio.create_task(fetch_chunk_with_retries(seq, off))
@@ -1271,12 +1310,18 @@ class ByteStreamer:
 
                             results_buffer[seq_idx] = chunk_bytes
 
+                            # Runway gating: schedule the next fetch only while
+                            # (scheduled - delivered) stays under the effective
+                            # prefetch distance. Runway mode may raise this at
+                            # runtime; the queue never blocks the producer here.
                             if next_to_schedule < part_count:
-                                seq = next_to_schedule
-                                off = offset + seq * chunk_size
-                                task = asyncio.create_task(fetch_chunk_with_retries(seq, off))
-                                scheduled_tasks[seq] = task
-                                next_to_schedule += 1
+                                eff_prefetch = max(1, int(registry_entry.get("effective_prefetch") or prefetch))
+                                if (next_to_schedule - next_to_put) < eff_prefetch:
+                                    seq = next_to_schedule
+                                    off = offset + seq * chunk_size
+                                    task = asyncio.create_task(fetch_chunk_with_retries(seq, off))
+                                    scheduled_tasks[seq] = task
+                                    next_to_schedule += 1
 
                         except asyncio.CancelledError:
                             raise
@@ -1375,6 +1420,7 @@ class ByteStreamer:
 
                     registry_entry["total_bytes"] += chunk_len
                     registry_entry["last_ts"] = now_ts
+                    registry_entry["file_offset"] = int(off + chunk_len) if off is not None else registry_entry.get("file_offset", 0)
 
                     total_time = now_ts - registry_entry["start_ts"]
                     if total_time <= 0:
@@ -1385,6 +1431,75 @@ class ByteStreamer:
 
                     if instant_mbps > registry_entry["peak_mbps"]:
                         registry_entry["peak_mbps"] = instant_mbps
+
+                    # --- streaming-instant hooks (all best-effort) -----------
+                    try:
+                        # Spill the delivered chunk to the range disk cache so
+                        # backward seeks / replays / 2nd viewers hit NVMe.
+                        if chat_id is not None and message_id is not None and chunk_len > 0:
+                            _uid = getattr(file_id, "unique_id", None)
+                            if _uid:
+                                spill_cache.enqueue_spill(chat_id, message_id, _uid, int(off), chunk)
+                    except Exception:
+                        pass
+
+                    chunks_seen = registry_entry.get("_chunks_seen", 0) + 1
+                    registry_entry["_chunks_seen"] = chunks_seen
+
+                    # Runway-aware prefetch: compare measured feed speed with
+                    # the file bitrate (from the container index) and adjust
+                    # the effective prefetch distance every 5 chunks.
+                    if chunks_seen % 5 == 0 and bool(getattr(Telegram, "RUNWAY_PREFETCH_ENABLED", True)):
+                        try:
+                            bitrate_bps = (registry_entry.get("meta") or {}).get("bitrate_bps")
+                            if bitrate_bps:
+                                feed_bps = max(float(registry_entry.get("instant_mbps") or 0.0),
+                                               0.0) * 1024 * 1024
+                                new_eff, reason = compute_runway_prefetch(
+                                    base=int(prefetch),
+                                    current=int(registry_entry.get("effective_prefetch") or prefetch),
+                                    cap=int(parallelism),
+                                    bitrate_bps=float(bitrate_bps),
+                                    feed_bps=float(feed_bps),
+                                )
+                                if new_eff != int(registry_entry.get("effective_prefetch") or prefetch):
+                                    registry_entry["effective_prefetch"] = new_eff
+                                    registry_entry["runway_reason"] = reason
+                                    adaptive = (registry_entry.get("meta") or {}).get("adaptive_prefetch")
+                                    if isinstance(adaptive, dict):
+                                        adaptive["effective_prefetch"] = new_eff
+                                        adaptive["runway"] = reason
+                                    LOGGER.debug(
+                                        "Runway %s for stream %s: eff_prefetch=%s bitrate=%.2fMB/s feed=%.2fMB/s",
+                                        reason, stream_id, new_eff, bitrate_bps / 1048576.0, feed_bps / 1048576.0,
+                                    )
+                        except Exception:
+                            pass
+
+                    # Skip-target speculative pre-warm (throttled to 1 check / 2s)
+                    try:
+                        if (
+                            bool(getattr(Telegram, "SKIP_PREWARM_ENABLED", True))
+                            and chat_id is not None
+                            and message_id is not None
+                            and (now_ts - registry_entry.get("_skip_prewarm_ts", 0.0)) >= 2.0
+                        ):
+                            registry_entry["_skip_prewarm_ts"] = now_ts
+                            asyncio.create_task(
+                                _prewarm_skip_targets(
+                                    file_id,
+                                    self,
+                                    chat_id=int(chat_id),
+                                    message_id=int(message_id),
+                                    file_offset=int(registry_entry.get("file_offset") or 0),
+                                    file_size=int(registry_entry.get("file_size") or 0),
+                                    inflight_holder=registry_entry,
+                                    session_pool=session_pool,
+                                )
+                            )
+                    except Exception:
+                        pass
+                    # --- end hooks -----------------------------------------
 
                     if part_count == 1:
                         if not first_yielded:
@@ -2151,3 +2266,131 @@ async def prefetch_seek_window(
         return await task
     finally:
         _in_flight_seek_fetches.pop(key, None)
+
+
+# ---------------------------------------------------------------------------
+# Runway-aware adaptive prefetch
+# ---------------------------------------------------------------------------
+def compute_runway_prefetch(
+    base: int,
+    current: int,
+    cap: int,
+    bitrate_bps: float,
+    feed_bps: float,
+    starve_ratio: Optional[float] = None,
+    relax_ratio: Optional[float] = None,
+) -> Tuple[int, str]:
+    """Decide the effective prefetch distance from feed speed vs file bitrate.
+
+    Pure function (unit-tested). Boosts toward the parallelism ceiling when the
+    Telegram feed can't keep up with the file bitrate; relaxes back to the
+    configured base when comfortably ahead. Returns (new_prefetch, reason).
+    """
+    try:
+        base = max(1, int(base))
+        current = max(1, int(current))
+        cap = max(1, int(cap))
+        if bitrate_bps <= 0 or feed_bps <= 0 or cap <= 1:
+            return current, "hold"
+        starve = starve_ratio if starve_ratio is not None else float(
+            getattr(Telegram, "RUNWAY_STARVE_RATIO", 1.15) or 1.15
+        )
+        relax = relax_ratio if relax_ratio is not None else float(
+            getattr(Telegram, "RUNWAY_RELAX_RATIO", 2.0) or 2.0
+        )
+        if feed_bps < bitrate_bps * starve:
+            want = min(cap, base + 2)
+            return (want if want > current else current), "boost"
+        if feed_bps > bitrate_bps * relax and current > base:
+            return base, "relax"
+        return current, "hold"
+    except Exception:
+        return current, "hold"
+
+
+# ---------------------------------------------------------------------------
+# Skip-target speculative pre-warm
+# ---------------------------------------------------------------------------
+async def _prewarm_skip_targets(
+    file_id: FileId,
+    streamer: "ByteStreamer",
+    *,
+    chat_id: int,
+    message_id: int,
+    file_offset: int,
+    file_size: int,
+    inflight_holder: dict,
+    session_pool: Optional[list] = None,
+) -> None:
+    """Pre-fetch 512 KB windows at +10s/+30s/-10s from the current position.
+
+    Uses the parsed container index for exact byte mapping; without an index
+    this is a no-op. Bounded by SKIP_PREWARM_MAX_INFLIGHT per stream; the
+    global MTProto semaphore still caps total pressure.
+    """
+    try:
+        if not bool(getattr(Telegram, "SKIP_PREWARM_ENABLED", True)):
+            return
+        if file_offset <= 0 or file_size <= 0:
+            return
+        from Backend.helper.media_index import get_media_index
+
+        idx = await get_media_index(chat_id, message_id)
+        if idx is None:
+            return
+        targets = getattr(Telegram, "SKIP_PREWARM_TARGETS_SEC", None) or [10.0, 30.0, -10.0]
+        max_inflight = max(1, int(getattr(Telegram, "SKIP_PREWARM_MAX_INFLIGHT", 2) or 2))
+        window = 512 * 1024
+        unique_id = str(getattr(file_id, "unique_id", "") or "")
+
+        inflight = int(inflight_holder.get("_skip_prewarm_inflight", 0))
+        if inflight >= max_inflight:
+            return
+
+        for dt in targets:
+            if inflight >= max_inflight:
+                break
+            target = idx.seek_delta_byte(file_offset, float(dt), file_size)
+            if target is None or target < 0:
+                continue
+            aligned = target - (target % window)
+            if aligned <= 0 or aligned >= file_size:
+                continue
+            # Already cached in RAM or on disk? Skip.
+            try:
+                if await SEEK_CACHE.get_seek_range(chat_id, message_id, aligned, 1) is not None:
+                    continue
+            except Exception:
+                pass
+            try:
+                if unique_id and await spill_cache.has_spilled_range(chat_id, message_id, unique_id, aligned, 1):
+                    continue
+            except Exception:
+                pass
+
+            inflight += 1
+            inflight_holder["_skip_prewarm_inflight"] = inflight
+
+            async def _one(aligned_start: int = aligned):
+                try:
+                    await prefetch_seek_window(
+                        file_id,
+                        streamer,
+                        session_pool,
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        start_offset=aligned_start,
+                    )
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        inflight_holder["_skip_prewarm_inflight"] = max(
+                            0, int(inflight_holder.get("_skip_prewarm_inflight", 1)) - 1
+                        )
+                    except Exception:
+                        pass
+
+            asyncio.create_task(_one())
+    except Exception as exc:
+        LOGGER.debug("skip pre-warm skipped: %s", exc)

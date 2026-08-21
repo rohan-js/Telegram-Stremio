@@ -164,6 +164,54 @@ class Telegram:
         STREAM_PICKER_PREBUFFER_SIZE_KB = 256
         STREAM_PICKER_PREBUFFER_MAX_ENTRIES = 32
 
+    try:
+        # Container seek-index parsing (MKV Cues / MP4 moov) — maps keyframe
+        # time <-> byte offset so skip pre-warm and runway math are exact.
+        STREAM_INDEX_ENABLED = getenv("STREAM_INDEX_ENABLED", "true").lower() == "true"
+        STREAM_INDEX_CACHE_MAX_ENTRIES = int(getenv("STREAM_INDEX_CACHE_MAX_ENTRIES", "64") or 64)
+        STREAM_INDEX_MAX_KEYFRAMES = int(getenv("STREAM_INDEX_MAX_KEYFRAMES", "4096") or 4096)
+        # Streamed-chunk spill cache — persist delivered chunks to a sparse disk
+        # file so backward seeks / replays / second viewers never re-fetch MTProto.
+        SPILL_CACHE_ENABLED = getenv("SPILL_CACHE_ENABLED", "true").lower() == "true"
+        SPILL_CACHE_MAX_GB = float(getenv("SPILL_CACHE_MAX_GB", "2.0") or 2.0)
+        # Runway-aware adaptive prefetch — boost PRE_FETCH toward PARALLEL when the
+        # measured Telegram feed falls behind the file's bitrate, relax when ahead.
+        RUNWAY_PREFETCH_ENABLED = getenv("RUNWAY_PREFETCH_ENABLED", "true").lower() == "true"
+        RUNWAY_STARVE_RATIO = float(getenv("RUNWAY_STARVE_RATIO", "1.15") or 1.15)
+        RUNWAY_RELAX_RATIO = float(getenv("RUNWAY_RELAX_RATIO", "2.0") or 2.0)
+        RUNWAY_HEAD_BOOST_MAX_MB = float(getenv("RUNWAY_HEAD_BOOST_MAX_MB", "60") or 60)
+        STREAM_BITRATE_HINT_ENABLED = getenv("STREAM_BITRATE_HINT_ENABLED", "false").lower() == "true"
+        # Skip-target speculative pre-warm — fetch +10s/+30s/-10s 512KB windows
+        # during playback so consecutive TV remote skips are RAM hits.
+        SKIP_PREWARM_ENABLED = getenv("SKIP_PREWARM_ENABLED", "true").lower() == "true"
+        SKIP_PREWARM_TARGETS_SEC = [
+            float(x.strip())
+            for x in (getenv("SKIP_PREWARM_TARGETS_SEC", "10,30,-10") or "10,30,-10").split(",")
+            if x.strip()
+        ]
+        SKIP_PREWARM_MAX_INFLIGHT = int(getenv("SKIP_PREWARM_MAX_INFLIGHT", "2") or 2)
+        # Multi-window seek cache + picker enhancements
+        SEEK_CACHE_WINDOWS_PER_FILE = int(getenv("SEEK_CACHE_WINDOWS_PER_FILE", "4") or 4)
+        STREAM_PICKER_PREBUFFER_CANDIDATES = int(getenv("STREAM_PICKER_PREBUFFER_CANDIDATES", "2") or 2)
+        STREAM_PICKER_SESSION_PREWARM = getenv("STREAM_PICKER_SESSION_PREWARM", "true").lower() == "true"
+    except Exception:
+        STREAM_INDEX_ENABLED = True
+        STREAM_INDEX_CACHE_MAX_ENTRIES = 64
+        STREAM_INDEX_MAX_KEYFRAMES = 4096
+        SPILL_CACHE_ENABLED = True
+        SPILL_CACHE_MAX_GB = 2.0
+        RUNWAY_PREFETCH_ENABLED = True
+        RUNWAY_STARVE_RATIO = 1.15
+        RUNWAY_RELAX_RATIO = 2.0
+        RUNWAY_HEAD_BOOST_MAX_MB = 60
+        STREAM_BITRATE_HINT_ENABLED = False
+        SKIP_PREWARM_ENABLED = True
+        SKIP_PREWARM_TARGETS_SEC = [10.0, 30.0, -10.0]
+        SKIP_PREWARM_MAX_INFLIGHT = 2
+        SEEK_CACHE_WINDOWS_PER_FILE = 4
+        STREAM_PICKER_PREBUFFER_CANDIDATES = 2
+        STREAM_PICKER_SESSION_PREWARM = True
+
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
     MANUAL_CHANNELS = [channel.strip() for channel in (getenv("MANUAL_CHANNELS") or "").split(",") if channel.strip()]
     ANIME_CHANNELS = [channel.strip() for channel in (getenv("ANIME_CHANNELS") or "").split(",") if channel.strip()]

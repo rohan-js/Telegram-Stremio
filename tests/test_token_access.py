@@ -47,6 +47,9 @@ class TokenAccessTests(unittest.IsolatedAsyncioTestCase):
         Telegram.BETA_EXEMPT_TOKEN_NAMES = ["autotest-temp"]
         Telegram.BETA_EXEMPT_TOKENS = []
         Telegram.BETA_EXEMPT_USER_IDS = []
+        # The 30s in-memory token cache (tokens.py _TOKEN_CACHE) would serve
+        # a previous test's stale record for the shared "abc" token.
+        token_security._TOKEN_CACHE.clear()
 
     async def asyncTearDown(self):
         Telegram.SUBSCRIPTION = self.subscription
@@ -56,6 +59,7 @@ class TokenAccessTests(unittest.IsolatedAsyncioTestCase):
         Telegram.BETA_EXEMPT_USER_IDS = self.exempt_users
 
     async def verify(self, token, user=None, active=(0, 0)):
+        token_security._TOKEN_CACHE.clear()
         with patch.object(token_security, "db", _TokenDB(token, user)), patch.object(
             token_security, "_active_stream_counts", return_value=active
         ):

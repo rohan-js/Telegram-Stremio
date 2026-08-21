@@ -103,5 +103,49 @@ class TestSeekCoalescing(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fetch_mock.call_count, 1)
 
 
+class TestSeekCacheMultiWindow(unittest.IsolatedAsyncioTestCase):
+    """SEEK_CACHE_WINDOWS_PER_FILE: several 512KB windows coexist per file."""
+
+    async def asyncSetUp(self):
+        SEEK_CACHE.clear()
+
+    async def test_multiple_windows_coexist(self):
+        cache = SeekCache(max_entries=10, ttl_sec=10.0, windows_per_file=3)
+        await cache.put_seek_block(5, 5, 0, b"A" * 1000)
+        await cache.put_seek_block(5, 5, 524288, b"B" * 1000)
+        r1 = await cache.get_seek_range(5, 5, 0, 10)
+        r2 = await cache.get_seek_range(5, 5, 524288, 10)
+        self.assertEqual(r1, b"A" * 10)
+        self.assertEqual(r2, b"B" * 10)
+
+    async def test_per_file_window_cap_evicts_oldest(self):
+        cache = SeekCache(max_entries=10, ttl_sec=10.0, windows_per_file=2)
+        await cache.put_seek_block(6, 6, 0, b"W1")
+        await cache.put_seek_block(6, 6, 524288, b"W2")
+        await cache.put_seek_block(6, 6, 1048576, b"W3")  # evicts W1
+        self.assertIsNone(await cache.get_seek_range(6, 6, 0, 2))
+        self.assertIsNotNone(await cache.get_seek_range(6, 6, 524288, 2))
+        self.assertIsNotNone(await cache.get_seek_range(6, 6, 1048576, 2))
+
+    async def test_window_access_refreshes_recency(self):
+        cache = SeekCache(max_entries=10, ttl_sec=10.0, windows_per_file=2)
+        await cache.put_seek_block(7, 7, 0, b"W1")
+        await cache.put_seek_block(7, 7, 524288, b"W2")
+        # Touch W1 so W2 becomes the LRU window
+        self.assertIsNotNone(await cache.get_seek_range(7, 7, 0, 1))
+        await cache.put_seek_block(7, 7, 1048576, b"W3")
+        self.assertIsNotNone(await cache.get_seek_range(7, 7, 0, 2))
+        self.assertIsNone(await cache.get_seek_range(7, 7, 524288, 2))
+        self.assertIsNotNone(await cache.get_seek_range(7, 7, 1048576, 2))
+
+    async def test_ttl_expires_single_window_only(self):
+        cache = SeekCache(max_entries=10, ttl_sec=0.05, windows_per_file=3)
+        await cache.put_seek_block(8, 8, 0, b"W1")
+        await asyncio.sleep(0.08)
+        await cache.put_seek_block(8, 8, 524288, b"W2")
+        self.assertIsNone(await cache.get_seek_range(8, 8, 0, 2))
+        self.assertIsNotNone(await cache.get_seek_range(8, 8, 524288, 2))
+
+
 if __name__ == "__main__":
     unittest.main()
