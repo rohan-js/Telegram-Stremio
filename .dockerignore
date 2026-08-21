@@ -1,0 +1,20 @@
+# Keep the Docker build context small and secret-free.
+# The production tree is a deliberately dirty overlay (private files, caches,
+# backups); the image must only ever contain the tracked app source.
+cache/
+backups/
+log.txt
+config.env
+config.env.bak*
+*.tar.gz
+*.part
+warp_private/
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+.git/
+.gitignore
+.dockerignore
+TELEGRAM_WARP_OUTAGE_BRIEF.md
+deploy/organic-*
