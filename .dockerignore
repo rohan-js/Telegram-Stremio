@@ -4,7 +4,6 @@
 cache/
 backups/
 log.txt
-config.env
 config.env.bak*
 *.tar.gz
 *.part
