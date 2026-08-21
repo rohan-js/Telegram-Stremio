@@ -28,7 +28,11 @@ from Backend.logger import LOGGER
 # Matroska element IDs
 # ---------------------------------------------------------------------------
 _EBML_MAGIC = b"\x1a\x45\xdf\xa3"
-_MKV_SEGMENT_ID = 0x18528067
+_MKV_SEGMENT_ID = 0x18538067
+_MKV_SEEKHEAD_ID = 0x114D9B74
+_MKV_SEEK_ID = 0x4DBB
+_MKV_SEEKID_ID = 0x53AB
+_MKV_SEEKPOS_ID = 0x53AC
 _MKV_INFO_ID = 0x1549A966
 _MKV_TIMESTAMP_SCALE_ID = 0x2AD7B1
 _MKV_DURATION_ID = 0x4489
@@ -228,32 +232,18 @@ def _parse_mkv_info(head_bytes: bytes) -> Tuple[float, Optional[float]]:
     return scale_ns, None
 
 
-def _find_mkv_cues_in_tail(tail_bytes: bytes) -> Optional[Tuple[int, int]]:
-    """Locate the Cues element inside the tail window; return (data_start, data_end)."""
-    search_from = 0
-    while True:
-        idx = tail_bytes.find(_MKV_CUES_BYTES, search_from)
-        if idx < 0:
-            return None
-        search_from = idx + 1
-        try:
-            _, size_val, size_len, size_unknown = _ebml_read_vint(tail_bytes, idx + 4)
-        except ValueError:
-            continue
-        data_start = idx + 4 + size_len
-        if size_unknown:
-            return (data_start, len(tail_bytes))
-        data_end = data_start + size_val
-        if data_end <= len(tail_bytes):
-            return (data_start, data_end)
-
-
 def parse_mkv_index(
     head_bytes: bytes,
     tail_bytes: bytes,
     file_size: int,
+    cues_window: Optional[Tuple[bytes, int]] = None,
 ) -> Optional[MediaIndex]:
-    """Build a MediaIndex from cached head/tail bytes of a Matroska file."""
+    """Build a MediaIndex from cached head/tail bytes of a Matroska file.
+
+    ``cues_window`` (bytes, base_offset) is an explicitly-provided window that
+    contains the Cues element (e.g. a targeted fetch at the offset resolved
+    from the SeekHead) — tried first when present.
+    """
     try:
         if not head_bytes or head_bytes[:4] != _EBML_MAGIC:
             return None
@@ -261,42 +251,79 @@ def parse_mkv_index(
         if segment_data_start is None:
             return None
         scale_ns, duration_sec = _parse_mkv_info(head_bytes)
-
-        cues_span = _find_mkv_cues_in_tail(tail_bytes)
-        if cues_span is None:
-            return None
-        cstart, cend = cues_span
-
+        tail_base = file_size - len(tail_bytes) if tail_bytes else file_size
         max_kf = max(64, int(getattr(Telegram, "STREAM_INDEX_MAX_KEYFRAMES", 4096) or 4096))
-        keyframes: List[Tuple[float, int]] = []
-        for eid, pstart, pend in _iter_ebml_elements(tail_bytes, cstart, cend):
-            if eid != _MKV_CUE_POINT_ID:
-                continue
-            cue_time = None
-            cluster_pos = None
-            for cid, c2s, c2e in _iter_ebml_elements(tail_bytes, pstart, pend):
-                if cid == _MKV_CUE_TIME_ID:
-                    raw = tail_bytes[c2s:c2e]
-                    if raw:
-                        cue_time = int.from_bytes(raw, "big")
-                elif cid == _MKV_CUE_TRACK_POS_ID:
-                    for fid, f2s, f2e in _iter_ebml_elements(tail_bytes, c2s, c2e):
-                        if fid == _MKV_CUE_CLUSTER_POS_ID:
-                            raw = tail_bytes[f2s:f2e]
-                            if raw:
-                                cluster_pos = int.from_bytes(raw, "big")
-            if cue_time is None or cluster_pos is None:
-                continue
-            abs_off = segment_data_start + cluster_pos
-            if abs_off < 0 or abs_off >= file_size:
-                continue
-            t_sec = (cue_time * scale_ns) / 1_000_000_000.0
-            keyframes.append((t_sec, abs_off))
-            if len(keyframes) >= max_kf * 4:
-                # hard stop while parsing; downsample later
-                break
 
-        if len(keyframes) < 2:
+        def _parse_cues(buf: bytes, cstart: int, cend: int) -> List[Tuple[float, int]]:
+            """Parse + validate CuePoints; empty list = not really Cues."""
+            keyframes: List[Tuple[float, int]] = []
+            for eid, pstart, pend in _iter_ebml_elements(buf, cstart, cend):
+                if eid != _MKV_CUE_POINT_ID:
+                    continue
+                cue_time = None
+                cluster_pos = None
+                for cid, c2s, c2e in _iter_ebml_elements(buf, pstart, pend):
+                    if cid == _MKV_CUE_TIME_ID:
+                        raw = buf[c2s:c2e]
+                        if raw:
+                            cue_time = int.from_bytes(raw, "big")
+                    elif cid == _MKV_CUE_TRACK_POS_ID:
+                        for fid, f2s, f2e in _iter_ebml_elements(buf, c2s, c2e):
+                            if fid == _MKV_CUE_CLUSTER_POS_ID:
+                                raw = buf[f2s:f2e]
+                                if raw:
+                                    cluster_pos = int.from_bytes(raw, "big")
+                if cue_time is None or cluster_pos is None:
+                    continue
+                abs_off = segment_data_start + cluster_pos
+                if abs_off < 0 or abs_off >= file_size:
+                    continue
+                keyframes.append(((cue_time * scale_ns) / 1_000_000_000.0, abs_off))
+                if len(keyframes) >= max_kf * 4:
+                    break
+            return keyframes
+
+        def _try_window(buf: bytes, base: int) -> Optional[List[Tuple[float, int]]]:
+            """Try every `Cues`-pattern match in a window; first that parses to
+            >=2 keyframes wins (rejects SeekID false-positives)."""
+            search_from = 0
+            while True:
+                idx = buf.find(_MKV_CUES_BYTES, search_from)
+                if idx < 0:
+                    return None
+                search_from = idx + 1
+                span = _find_mkv_cues_element(buf, idx)
+                if span is None:
+                    continue
+                kfs = _parse_cues(buf, span[0], span[1])
+                if len(kfs) >= 2:
+                    return kfs
+            return None
+
+        keyframes = None
+        if cues_window is not None:
+            keyframes = _try_window(cues_window[0], cues_window[1])
+        if keyframes is None:
+            keyframes = _try_window(head_bytes, 0)
+        if keyframes is None and tail_bytes:
+            keyframes = _try_window(tail_bytes, tail_base)
+
+        if keyframes is None:
+            # Resolve Cues via the SeekHead (points at the absolute Cues
+            # position; may live in neither cached window for big files).
+            cues_abs = _resolve_cues_offset_via_seekhead(head_bytes, segment_data_start)
+            if cues_abs is not None:
+                if 0 <= cues_abs < len(head_bytes):
+                    span = _find_mkv_cues_element(head_bytes, cues_abs)
+                    if span:
+                        keyframes = _parse_cues(head_bytes, span[0], span[1])
+                elif tail_bytes and tail_base <= cues_abs < file_size:
+                    rel = cues_abs - tail_base
+                    span = _find_mkv_cues_element(tail_bytes, rel)
+                    if span:
+                        keyframes = _parse_cues(tail_bytes, span[0], span[1])
+
+        if not keyframes or len(keyframes) < 2:
             return None
         keyframes.sort(key=lambda p: p[0])
         if duration_sec is None:
@@ -305,6 +332,61 @@ def parse_mkv_index(
     except Exception as exc:
         LOGGER.debug("mkv index parse failed: %s", exc)
         return None
+
+
+def _find_mkv_cues_element(data: bytes, idx: int) -> Optional[Tuple[int, int]]:
+    """Given the offset of a Cues element ID inside ``data``, return its
+    (data_start, data_end) if the element fits in the buffer, else None."""
+    try:
+        _, size_val, size_len, size_unknown = _ebml_read_vint(data, idx + 4)
+    except (ValueError, IndexError):
+        return None
+    data_start = idx + 4 + size_len
+    if size_unknown:
+        return (data_start, len(data))
+    data_end = data_start + size_val
+    if data_end <= len(data):
+        return (data_start, data_end)
+    return None
+
+
+def _resolve_cues_offset_via_seekhead(head_bytes: bytes, segment_data_start: int) -> Optional[int]:
+    """Absolute file offset of the Cues element from SeekHead entries."""
+    try:
+        for eid, ds, de in _iter_ebml_elements(head_bytes, segment_data_start, len(head_bytes)):
+            if eid == _MKV_CUES_ID:
+                return ds
+            if eid != _MKV_SEEKHEAD_ID:
+                continue
+            for sid, ss, se in _iter_ebml_elements(head_bytes, ds, de):
+                if sid != _MKV_SEEK_ID:
+                    continue
+                target_id = None
+                pos = None
+                for fid, fs, fe in _iter_ebml_elements(head_bytes, ss, se):
+                    if fid == _MKV_SEEKID_ID:
+                        raw = head_bytes[fs:fe]
+                        if raw:
+                            target_id = int.from_bytes(raw, "big")
+                    elif fid == _MKV_SEEKPOS_ID:
+                        raw = head_bytes[fs:fe]
+                        if raw:
+                            pos = int.from_bytes(raw, "big")
+                if target_id == _MKV_CUES_ID and pos is not None:
+                    return segment_data_start + pos
+        return None
+    except Exception:
+        return None
+
+
+def resolve_mkv_cues_offset(head_bytes: bytes) -> Optional[int]:
+    """Absolute file offset of the Cues element, resolved from the SeekHead."""
+    if not head_bytes or head_bytes[:4] != _EBML_MAGIC:
+        return None
+    seg = _parse_mkv_segment_start(head_bytes)
+    if seg is None:
+        return None
+    return _resolve_cues_offset_via_seekhead(head_bytes, seg)
 
 
 # ---------------------------------------------------------------------------
@@ -652,12 +734,25 @@ async def _do_build_media_index(file_id, streamer, key: Tuple[int, int]) -> Opti
             return None
 
         async def _fetch(offset: int, limit: int) -> bytes:
+            # upload.getFile returns at most ~1 MiB per call regardless of the
+            # requested limit — fetch in <=512 KiB pieces and stop on short reads.
             session = await streamer._get_media_session(file_id)
             location = await streamer._get_location(file_id)
-            data = await streamer._fetch_file_bytes(
-                media_session=session, location=location, offset=offset, limit=limit
-            )
-            return data or b""
+            out = bytearray()
+            pos = int(offset)
+            end = int(offset) + int(limit)
+            while pos < end:
+                want = min(512 * 1024, end - pos)
+                piece = await streamer._fetch_file_bytes(
+                    media_session=session, location=location, offset=pos, limit=want
+                )
+                if not piece:
+                    break
+                out += piece
+                if len(piece) < want:
+                    break
+                pos += len(piece)
+            return bytes(out)
 
         # Head: prefer cached RAM head (picker prebuffer usually put it there)
         head_bytes = b""
@@ -699,17 +794,33 @@ async def _do_build_media_index(file_id, streamer, key: Tuple[int, int]) -> Opti
                 head_bytes, tail_bytes, file_size
             )
 
-        # One retry with a bigger tail (2 MB) for files whose Cues/moov don't
-        # fit the small window — long movies with dense cue entries.
-        if idx is None and file_size > 4 * 1024 * 1024:
+        # MKV retry: resolve the exact Cues position from the SeekHead and
+        # fetch just that window — robust even when Cues sit deeper than any
+        # blind tail window and immune to end-of-file short reads.
+        if (
+            idx is None
+            and container in ("", "mkv")
+            and head_bytes[:4] == _EBML_MAGIC
+            and file_size > 4 * 1024 * 1024
+        ):
+            cues_abs = resolve_mkv_cues_offset(head_bytes)
+            if cues_abs is not None and cues_abs >= len(head_bytes):
+                cues_buf = await _fetch(cues_abs, 1024 * 1024)
+                if cues_buf:
+                    idx = parse_mkv_index(
+                        head_bytes, b"", file_size, cues_window=(cues_buf, cues_abs)
+                    )
+
+        # MP4 retry: moov-at-end files may need a bigger tail window.
+        if idx is None and container in ("", "mp4") and file_size > 4 * 1024 * 1024:
             want = min(2 * 1024 * 1024, file_size)
             big_offset = file_size - want
             big_tail = await _fetch(big_offset, want)
             if big_tail:
-                if container in ("", "mkv"):
-                    idx = parse_mkv_index(head_bytes, big_tail, file_size)
-                if idx is None and container in ("", "mp4"):
+                if container in ("", "mp4"):
                     idx = parse_mp4_index(head_bytes, big_tail, file_size)
+                if idx is None and container == "":
+                    idx = parse_mkv_index(head_bytes, big_tail, file_size)
 
         await _store_index(key, idx)
         if idx is not None:

@@ -57,7 +57,7 @@ def build_mkv_fixture(keyframes, duration_sec=600.0, timestamp_scale_ns=1_000_00
     last_pos = max((pos for _, pos in keyframes), default=0)
     dummy_clusters = b"\x00" * max(64, last_pos + 8)
     segment_payload = info_box + dummy_clusters + cues
-    segment = ebml_element(0x18528067, segment_payload)
+    segment = ebml_element(0x18538067, segment_payload)
 
     doctype = ebml_element(0x4282, b"matroska")
     ebml_header = ebml_element(0x1A45DFA3, doctype)

@@ -1269,7 +1269,7 @@ class ByteStreamer:
 
                     if not scheduled_tasks:
                         eff_prefetch_0 = max(1, int(registry_entry.get("effective_prefetch") or prefetch))
-                        if (next_to_schedule - next_to_put) >= eff_prefetch_0:
+                        if (next_to_schedule - next_to_put) >= (eff_prefetch_0 + max_parallel):
                             # Runway-limited: wait for the consumer to drain
                             # before scheduling more (never blocks the stream).
                             await asyncio.sleep(0.05)
@@ -1310,13 +1310,14 @@ class ByteStreamer:
 
                             results_buffer[seq_idx] = chunk_bytes
 
-                            # Runway gating: schedule the next fetch only while
-                            # (scheduled - delivered) stays under the effective
-                            # prefetch distance. Runway mode may raise this at
-                            # runtime; the queue never blocks the producer here.
+                            # Runway gating: the ceiling is the *buffered* target
+                            # (effective prefetch) PLUS the pool's in-flight
+                            # workers — parallel fetchers must never be starved
+                            # or the multi-bot pool loses throughput. Runway mode
+                            # raises the buffered target at runtime.
                             if next_to_schedule < part_count:
                                 eff_prefetch = max(1, int(registry_entry.get("effective_prefetch") or prefetch))
-                                if (next_to_schedule - next_to_put) < eff_prefetch:
+                                if (next_to_schedule - next_to_put) < (eff_prefetch + max_parallel):
                                     seq = next_to_schedule
                                     off = offset + seq * chunk_size
                                     task = asyncio.create_task(fetch_chunk_with_retries(seq, off))
