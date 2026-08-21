@@ -667,9 +667,9 @@ async def get_media_index(chat_id: int, message_id: int) -> Optional[MediaIndex]
         entry = _INDEX_CACHE.get(key)
         if entry is None:
             return None
-        # Backward-compat: older (idx, ts) entries.
-        if len(entry) == 2:
-            idx, ts = entry  # type: ignore[misc]
+        # Entries can be (idx, ts) from before the upgrade or (idx, ts, cause).
+        if len(entry) == 2:  # type: ignore[arg-type]
+            idx, ts = entry
             cause = None
         else:
             idx, ts, cause = entry  # type: ignore[misc]
@@ -682,7 +682,11 @@ async def get_media_index(chat_id: int, message_id: int) -> Optional[MediaIndex]
 
 
 def get_index_cache_stats() -> dict:
-    positive = sum(1 for idx, _ in _INDEX_CACHE.values() if idx is not None)
+    positive = 0
+    for entry in _INDEX_CACHE.values():
+        idx = entry[0]
+        if idx is not None:
+            positive += 1
     # Back-compat with older tuple shape.
     return {
         "enabled": _index_enabled(),
