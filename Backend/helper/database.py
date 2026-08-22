@@ -2379,6 +2379,40 @@ class Database:
         LOGGER.info(f"No document found with tmdb_id {tmdb_id}.")
         return False
 
+    async def find_next_episode_after(self, chat_id: int, msg_id: int) -> Optional[tuple]:
+        """Given a telegram file (full -100 chat_id + msg_id) playing now, return
+        (next_chat_id, next_msg_id) for the next episode of the same show, or None.
+
+        Powers binge-mode prewarm: when playback passes ~90% of an episode the
+        streamer prewarms the next episode's head/index so the next tap is instant.
+        """
+        try:
+            full_chat = int(chat_id)
+            origin_msg = int(msg_id)
+            for i in range(self.current_db_index, 0, -1):
+                db = self.dbs[f"storage_{i}"]
+                tv = await db["tv"].find_one({
+                    "seasons.episodes.telegram.origin_chat_id": full_chat,
+                    "seasons.episodes.telegram.origin_msg_id": origin_msg,
+                })
+                if not tv:
+                    # split parts: parts[].chat_id is stored WITHOUT the -100 prefix
+                    tv = await db["tv"].find_one({
+                        "seasons.episodes.telegram.parts": {
+                            "$elemMatch": {
+                                "chat_id": int(str(full_chat).replace("-100", "")),
+                                "msg_id": origin_msg,
+                            }
+                        }
+                    })
+                if tv:
+                    quality = _next_episode_quality_from_doc(tv, full_chat, origin_msg)
+                    if quality:
+                        return quality
+            return None
+        except Exception:
+            return None
+
     async def get_title_by_stream_id(self, stream_id_hash: str) -> Optional[str]:
         """Look up the original media title across all storage DBs using the telegram file ID hash.
         For TV shows, it includes the Season and Episode number in the title."""
@@ -3576,3 +3610,78 @@ class Database:
                         if group:
                             groups.append(group)
         return groups[:limit]
+
+
+def _next_episode_quality_from_doc(tv_doc: dict, full_chat_id: int, msg_id: int) -> Optional[tuple]:
+    """Pure walker: find the next episode after the one containing the given
+    telegram file and return its best telegram quality as (chat_id, msg_id)
+    with the FULL -100 chat id, or None. Unit-tested without Mongo."""
+    short_chat = int(str(full_chat_id).replace("-100", ""))
+
+    def _quality_matches(q: dict) -> bool:
+        if q.get("origin_chat_id") == full_chat_id and q.get("origin_msg_id") == msg_id:
+            return True
+        parts = q.get("parts") or []
+        if parts:
+            p0 = parts[0] or {}
+            try:
+                if int(p0.get("chat_id", 0)) == short_chat and int(p0.get("msg_id", 0)) == msg_id:
+                    return True
+            except (TypeError, ValueError):
+                pass
+        return False
+
+    seasons = sorted(tv_doc.get("seasons", []), key=lambda s: int(s.get("season_number", 0) or 0))
+    for s_idx, season in enumerate(seasons):
+        episodes = sorted(season.get("episodes", []), key=lambda e: int(e.get("episode_number", 0) or 0))
+        current_pos = None
+        for e_idx, episode in enumerate(episodes):
+            if any(_quality_matches(q) for q in episode.get("telegram", [])):
+                current_pos = e_idx
+                break
+        if current_pos is None:
+            continue
+        # Next episode in the same season, else first episode of the next season
+        candidates = episodes[current_pos + 1:]
+        if not candidates and s_idx + 1 < len(seasons):
+            next_season_eps = sorted(
+                seasons[s_idx + 1].get("episodes", []),
+                key=lambda e: int(e.get("episode_number", 0) or 0),
+            )
+            candidates = next_season_eps
+        for episode in candidates:
+            got = _pick_telegram_quality(episode.get("telegram", []))
+            if got:
+                return got
+        return None  # playing the last episode of the show
+    return None
+
+
+def _pick_telegram_quality(qualities: list) -> Optional[tuple]:
+    """Pick the best telegram quality from an episode's list: recommended
+    first, then first; returns (full_chat_id, msg_id) or None."""
+    tg = [q for q in qualities if q.get("source_type", "telegram") == "telegram"]
+    if not tg:
+        return None
+    ordered = sorted(tg, key=lambda q: 0 if q.get("recommended") else 1)
+    for q in ordered:
+        parts = q.get("parts") or []
+        if parts:
+            p0 = parts[0] or {}
+            try:
+                c = int(p0.get("chat_id", 0))
+                m = int(p0.get("msg_id", 0))
+                if c and m:
+                    full = int(c) if str(c).startswith("-") else int(f"-100{c}")
+                    return (full, m)
+            except (TypeError, ValueError):
+                continue
+        else:
+            oc = q.get("origin_chat_id")
+            om = q.get("origin_msg_id")
+            if oc and om:
+                try:
+                    return (int(oc), int(om))
+                except (TypeError, ValueError):
+                    continue
+    return None

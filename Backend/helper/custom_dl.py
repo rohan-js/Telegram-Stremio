@@ -1500,6 +1500,26 @@ class ByteStreamer:
                             )
                     except Exception:
                         pass
+
+                    # Binge mode: once playback passes 90% of the file, prewarm
+                    # the next episode of the same show so the follow-up tap is
+                    # instant (YouTube-autoplay style).
+                    try:
+                        _fsize = int(registry_entry.get("file_size") or 0)
+                        if (
+                            bool(getattr(Telegram, "NEXT_EPISODE_PREWARM_ENABLED", True))
+                            and not registry_entry.get("_next_ep_prep_done")
+                            and chat_id is not None
+                            and message_id is not None
+                            and _fsize > 0
+                            and int(registry_entry.get("file_offset") or 0) > 0.9 * _fsize
+                        ):
+                            registry_entry["_next_ep_prep_done"] = True
+                            asyncio.create_task(
+                                _prewarm_next_episode(int(chat_id), int(message_id))
+                            )
+                    except Exception:
+                        pass
                     # --- end hooks -----------------------------------------
 
                     if part_count == 1:
@@ -2395,3 +2415,46 @@ async def _prewarm_skip_targets(
             asyncio.create_task(_one())
     except Exception as exc:
         LOGGER.debug("skip pre-warm skipped: %s", exc)
+
+
+async def _prewarm_next_episode(chat_id: int, message_id: int) -> None:
+    """Binge mode: find the next episode of the show being watched and prewarm
+    its head + tail + container index using the main bot's warm session, so
+    the next tap starts instantly. Best-effort; never raises."""
+    try:
+        if not bool(getattr(Telegram, "NEXT_EPISODE_PREWARM_ENABLED", True)):
+            return
+        from Backend import db as _db
+
+        found = await _db.find_next_episode_after(chat_id, message_id)
+        if not found:
+            return
+        next_chat, next_msg = found
+        if next_chat == int(chat_id) and next_msg == int(message_id):
+            return
+
+        from Backend.fastapi.routes.stream_routes import get_streamer
+        from Backend.helper import media_index
+
+        streamer = get_streamer(0)
+        file_id = await streamer.get_file_properties(chat_id=next_chat, message_id=next_msg)
+        if not file_id:
+            return
+        LOGGER.info("Binge prewarm: next episode (%s, %s)", next_chat, next_msg)
+        await prefetch_stream_head(file_id, streamer, chat_id=next_chat, message_id=next_msg)
+        try:
+            await prefetch_file_tail(file_id, streamer, chat_id=next_chat, message_id=next_msg)
+        except Exception:
+            pass
+        try:
+            _sess = await streamer._get_media_session(file_id)
+            _loc = await streamer._get_location(file_id)
+        except Exception:
+            _sess = None
+            _loc = None
+        await media_index.build_media_index(
+            file_id, streamer, chat_id=next_chat, message_id=next_msg,
+            media_session=_sess, location=_loc,
+        )
+    except Exception as exc:
+        LOGGER.debug("next-episode prewarm skipped: %s", exc)

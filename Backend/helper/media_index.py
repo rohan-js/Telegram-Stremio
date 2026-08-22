@@ -728,6 +728,14 @@ async def build_media_index(
     if cached is not None:
         return cached
 
+    # Persisted index (Mongo): a restart wipes the RAM LRU, but a previously
+    # parsed index is one cheap DB read away — no MTProto fetch, no parse.
+    restored = await _load_persisted_index(key)
+    if restored is not None:
+        await _store_index(key, restored)
+        LOGGER.debug("MediaIndex: restored from Mongo for %s", key)
+        return restored
+
     existing = _in_flight_index_builds.get(key)
     if existing is not None and not existing.done():
         try:
@@ -861,6 +869,7 @@ async def _do_build_media_index(
                 "MediaIndex: parsed %s index for (%s, %s): %d keyframes, duration=%.1fs",
                 idx.container, key[0], key[1], len(idx.keyframes), idx.duration_sec or 0.0,
             )
+            asyncio.create_task(_persist_index(key, idx))
         return idx
     except Exception as exc:
         is_floodwait = "FLOOD_WAIT" in str(exc) or " FloodWait" in str(type(exc))
@@ -874,7 +883,9 @@ async def _do_build_media_index(
         if is_floodwait:
             LOGGER.info("MediaIndex build FloodWait for %s (%s) — short-TTL negative cache", key, exc)
         else:
-            LOGGER.debug("MediaIndex build failed for %s: %s", key, exc)
+            # INFO (not DEBUG): bounded by the negative TTL, and this is the
+            # only place parse failures are explainable from /api/admin/logs.
+            LOGGER.info("MediaIndex build failed for %s: %s: %s", key, type(exc).__name__, exc)
         try:
             await _store_index(key, None, cause=("floodwait" if is_floodwait else None))
         except Exception:
@@ -898,3 +909,46 @@ async def _store_index(
         _INDEX_CACHE.move_to_end(key)
         while len(_INDEX_CACHE) > _max_index_entries():
             _INDEX_CACHE.popitem(last=False)
+
+
+# ---------------------------------------------------------------------------
+# Mongo persistence — indexes survive restarts (tracking["media_indexes"])
+# ---------------------------------------------------------------------------
+async def _persist_index(key: Tuple[int, int], idx: MediaIndex) -> None:
+    """Fire-and-forget upsert of a successfully parsed index. Never raises."""
+    try:
+        from Backend import db
+        from datetime import datetime
+
+        doc = {
+            "_id": f"{key[0]}:{key[1]}",
+            "container": idx.container,
+            "duration_sec": idx.duration_sec,
+            "keyframes": [[round(t, 3), int(b)] for t, b in idx.keyframes],
+            "created_at": datetime.utcnow(),
+        }
+        await db.dbs["tracking"]["media_indexes"].update_one(
+            {"_id": doc["_id"]}, {"$set": doc}, upsert=True
+        )
+    except Exception as exc:
+        LOGGER.debug("MediaIndex persist failed for %s: %s", key, exc)
+
+
+async def _load_persisted_index(key: Tuple[int, int]) -> Optional[MediaIndex]:
+    """Restore a persisted index from Mongo, or None. Never raises."""
+    try:
+        from Backend import db
+
+        doc = await db.dbs["tracking"]["media_indexes"].find_one({"_id": f"{key[0]}:{key[1]}"})
+        if not doc:
+            return None
+        container = str(doc.get("container") or "")
+        duration = doc.get("duration_sec")
+        raw_kfs = doc.get("keyframes") or []
+        keyframes = [(float(t), int(b)) for t, b in raw_kfs if b is not None]
+        if not container or len(keyframes) < 2:
+            return None
+        return MediaIndex(container, float(duration) if duration else None, keyframes)
+    except Exception as exc:
+        LOGGER.debug("MediaIndex restore failed for %s: %s", key, exc)
+        return None

@@ -304,6 +304,10 @@ async def _process_ingest_job(job: dict) -> None:
         if job.get("source_type") == "telegram" and job.get("channel") and job.get("msg_id"):
             from Backend.pyrofork.bot import StreamBot as _stamp_client
             create_task(stamp_caption_by_ref(_stamp_client, job["channel"], job["msg_id"], metadata_info))
+            # Ingest-time prewarm: fetch the head + tail + container index so
+            # the FIRST viewer of this upload gets an instant start (same
+            # machinery the quality-picker prebuffer uses).
+            create_task(_prepare_new_media(job))
         try:
             await mark_uploaded_for_media(metadata_info)
         except Exception as e:
@@ -318,6 +322,54 @@ async def _process_ingest_job(job: dict) -> None:
             "status_chat_id": job.get("status_chat_id"),
             "status_msg_id": job.get("status_msg_id"),
         })
+
+
+async def _prepare_new_media(job: dict) -> None:
+    """Background: prewarm head/tail/index for a freshly ingested telegram file.
+
+    Mirrors the picker-prebuffer sequence (stremio_routes._trigger_picker_prebuffer):
+    reuses the main StreamBot's warm MTProto session — no throwaway client, no
+    extra auth. Best-effort: every failure is swallowed; the single-flight
+    guards inside prefetch_stream_head / build_media_index dedupe against the
+    picker path if a viewer arrives first.
+    """
+    try:
+        from Backend.config import Telegram
+        if not bool(getattr(Telegram, "INGEST_PREWARM_ENABLED", True)):
+            return
+        if job.get("source_type") not in (None, "telegram"):
+            return
+        chat_id = job.get("chat_id")
+        msg_id = job.get("msg_id")
+        if not chat_id or not msg_id:
+            return
+
+        from Backend.fastapi.routes.stream_routes import get_streamer
+        from Backend.helper.custom_dl import prefetch_stream_head, prefetch_file_tail
+        from Backend.helper import media_index
+
+        streamer = get_streamer(0)
+        file_id = await streamer.get_file_properties(chat_id=int(chat_id), message_id=int(msg_id))
+        if not file_id:
+            return
+        LOGGER.info("Ingest prewarm: preparing (%s, %s)", chat_id, msg_id)
+        await prefetch_stream_head(file_id, streamer, chat_id=int(chat_id), message_id=int(msg_id))
+        try:
+            await prefetch_file_tail(file_id, streamer, chat_id=int(chat_id), message_id=int(msg_id))
+        except Exception as e:
+            LOGGER.debug("Ingest prewarm tail skipped for (%s, %s): %s", chat_id, msg_id, e)
+        try:
+            _idx_sess = await streamer._get_media_session(file_id)
+            _idx_loc = await streamer._get_location(file_id)
+        except Exception:
+            _idx_sess = None
+            _idx_loc = None
+        await media_index.build_media_index(
+            file_id, streamer, chat_id=int(chat_id), message_id=int(msg_id),
+            media_session=_idx_sess, location=_idx_loc,
+        )
+    except Exception as e:
+        LOGGER.debug("Ingest prewarm failed for msg %s: %s", job.get("msg_id"), e)
 
 
 async def process_file():

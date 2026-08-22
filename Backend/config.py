@@ -196,6 +196,17 @@ class Telegram:
         SEEK_CACHE_WINDOWS_PER_FILE = int(getenv("SEEK_CACHE_WINDOWS_PER_FILE", "4") or 4)
         STREAM_PICKER_PREBUFFER_CANDIDATES = int(getenv("STREAM_PICKER_PREBUFFER_CANDIDATES", "2") or 2)
         STREAM_PICKER_SESSION_PREWARM = getenv("STREAM_PICKER_SESSION_PREWARM", "true").lower() == "true"
+        # Ingest-time prewarm: head + tail + index for every newly uploaded
+        # telegram video, so the FIRST viewer ever gets an instant start.
+        INGEST_PREWARM_ENABLED = getenv("INGEST_PREWARM_ENABLED", "true").lower() == "true"
+        # Binge mode: when playback passes 90% of an episode, prewarm the
+        # next episode's head/index in the background.
+        NEXT_EPISODE_PREWARM_ENABLED = getenv("NEXT_EPISODE_PREWARM_ENABLED", "true").lower() == "true"
+        # Quality-picker micro-cache: short-TTL cache of stream-list JSON per
+        # (token, media_type, id) so the picker opens instantly on repeats.
+        STREAM_LIST_CACHE_ENABLED = getenv("STREAM_LIST_CACHE_ENABLED", "true").lower() == "true"
+        STREAM_LIST_CACHE_TTL_SEC = int(getenv("STREAM_LIST_CACHE_TTL_SEC", "20") or 20)
+        STREAM_LIST_CACHE_MAX_ENTRIES = int(getenv("STREAM_LIST_CACHE_MAX_ENTRIES", "128") or 128)
     except Exception:
         STREAM_INDEX_ENABLED = True
         STREAM_INDEX_CACHE_MAX_ENTRIES = 64
@@ -215,6 +226,11 @@ class Telegram:
         SEEK_CACHE_WINDOWS_PER_FILE = 4
         STREAM_PICKER_PREBUFFER_CANDIDATES = 2
         STREAM_PICKER_SESSION_PREWARM = True
+        INGEST_PREWARM_ENABLED = True
+        NEXT_EPISODE_PREWARM_ENABLED = True
+        STREAM_LIST_CACHE_ENABLED = True
+        STREAM_LIST_CACHE_TTL_SEC = 20
+        STREAM_LIST_CACHE_MAX_ENTRIES = 128
 
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
     MANUAL_CHANNELS = [channel.strip() for channel in (getenv("MANUAL_CHANNELS") or "").split(",") if channel.strip()]

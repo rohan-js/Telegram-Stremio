@@ -1,5 +1,7 @@
 import asyncio
 import re
+import time
+from collections import OrderedDict
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from fastapi.templating import Jinja2Templates
 from typing import Optional
@@ -1154,6 +1156,21 @@ async def get_streams(
     except (ValueError, IndexError):
         raise HTTPException(status_code=400, detail="Invalid Stremio ID format")
 
+    # ------------------------------------------------------------------
+    # Stream-list micro-cache: repeat picker opens for the same
+    # (token, media_type, id) within the TTL skip the DB fetch + stream
+    # building + sorting entirely. Key includes the token because stream
+    # URLs embed it and quality_filter/quality_sort are per-token config.
+    # ------------------------------------------------------------------
+    _sl_cache_key = (str(token), str(media_type), str(id))
+    if bool(getattr(Telegram, "STREAM_LIST_CACHE_ENABLED", True)):
+        try:
+            cached_payload = _stream_list_cache_get(_sl_cache_key)
+            if cached_payload is not None:
+                return cached_payload
+        except Exception:
+            pass
+
     media_details = await db.get_media_details(
         imdb_id=imdb_id,
         season_number=season_num,
@@ -1331,12 +1348,45 @@ async def get_streams(
         except Exception as e:
             LOGGER.debug("Stream picker pre-buffer dispatch error: %s", e)
 
-    return {
+    payload = {
         "streams": streams,
         "cacheMaxAge": 0,
         "staleRevalidate": 0,
         "staleError": 0,
     }
+    if bool(getattr(Telegram, "STREAM_LIST_CACHE_ENABLED", True)):
+        try:
+            _stream_list_cache_put(_sl_cache_key, payload)
+        except Exception:
+            pass
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# Stream-list micro-cache (bounded LRU + TTL) — mirrors tokens._TOKEN_CACHE
+# ---------------------------------------------------------------------------
+_STREAM_LIST_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
+
+
+def _stream_list_cache_get(key: tuple):
+    ttl = max(1, int(getattr(Telegram, "STREAM_LIST_CACHE_TTL_SEC", 20) or 20))
+    entry = _STREAM_LIST_CACHE.get(key)
+    if entry is None:
+        return None
+    payload, ts = entry
+    if (time.time() - ts) > ttl:
+        _STREAM_LIST_CACHE.pop(key, None)
+        return None
+    _STREAM_LIST_CACHE.move_to_end(key)
+    return payload
+
+
+def _stream_list_cache_put(key: tuple, payload: dict) -> None:
+    max_entries = max(4, int(getattr(Telegram, "STREAM_LIST_CACHE_MAX_ENTRIES", 128) or 128))
+    _STREAM_LIST_CACHE[key] = (payload, time.time())
+    _STREAM_LIST_CACHE.move_to_end(key)
+    while len(_STREAM_LIST_CACHE) > max_entries:
+        _STREAM_LIST_CACHE.popitem(last=False)
 
 
 async def _trigger_picker_prebuffer(quality_id: str) -> None:
