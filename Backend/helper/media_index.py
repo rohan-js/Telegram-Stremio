@@ -778,13 +778,32 @@ async def _do_build_media_index(
             pos -= pos % 4096
             out = bytearray()
             while pos < end:
+                # Telegram requires 4096-aligned offsets AND limits that are
+                # 4096 multiples, with offset+limit <= real file size — clamp
+                # every piece accordingly (the <4KB tail remainder is skipped).
                 want = min(512 * 1024, end - pos, file_size - pos)
                 want -= want % 4096
                 if want <= 0:
                     break
-                piece = await streamer._fetch_file_bytes(
-                    media_session=session, location=loc, offset=pos, limit=want
-                )
+                piece = None
+                # Some DCs reject otherwise-valid limits near EOF; halve the
+                # piece (re-rounded to 4096) and log the exact rejected call
+                # so failures are diagnosable from /api/admin/logs.
+                for _attempt in range(3):
+                    try:
+                        piece = await streamer._fetch_file_bytes(
+                            media_session=session, location=loc, offset=pos, limit=want
+                        )
+                        break
+                    except Exception as pexc:
+                        if _attempt == 2:
+                            LOGGER.info(
+                                "MediaIndex fetch rejected: offset=%s limit=%s file_size=%s: %s",
+                                pos, want, file_size, pexc,
+                            )
+                            piece = None
+                            break
+                        want = max(4096, (want // 2) - ((want // 2) % 4096))
                 if not piece:
                     break
                 out += piece
