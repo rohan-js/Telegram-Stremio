@@ -237,12 +237,15 @@ def parse_mkv_index(
     tail_bytes: bytes,
     file_size: int,
     cues_window: Optional[Tuple[bytes, int]] = None,
+    tail_base: Optional[int] = None,
 ) -> Optional[MediaIndex]:
     """Build a MediaIndex from cached head/tail bytes of a Matroska file.
 
     ``cues_window`` (bytes, base_offset) is an explicitly-provided window that
     contains the Cues element (e.g. a targeted fetch at the offset resolved
-    from the SeekHead) — tried first when present.
+    from the SeekHead) — tried first when present. ``tail_base`` is the
+    absolute file offset where ``tail_bytes`` starts; when omitted it is
+    derived as ``file_size - len(tail_bytes)``.
     """
     try:
         if not head_bytes or head_bytes[:4] != _EBML_MAGIC:
@@ -251,7 +254,8 @@ def parse_mkv_index(
         if segment_data_start is None:
             return None
         scale_ns, duration_sec = _parse_mkv_info(head_bytes)
-        tail_base = file_size - len(tail_bytes) if tail_bytes else file_size
+        if tail_base is None:
+            tail_base = file_size - len(tail_bytes) if tail_bytes else file_size
         max_kf = max(64, int(getattr(Telegram, "STREAM_INDEX_MAX_KEYFRAMES", 4096) or 4096))
 
         def _parse_cues(buf: bytes, cstart: int, cend: int) -> List[Tuple[float, int]]:
@@ -765,52 +769,55 @@ async def _do_build_media_index(
         warm_session = media_session
         warm_location = location
 
-        async def _fetch(offset: int, limit: int) -> bytes:
-            # Reuse the caller's already-warm MTProto session when available —
-            # avoids creating a throwaway Client that FloodWaits on ImportAuth.
-            # upload.getFile REJECTS offsets/limits that aren't 4096-aligned
-            # (OFFSET_INVALID/LIMIT_INVALID) and offset+limit beyond the real
-            # file end, so fetch in <=512 KiB 4096-aligned pieces.
+        async def _fetch(offset: int, limit: int):
+            """Grid-aligned ranged fetch -> (bytes, base_offset).
+
+            Production diagnostics (Rocky III, 2026-08-22) showed Telegram's
+            upload.getFile accepts a read iff ``offset % limit == 0`` — every
+            successful piece was an exact 512 KiB-multiple offset with a full
+            512 KiB limit, and every rejection (even 48 KB limits) had a
+            non-divisible offset. So we only ever fetch FULL 512 KiB pieces
+            on the grid: the first piece starts at floor(offset/grid)*grid,
+            and the trailing partial piece near EOF is skipped (seek-index
+            data never lives in the final <512 KiB of a file). Returns the
+            actual base offset so callers can place the window correctly.
+            """
             session = warm_session if warm_session is not None else await streamer._get_media_session(file_id)
             loc = warm_location if warm_location is not None else await streamer._get_location(file_id)
+            grid = 512 * 1024
             end = int(offset) + int(limit)
-            pos = int(offset)
-            pos -= pos % 4096
+            pos = (int(offset) // grid) * grid
+            base = pos
             out = bytearray()
             while pos < end:
-                # Telegram requires 4096-aligned offsets AND limits that are
-                # 4096 multiples, with offset+limit <= real file size — clamp
-                # every piece accordingly (the <4KB tail remainder is skipped).
-                want = min(512 * 1024, end - pos, file_size - pos)
-                want -= want % 4096
-                if want <= 0:
-                    break
-                piece = None
-                # Some DCs reject otherwise-valid limits near EOF; halve the
-                # piece (re-rounded to 4096) and log the exact rejected call
-                # so failures are diagnosable from /api/admin/logs.
-                for _attempt in range(3):
-                    try:
-                        piece = await streamer._fetch_file_bytes(
-                            media_session=session, location=loc, offset=pos, limit=want
-                        )
-                        break
-                    except Exception as pexc:
-                        if _attempt == 2:
-                            LOGGER.info(
-                                "MediaIndex fetch rejected: offset=%s limit=%s file_size=%s: %s",
-                                pos, want, file_size, pexc,
-                            )
-                            piece = None
+                want = grid
+                if pos + want > file_size:
+                    if pos == 0:
+                        # Small file (< one grid): a single whole-file read.
+                        want = file_size - (file_size % 4096)
+                        if want <= 0:
                             break
-                        want = max(4096, (want // 2) - ((want // 2) % 4096))
+                    else:
+                        # Trailing partial piece — offset wouldn't divide the
+                        # limit; skip it (index data never lives there).
+                        break
+                try:
+                    piece = await streamer._fetch_file_bytes(
+                        media_session=session, location=loc, offset=pos, limit=want
+                    )
+                except Exception as pexc:
+                    LOGGER.info(
+                        "MediaIndex fetch rejected: offset=%s limit=%s file_size=%s: %s",
+                        pos, want, file_size, pexc,
+                    )
+                    break
                 if not piece:
                     break
                 out += piece
                 if len(piece) < want:
                     break
                 pos += len(piece)
-            return bytes(out)
+            return bytes(out), base
 
         # Head: prefer cached RAM head (picker prebuffer usually put it there)
         head_bytes = b""
@@ -820,23 +827,24 @@ async def _do_build_media_index(
         except Exception:
             head_bytes = b""
         if not head_bytes:
-            head_bytes = await _fetch(0, min(256 * 1024, file_size))
+            head_bytes, _ = await _fetch(0, min(256 * 1024, file_size))
 
         # Tail: prefer cached RAM tail, else fetch a 512 KB window
         tail_bytes = b""
+        tail_base: Optional[int] = None
         try:
             async with TAIL_CACHE._lock:
                 entry = TAIL_CACHE._cache.get(key)
                 if entry:
                     tail_off, tb = entry
                     tail_bytes = tb
-                    tail_offset = tail_off
+                    tail_base = tail_off
         except Exception:
             tail_bytes = b""
         if not tail_bytes:
             want = min(512 * 1024, file_size)
             tail_offset = file_size - want
-            tail_bytes = await _fetch(tail_offset, want)
+            tail_bytes, tail_base = await _fetch(tail_offset, want)
         if not head_bytes or not tail_bytes:
             await _store_index(key, None)
             return None
@@ -844,11 +852,11 @@ async def _do_build_media_index(
         idx = None
         container = container_guess(head_bytes)
         if container == "mkv":
-            idx = parse_mkv_index(head_bytes, tail_bytes, file_size)
+            idx = parse_mkv_index(head_bytes, tail_bytes, file_size, tail_base=tail_base)
         elif container == "mp4":
             idx = parse_mp4_index(head_bytes, tail_bytes, file_size)
         else:
-            idx = parse_mkv_index(head_bytes, tail_bytes, file_size) or parse_mp4_index(
+            idx = parse_mkv_index(head_bytes, tail_bytes, file_size, tail_base=tail_base) or parse_mp4_index(
                 head_bytes, tail_bytes, file_size
             )
 
@@ -863,10 +871,8 @@ async def _do_build_media_index(
         ):
             cues_abs = resolve_mkv_cues_offset(head_bytes)
             if cues_abs is not None and cues_abs >= len(head_bytes):
-                cues_buf = await _fetch(cues_abs, 1024 * 1024)
+                cues_buf, win_base = await _fetch(cues_abs, 1024 * 1024)
                 if cues_buf:
-                    # _fetch starts at a 4096-aligned offset <= cues_abs
-                    win_base = cues_abs - (cues_abs % 4096)
                     idx = parse_mkv_index(
                         head_bytes, b"", file_size, cues_window=(cues_buf, win_base)
                     )
@@ -875,12 +881,12 @@ async def _do_build_media_index(
         if idx is None and container in ("", "mp4") and file_size > 4 * 1024 * 1024:
             want = min(2 * 1024 * 1024, file_size)
             big_offset = file_size - want
-            big_tail = await _fetch(big_offset, want)
+            big_tail, big_tail_base = await _fetch(big_offset, want)
             if big_tail:
                 if container in ("", "mp4"):
                     idx = parse_mp4_index(head_bytes, big_tail, file_size)
                 if idx is None and container == "":
-                    idx = parse_mkv_index(head_bytes, big_tail, file_size)
+                    idx = parse_mkv_index(head_bytes, big_tail, file_size, tail_base=big_tail_base)
 
         await _store_index(key, idx)
         if idx is not None:
