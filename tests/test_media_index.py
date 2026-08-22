@@ -296,6 +296,86 @@ class MediaIndexSessionAndTtlTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn((4, 4), _INDEX_CACHE)
 
 
+class GridFetchGeometryTests(unittest.IsolatedAsyncioTestCase):
+    """Every MTProto read must satisfy offset % limit == 0 (upload.getFile
+    constraint observed in production 2026-08-22), and the tail window must
+    reach EOF via a FULL-grid-limit request that Telegram short-reads —
+    never a remainder-sized limit, never a skipped final piece."""
+
+    GRID = 512 * 1024
+
+    async def asyncSetUp(self):
+        from Backend.helper.custom_dl import HEAD_CACHE, TAIL_CACHE
+        _INDEX_CACHE.clear()
+        async with HEAD_CACHE._lock:
+            HEAD_CACHE._cache.clear()
+        async with TAIL_CACHE._lock:
+            TAIL_CACHE._cache.clear()
+
+    def _fake_streamer(self, file_size: int):
+        from unittest.mock import AsyncMock, MagicMock
+
+        payload = b"\x00" * file_size  # unparseable container -> exercises all fetch paths
+        streamer = MagicMock()
+        streamer._get_media_session = AsyncMock(return_value=object())
+        streamer._get_location = AsyncMock(return_value=object())
+
+        async def serve(offset, limit, **kwargs):
+            assert offset % limit == 0, f"unaligned read offset={offset} limit={limit}"
+            return payload[offset : offset + limit]  # short read at EOF like Telegram
+
+        streamer._fetch_file_bytes = AsyncMock(side_effect=serve)
+        return streamer
+
+    async def test_all_reads_grid_aligned_and_tail_reaches_eof(self):
+        from unittest.mock import MagicMock
+        from Backend.helper.media_index import _do_build_media_index
+
+        file_size = 6 * 1024 * 1024 + 12345  # NOT a grid multiple
+        fid = MagicMock()
+        fid.file_size = file_size
+        streamer = self._fake_streamer(file_size)
+        await _do_build_media_index(fid, streamer, (77, 1))
+
+        calls = [(c.kwargs["offset"], c.kwargs["limit"]) for c in streamer._fetch_file_bytes.call_args_list]
+        self.assertTrue(calls, "expected fetches to happen")
+        for off, lim in calls:
+            self.assertEqual(lim, self.GRID, f"non-grid limit {lim} at offset {off}")
+            self.assertEqual(off % lim, 0, f"offset {off} not divisible by limit {lim}")
+        # Tail window (last 512 KiB) must include the final partial piece:
+        # the last read starts at the last grid point before EOF with a FULL limit.
+        last_off = calls[-1][0]
+        self.assertEqual(last_off, (file_size - 1) // self.GRID * self.GRID)
+        self.assertLess(last_off, file_size)
+        self.assertGreater(last_off + self.GRID, file_size)
+        # Negative-cached (zeros don't parse) but fetch geometry was correct.
+        self.assertIn((77, 1), _INDEX_CACHE)
+
+    async def test_head_read_is_single_grid_piece_at_zero(self):
+        from unittest.mock import MagicMock
+        from Backend.helper.media_index import _do_build_media_index
+
+        file_size = 6 * 1024 * 1024
+        fid = MagicMock()
+        fid.file_size = file_size
+        streamer = self._fake_streamer(file_size)
+        await _do_build_media_index(fid, streamer, (78, 1))
+        first = streamer._fetch_file_bytes.call_args_list[0].kwargs
+        self.assertEqual(first["offset"], 0)
+        self.assertEqual(first["limit"], self.GRID)
+
+    async def test_tiny_file_below_1mib_short_circuits_without_fetch(self):
+        from unittest.mock import MagicMock
+        from Backend.helper.media_index import build_media_index, get_media_index
+
+        fid = MagicMock()
+        fid.file_size = 900 * 1024
+        streamer = self._fake_streamer(fid.file_size)
+        await build_media_index(fid, streamer, chat_id=79, message_id=1)
+        streamer._fetch_file_bytes.assert_not_called()
+        self.assertIsNone(await get_media_index(79, 1))
+
+
 if __name__ == "__main__":
     unittest.main()
 

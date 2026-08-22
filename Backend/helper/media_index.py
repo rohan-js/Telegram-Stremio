@@ -791,16 +791,15 @@ async def _do_build_media_index(
             out = bytearray()
             while pos < end:
                 want = grid
-                if pos + want > file_size:
-                    if pos == 0:
-                        # Small file (< one grid): a single whole-file read.
-                        want = file_size - (file_size % 4096)
-                        if want <= 0:
-                            break
-                    else:
-                        # Trailing partial piece — offset wouldn't divide the
-                        # limit; skip it (index data never lives there).
+                if pos == 0 and file_size < grid:
+                    # Small file (< one grid): a single whole-file read.
+                    want = file_size - (file_size % 4096)
+                    if want <= 0:
                         break
+                # A trailing partial piece is fetched with the FULL grid
+                # limit (offset still divides it) — Telegram short-reads at
+                # EOF, exactly like the production chunk loop. Never request
+                # a remainder-sized limit: offset % limit != 0 gets rejected.
                 try:
                     piece = await streamer._fetch_file_bytes(
                         media_session=session, location=loc, offset=pos, limit=want
@@ -846,6 +845,10 @@ async def _do_build_media_index(
             tail_offset = file_size - want
             tail_bytes, tail_base = await _fetch(tail_offset, want)
         if not head_bytes or not tail_bytes:
+            LOGGER.info(
+                "MediaIndex: empty fetch for %s (head=%d tail=%d bytes) — negative cache",
+                key, len(head_bytes), len(tail_bytes),
+            )
             await _store_index(key, None)
             return None
 
@@ -895,6 +898,13 @@ async def _do_build_media_index(
                 idx.container, key[0], key[1], len(idx.keyframes), idx.duration_sec or 0.0,
             )
             asyncio.create_task(_persist_index(key, idx))
+        else:
+            # Bounded by the negative TTL: makes "parsed=0" explainable
+            # from /api/admin/logs without enabling DEBUG.
+            LOGGER.info(
+                "MediaIndex: no index parsed for %s (container=%r) — negative cache",
+                key, container,
+            )
         return idx
     except Exception as exc:
         is_floodwait = "FLOOD_WAIT" in str(exc) or " FloodWait" in str(type(exc))
