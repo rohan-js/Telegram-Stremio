@@ -38,6 +38,8 @@ from Backend.helper.production_ops import start_backup_loop
 loop = get_event_loop()
 
 async def start_telegram_services():
+    startup_failures = 0
+    first_attempt_at = None
     while True:
         try:
             await asyncio.wait_for(StreamBot.start(), timeout=Telegram.TELEGRAM_CLIENT_START_TIMEOUT_SEC)
@@ -92,14 +94,33 @@ async def start_telegram_services():
                 LOGGER.info("Subscription Checker Task Started.")
 
             LOGGER.info("Telegram clients started successfully.")
+            if startup_failures:
+                minutes = int((loop.time() - (first_attempt_at or loop.time())) / 60)
+                schedule_owner_alert(
+                    f"⚠️ Telegram clients RECOVERED after {startup_failures} failed "
+                    f"attempt(s) over ~{minutes} min. All bots online.",
+                    key="bot-startup-recovered",
+                    cooldown_sec=60,
+                )
             schedule_owner_alert(
                 f"Telegram-Stremio v{__version__} started successfully.",
                 key="app-started",
                 cooldown_sec=300,
             )
             return
-        except Exception:
+        except Exception as startup_exc:
             LOGGER.error("Telegram client startup failed; retrying in 60 seconds:\n" + format_exc())
+            startup_failures += 1
+            if first_attempt_at is None:
+                first_attempt_at = loop.time()
+            # Delivered only when some client is still connected (partial
+            # failures); the recovery alert above covers the fully-down case.
+            schedule_owner_alert(
+                f"⚠️ Telegram client startup failed (attempt {startup_failures}), "
+                f"retrying in 60s: {type(startup_exc).__name__}",
+                key="bot-startup-failed",
+                cooldown_sec=900,
+            )
             for client in (StreamBot, Helper, Userbot):
                 try:
                     if client is not None and getattr(client, "is_connected", False):
@@ -128,7 +149,14 @@ async def start_services():
         LOGGER.info("Initializing Telegram-Stremio Web Server...")
         loop.create_task(server.serve())
         loop.create_task(ping())
-        
+
+        try:
+            from Backend.helper.production_ops import ops_watch_loop
+
+            loop.create_task(ops_watch_loop())
+        except Exception:
+            LOGGER.warning("Ops watch loop could not be started.", exc_info=True)
+
         link_checker_task = DeadLinkChecker(db, app, check_interval_hours=24)
         loop.create_task(link_checker_task.start())
 

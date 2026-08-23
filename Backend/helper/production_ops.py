@@ -210,3 +210,91 @@ async def get_launch_readiness(db) -> dict:
         "backup": backup,
         "generated_at": datetime.utcnow(),
     }
+
+
+# -------------------------------
+# Ops watch loop — disk + TLS expiry owner alerts
+# -------------------------------
+
+_OPS_DISK_INTERVAL_SEC = 30 * 60
+_OPS_TLS_INTERVAL_SEC = 6 * 60 * 60
+_OPS_DISK_MIN_FREE_GB = 10.0
+_OPS_DISK_MIN_FREE_PCT = 15.0
+_OPS_TLS_WARN_DAYS = 14
+
+
+async def _check_disk_paths() -> None:
+    from Backend.helper.owner_alerts import schedule_owner_alert
+
+    paths = {"/": "root", str(Telegram.TORRENT_DOWNLOAD_ROOT or "/downloads"): "downloads"}
+    for path, label in paths.items():
+        info = _diskinfo(path)
+        free_gb = info.get("free_gb")
+        used_pct = info.get("used_percent")
+        if free_gb is None:
+            continue
+        low_gb = float(free_gb) < _OPS_DISK_MIN_FREE_GB
+        low_pct = used_pct is not None and float(used_pct) > (100 - _OPS_DISK_MIN_FREE_PCT)
+        if low_gb or low_pct:
+            schedule_owner_alert(
+                f"🔴 Disk low [{label}]: {free_gb} GB free ({used_pct}% used) at {path}",
+                key=f"disk-low:{label}",
+                cooldown_sec=6 * 60 * 60,
+            )
+
+
+def _tls_expiry_days() -> float | None:
+    """Days until our public TLS cert expires (None if uncheckable)."""
+    import socket
+    import ssl
+    from urllib.parse import urlparse
+
+    base = str(Telegram.BASE_URL or "").strip()
+    if not base:
+        return None
+    try:
+        host = urlparse(base).hostname
+        if not host:
+            return None
+        ctx = ssl.create_default_context()
+        with socket.create_connection((host, 443), timeout=10) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as tls:
+                not_after = tls.getpeercert()["notAfter"]
+        expires = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z")
+        return (expires - datetime.utcnow()).total_seconds() / 86400
+    except Exception:
+        return None
+
+
+async def _check_tls_expiry() -> None:
+    days = await asyncio.to_thread(_tls_expiry_days)
+    if days is None:
+        return
+    if days < _OPS_TLS_WARN_DAYS:
+        from Backend.helper.owner_alerts import schedule_owner_alert
+
+        schedule_owner_alert(
+            f"⚠️ TLS certificate expires in {days:.0f} day(s) — check certbot renewal.",
+            key="cert-expiry",
+            cooldown_sec=24 * 60 * 60,
+        )
+
+
+async def ops_watch_loop() -> None:
+    """Background ops monitor: periodic disk-space and TLS-expiry alerts."""
+    import time as _time
+
+    LOGGER.info("Ops watch loop started (disk every 30m, TLS every 6h)")
+    last_tls = 0.0
+    while True:
+        try:
+            await _check_disk_paths()
+        except Exception:
+            pass
+        if _time.monotonic() - last_tls >= _OPS_TLS_INTERVAL_SEC:
+            last_tls = _time.monotonic()
+            try:
+                await _check_tls_expiry()
+            except Exception:
+                pass
+        await asyncio.sleep(_OPS_DISK_INTERVAL_SEC)

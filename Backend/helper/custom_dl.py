@@ -1239,6 +1239,16 @@ class ByteStreamer:
             registry_entry["status"] = "error"
             registry_entry["error_reason"] = reason
             LOGGER.error("Stream chunk failure: stream=%s %s", stream_id, reason)
+            try:
+                from Backend.helper.owner_alerts import schedule_owner_alert
+
+                schedule_owner_alert(
+                    f"🔴 Stream chunk failure after retries: {reason[:160]}",
+                    key=f"chunk-fail:{stream_id}",
+                    cooldown_sec=600,
+                )
+            except Exception:
+                pass
             return seq_idx, None, reason
 
         async def producer():
@@ -1391,6 +1401,16 @@ class ByteStreamer:
                         LOGGER.error("Producer stall (90 s) for stream %s — aborting", stream_id)
                         registry_entry["status"] = "error"
                         registry_entry["error_reason"] = "producer_stall_90s"
+                        try:
+                            from Backend.helper.owner_alerts import schedule_owner_alert
+
+                            schedule_owner_alert(
+                                f"🔴 Producer stall (90 s) — stream aborted: {stream_id}",
+                                key=f"stall:{stream_id}",
+                                cooldown_sec=600,
+                            )
+                        except Exception:
+                            pass
                         stop_event.set()
                         break
                     if off_chunk is None:

@@ -239,6 +239,7 @@ def build_torrent_stream(
     stream_name: str,
     stream_title: str,
     torrent_stats: Optional[dict] = None,
+    binge_group: Optional[str] = None,
 ) -> Optional[dict]:
     info_hash = quality.get("info_hash")
     if not info_hash:
@@ -277,6 +278,8 @@ def build_torrent_stream(
             behavior_hints["videoSize"] = int(video_size)
         except (TypeError, ValueError):
             pass
+    if binge_group:
+        behavior_hints["bingeGroup"] = binge_group
     if behavior_hints:
         stream["behaviorHints"] = behavior_hints
 
@@ -290,6 +293,7 @@ async def build_downloaded_torrent_stream(
     download_job: Optional[dict],
     season_number: Optional[int] = None,
     episode_number: Optional[int] = None,
+    binge_group: Optional[str] = None,
 ) -> Optional[dict]:
     if not download_job or download_job.get("status") != "completed":
         return None
@@ -322,7 +326,7 @@ async def build_downloaded_torrent_stream(
     if downloaded_name == stream_name:
         downloaded_name = f"Downloaded {stream_name}".strip()
 
-    return {
+    downloaded_stream = {
         "name": downloaded_name,
         "title": "\n".join(
             part for part in [
@@ -334,9 +338,12 @@ async def build_downloaded_torrent_stream(
         ),
         "url": f"{BASE_URL}/downloaded/{token}/{encoded}/video.mkv",
     }
+    if binge_group:
+        downloaded_stream["behaviorHints"] = {"bingeGroup": binge_group}
+    return downloaded_stream
 
 
-async def build_local_vps_stream(token: str, quality: dict, stream_name: str) -> Optional[dict]:
+async def build_local_vps_stream(token: str, quality: dict, stream_name: str, binge_group: Optional[str] = None) -> Optional[dict]:
     rel_path = str(quality.get("local_rel_path") or "").replace("\\", "/").lstrip("/")
     if not rel_path:
         return None
@@ -362,14 +369,17 @@ async def build_local_vps_stream(token: str, quality: dict, stream_name: str) ->
     if local_name == stream_name:
         local_name = f"VPS Local {stream_name}".strip()
     size_text = quality.get("size") or f"{file_size / (1024 ** 3):.2f} GB"
+    local_hints = {
+        "filename": filename,
+        "videoSize": file_size,
+    }
+    if binge_group:
+        local_hints["bingeGroup"] = binge_group
     return {
         "name": local_name,
         "title": f"📁 {filename}\n💾 {size_text}\n✅ Stored on VPS",
         "url": f"{BASE_URL}/downloaded/{token}/{encoded}/video.mkv",
-        "behaviorHints": {
-            "filename": filename,
-            "videoSize": file_size,
-        },
+        "behaviorHints": local_hints,
     }
 
 
@@ -1059,6 +1069,11 @@ async def _global_streams_for(token: str, imdb_id: str, media_type: str, season_
         return []
 
     streams = []
+    global_group = (
+        f"telegram-stremio-{imdb_id}"
+        if media_type == "series" and season_num is not None and episode_num is not None
+        else None
+    )
     for r in global_results:
         is_split = bool(r.get("is_split"))
         quality = r.get("quality") or "HD"
@@ -1071,13 +1086,16 @@ async def _global_streams_for(token: str, imdb_id: str, media_type: str, season_
         if is_split:
             kind = "zip parts" if r.get("is_zip") else "parts"
             title_parts.append(f"📦 {r.get('part_count', 0)} {kind}")
-        streams.append({
+        global_stream = {
             "name": f"🌐 GLOBAL {quality}",
             "title": "\n".join(part for part in title_parts if part),
             "url": f"{BASE_URL}/dl/{token}/{r.get('token')}/video.mkv",
             "size_bytes": parse_size_to_bytes(r.get("size", "")),
             "_recommended": False,
-        })
+        }
+        if global_group:
+            global_stream["behaviorHints"] = {"bingeGroup": global_group}
+        streams.append(global_stream)
     return streams
 
 
@@ -1195,6 +1213,13 @@ async def get_streams(
                 "staleError": 0,
             }
         for quality in media_details.get("telegram", []):
+            # Episodes get a bingeGroup so Stremio auto-advances to the next
+            # episode keeping our source (pairs with the 90% binge prewarm).
+            episode_group = (
+                f"telegram-stremio-{imdb_id}"
+                if media_type == "series" and season_num is not None and episode_num is not None
+                else None
+            )
             if quality.get("hidden_from_stremio"):
                 continue
             filename = quality.get("name", "")
@@ -1219,7 +1244,7 @@ async def get_streams(
 
             source_type = quality.get("source_type") or "telegram"
             if source_type == "local_vps":
-                local_stream = await build_local_vps_stream(token, quality, stream_name)
+                local_stream = await build_local_vps_stream(token, quality, stream_name, binge_group=episode_group)
                 if local_stream:
                     local_stream["_recommended"] = bool(quality.get("recommended"))
                     streams.append(local_stream)
@@ -1234,7 +1259,7 @@ async def get_streams(
                     quality.get("sources") or [],
                     torrent_private=bool(quality.get("torrent_private", False)),
                 )
-                torrent_stream = build_torrent_stream(quality, stream_name, stream_title, torrent_stats)
+                torrent_stream = build_torrent_stream(quality, stream_name, stream_title, torrent_stats, binge_group=episode_group)
                 if torrent_stream:
                     torrent_stream["_recommended"] = bool(quality.get("recommended"))
                     streams.append(torrent_stream)
@@ -1245,6 +1270,7 @@ async def get_streams(
                     download_job,
                     season_number=season_num,
                     episode_number=episode_num,
+                    binge_group=episode_group,
                 )
                 if downloaded_stream:
                     downloaded_stream["_recommended"] = bool(quality.get("recommended"))
@@ -1257,6 +1283,9 @@ async def get_streams(
             original_url = f"{BASE_URL}/dl/{token}/{quality.get('id')}/video.mkv"
             proxy_url = f"{Telegram.HTTP_PROXY_URL}{original_url}" if Telegram.PROXY and Telegram.HTTP_PROXY_URL else None
 
+            # Episode bingeGroup (computed once per loop above)
+            episode_hints = {"bingeGroup": episode_group} if episode_group else None
+
             if Telegram.SHOW_PROXY_AND_NON_PROXY_BOTH and proxy_url:
                 streams.append({
                     "name": f"{stream_name} (Proxy)",
@@ -1264,6 +1293,7 @@ async def get_streams(
                     "url": proxy_url,
                     "size_bytes": size_bytes,
                     "_recommended": bool(quality.get("recommended")),
+                    **({"behaviorHints": episode_hints} if episode_hints else {}),
                 })
                 streams.append({
                     "name": f"{stream_name} (Direct)",
@@ -1271,6 +1301,7 @@ async def get_streams(
                     "url": original_url,
                     "size_bytes": size_bytes,
                     "_recommended": bool(quality.get("recommended")),
+                    **({"behaviorHints": dict(episode_hints)} if episode_hints else {}),
                 })
             elif proxy_url:
                 streams.append({
@@ -1279,6 +1310,7 @@ async def get_streams(
                     "url": proxy_url,
                     "size_bytes": size_bytes,
                     "_recommended": bool(quality.get("recommended")),
+                    **({"behaviorHints": episode_hints} if episode_hints else {}),
                 })
             else:
                 streams.append({
@@ -1287,6 +1319,7 @@ async def get_streams(
                     "url": original_url,
                     "size_bytes": size_bytes,
                     "_recommended": bool(quality.get("recommended")),
+                    **({"behaviorHints": episode_hints} if episode_hints else {}),
                 })
 
     #----- Global Search fallback when the library has no streams for this title/episode

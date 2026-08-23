@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# IMAGE_REF (optional): pull a CI-built image from GHCR instead of building
+# on this box, e.g. IMAGE_REF="ghcr.io/rohan-js/telegram-stremio:sha-<full-sha>"
+# ./deploy/safe_deploy.sh
+# Falls back to the normal local build if the pull fails. The repo is public,
+# so the image pulls anonymously (no docker login required).
+
 APP_DIR="${APP_DIR:-/home/ubuntu/telegram-stremio}"
 SERVICE="${SERVICE:-telegram-stremio}"
 CONTAINER="${CONTAINER:-tg_stremio}"
 IMAGE="${IMAGE:-telegram-stremio:local}"
+IMAGE_REF="${IMAGE_REF:-}"
 STREAM_STATS_URL="${STREAM_STATS_URL:-http://127.0.0.1:8000/stream/stats}"
 LOGIN_URL="${LOGIN_URL:-http://127.0.0.1:8000/login}"
 MANIFEST_URL="${MANIFEST_URL:-}"
@@ -51,7 +58,15 @@ print(match.group(1))
 PY
 )"
 
-compose build "${SERVICE}"
+if [ -n "${IMAGE_REF}" ] && docker pull "${IMAGE_REF}" 2>/dev/null; then
+  docker tag "${IMAGE_REF}" "${IMAGE}"
+  echo "Pulled ${IMAGE_REF} and tagged as ${IMAGE}"
+else
+  if [ -n "${IMAGE_REF}" ]; then
+    echo "Pull of ${IMAGE_REF} failed; falling back to local build." >&2
+  fi
+  compose build "${SERVICE}"
+fi
 
 built_image_id="$(docker image inspect "${IMAGE}" --format '{{.Id}}')"
 built_version="$(

@@ -343,6 +343,21 @@ def _perform_restart():
 
 async def restart_app_api():
     try:
+        # os.execl replaces the process instantly, so this alert must be
+        # awaited (bounded) rather than fire-and-forget.
+        try:
+            from Backend.helper.owner_alerts import send_owner_alert
+
+            await asyncio.wait_for(
+                send_owner_alert(
+                    "♻️ Manual restart triggered from the dashboard.",
+                    key="manual-restart",
+                    cooldown_sec=60,
+                ),
+                timeout=5,
+            )
+        except Exception:
+            pass
         return await asyncio.to_thread(_perform_restart)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
