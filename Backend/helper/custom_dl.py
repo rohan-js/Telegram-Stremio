@@ -1025,6 +1025,7 @@ class ByteStreamer:
                             use_client_idx = client_index
 
                 # --- attempt the fetch with a hard timeout and anti-stall hedge racing ---
+                is_flood = False  # reset per attempt: TimeoutError branch never sets it
                 try:
                     base_timeout = float(getattr(Telegram, "SMART_ROUTING_CHUNK_TIMEOUT_SEC", 15.0) or 15.0)
                     first_timeout = float(getattr(Telegram, "SMART_ROUTING_FIRST_CHUNK_TIMEOUT_SEC", 4.0) or 4.0)

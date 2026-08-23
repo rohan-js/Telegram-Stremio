@@ -207,6 +207,50 @@ class HedgedChunkRacingTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(chunks, [b"single_client_bytes"])
 
+    async def test_timeout_then_success_recovers_chunk(self):
+        """Regression: a chunk attempt failing with asyncio.TimeoutError must be
+        retried, not crash fetch_chunk_with_retries with UnboundLocalError
+        (`is_flood` was only assigned in the generic Exception branch —
+        prod incident 2026-08-23 02:40 IST, log "Error processing completed
+        fetch task")."""
+        calls = {"n": 0}
+
+        async def mock_fetch_flaky(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise asyncio.TimeoutError("simulated chunk timeout")
+            return b"recovered_after_timeout"
+
+        with (
+            patch.object(Telegram, "SMART_ROUTING_HEDGE_ENABLED", False),
+            patch.object(self.streamer0, "_fetch_file_bytes", side_effect=mock_fetch_flaky),
+            patch.object(self.streamer0, "_get_media_session", return_value=MagicMock()),
+            patch.object(self.streamer0, "_get_location", return_value=MagicMock()),
+            patch("Backend.db.log_stream_stats", new=AsyncMock()),
+        ):
+            stream_gen = await self.streamer0.prefetch_stream(
+                file_id=self.dummy_file_id,
+                client_index=0,
+                offset=0,
+                first_part_cut=0,
+                last_part_cut=1024,
+                part_count=1,
+                chunk_size=1024,
+                prefetch=1,
+                stream_id="test-timeout-retry",
+                extra_clients=None,
+            )
+
+            chunks = []
+            async for chunk in stream_gen:
+                chunks.append(chunk)
+
+            self.assertEqual(chunks, [b"recovered_after_timeout"])
+            self.assertEqual(calls["n"], 2)  # first attempt timed out, retry succeeded
+            entry = custom_dl.ACTIVE_STREAMS.get("test-timeout-retry") or {}
+            self.assertEqual(entry.get("chunk_timeouts"), 1)
+            self.assertNotEqual(entry.get("status"), "error")
+
 
 if __name__ == "__main__":
     unittest.main()
