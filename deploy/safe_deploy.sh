@@ -70,7 +70,7 @@ fi
 
 built_image_id="$(docker image inspect "${IMAGE}" --format '{{.Id}}')"
 built_version="$(
-  docker run --rm --entrypoint python "${IMAGE}" -c \
+  docker run --rm --env-file "${APP_DIR}/config.env" --entrypoint python "${IMAGE}" -c \
     'import Backend; print(Backend.__version__)'
 )"
 if [ "${built_version}" != "${expected_version}" ]; then
@@ -78,7 +78,7 @@ if [ "${built_version}" != "${expected_version}" ]; then
   exit 3
 fi
 
-docker run --rm --entrypoint python "${IMAGE}" -c \
+docker run --rm --env-file "${APP_DIR}/config.env" --entrypoint python "${IMAGE}" -c \
   'from Backend.helper.metadata_matcher import build_title_variants; assert build_title_variants("Patriot.2026", "Patriot", 2026)'
 
 compose up -d --no-deps --force-recreate "${SERVICE}"
