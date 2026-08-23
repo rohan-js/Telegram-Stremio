@@ -522,6 +522,10 @@ class Telegram:
     # -------------------------------
     TORRENT_DOWNLOADS_ENABLED = getenv("TORRENT_DOWNLOADS_ENABLED", "true").lower() == "true"
     TORRENT_DOWNLOAD_ROOT = getenv("TORRENT_DOWNLOAD_ROOT", "/downloads/completed")
+    # NFO (Kodi-style metadata): admin download endpoints, and optional
+    # .nfo written next to completed torrent downloads
+    NFO_DOWNLOAD_ENABLED = getenv("NFO_DOWNLOAD_ENABLED", "true").lower() == "true"
+    NFO_WRITE_ON_DOWNLOAD = getenv("NFO_WRITE_ON_DOWNLOAD", "false").lower() == "true"
     try:
         TORRENT_DOWNLOAD_MIN_FREE_GB = float(getenv("TORRENT_DOWNLOAD_MIN_FREE_GB", "10") or 10)
     except Exception:

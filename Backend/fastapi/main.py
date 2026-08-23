@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from typing import Optional
 from Backend import __version__
 from Backend.config import Telegram
 from Backend.fastapi.security.credentials import require_auth
@@ -63,6 +64,7 @@ from Backend.fastapi.routes.api_routes import (
     export_config_api, import_config_api, restart_app_api,
     resolve_subtitle_api, list_subtitle_languages_api, list_subtitles_api,
     add_subtitles_api, remove_subtitle_api,
+    get_movie_nfo_api, get_tv_nfo_api,
 )
 
 app = FastAPI(
@@ -397,6 +399,21 @@ async def get_settings(_: bool = Depends(require_auth)):
 @app.put("/api/admin/settings")
 async def update_settings(payload: dict, _: bool = Depends(require_auth)):
     return await update_settings_api(payload)
+
+
+@app.get("/api/admin/nfo/movie/{imdb_id}")
+async def get_movie_nfo(imdb_id: str, _: bool = Depends(require_auth)):
+    return await get_movie_nfo_api(imdb_id)
+
+
+@app.get("/api/admin/nfo/tv/{imdb_id}")
+async def get_tv_nfo(
+    imdb_id: str,
+    season: Optional[int] = None,
+    episode: Optional[int] = None,
+    _: bool = Depends(require_auth),
+):
+    return await get_tv_nfo_api(imdb_id, season=season, episode=episode)
 
 
 #----- Telegram user session login (replaces manual USER_SESSION_STRING)

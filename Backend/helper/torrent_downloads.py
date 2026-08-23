@@ -125,6 +125,71 @@ def normalize_qbit_files(files: list[dict]) -> list[dict]:
     return [normalize_qbit_file(item, idx) for idx, item in enumerate(files or [])]
 
 
+async def write_nfo_for_job(job: dict) -> None:
+    """Opt-in (NFO_WRITE_ON_DOWNLOAD): write a Kodi-style .nfo beside the
+    completed torrent's video file so the downloads folder can be scanned
+    by Kodi/Jellyfin directly. Best-effort: every failure is swallowed."""
+    try:
+        if not bool(getattr(Telegram, "NFO_WRITE_ON_DOWNLOAD", False)):
+            return
+        imdb_id = job.get("imdb_id")
+        if not imdb_id:
+            return
+        from Backend import db
+        from Backend.helper.nfo_generator import movie_nfo, tvshow_nfo, episode_nfo
+
+        doc = await db.get_media_details(imdb_id=imdb_id)
+        if not doc:
+            return
+
+        root = download_root_dir()
+        target = None
+        for f in job.get("files") or []:
+            if f.get("is_video") and f.get("rel_path"):
+                candidate = (root / str(f["rel_path"])).resolve()
+                # stay inside the download root (rel_path is already
+                # backslash-stripped and leading-slash-stripped)
+                if str(candidate).startswith(str(root.resolve())):
+                    target = candidate
+                    break
+        if target is None or not target.exists():
+            LOGGER.debug("NFO write skipped: no completed video file on disk for %s", imdb_id)
+            return
+
+        xml = None
+        if job.get("media_type") == "tv":
+            season_number = job.get("season_number")
+            episode_number = job.get("episode_number")
+            if season_number is not None and episode_number is not None:
+                for season in doc.get("seasons") or []:
+                    try:
+                        if int(season.get("season_number") or -1) != int(season_number):
+                            continue
+                    except (TypeError, ValueError):
+                        continue
+                    for ep in season.get("episodes") or []:
+                        try:
+                            if int(ep.get("episode_number") or -1) == int(episode_number):
+                                xml = episode_nfo(doc, int(season_number), ep)
+                                break
+                        except (TypeError, ValueError):
+                            continue
+                    if xml:
+                        break
+            if xml is None:
+                xml = tvshow_nfo(doc)
+        else:
+            xml = movie_nfo(doc)
+
+        nfo_path = target.with_suffix(".nfo")
+        nfo_path.write_text(xml, encoding="utf-8")
+        LOGGER.info("NFO written: %s", nfo_path)
+    except Exception as e:
+        LOGGER.debug(
+            "NFO write skipped for %s: %s", job.get("info_hash") or job.get("imdb_id"), e,
+        )
+
+
 def _episode_pattern(season_number: int, episode_number: int) -> re.Pattern:
     season = int(season_number)
     episode = int(episode_number)
@@ -643,6 +708,7 @@ class TorrentDownloadManager:
                 job = await db.get_torrent_download(info_hash)
                 if job:
                     await self.edit_status_message(client, job, force=True)
+                    asyncio.create_task(write_nfo_for_job(job))
                 return
 
             if state in ERROR_STATES:

@@ -2,10 +2,12 @@ import asyncio
 import json
 import os
 import random
+import re
 import secrets
 import shutil
 from datetime import datetime
-from fastapi import Request, Query, HTTPException
+from typing import Optional
+from fastapi import Request, Query, HTTPException, Response
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 import Backend.pyrofork.bot as botmod
 from pyrogram.errors import FloodWait
@@ -18,6 +20,7 @@ from Backend.helper.pyro import get_readable_time
 from Backend.pyrofork.bot import multi_clients, StreamBot
 from Backend.helper.custom_dl import run_speed_test, _speed_test_single_client
 from Backend.helper.nginx_egress import get_nginx_egress_summary
+from Backend.helper.nfo_generator import movie_nfo, tvshow_nfo, episode_nfo
 from Backend.helper.host_outbound import get_vps_outbound_summary
 from Backend.helper.auto_catalog import (
     get_auto_catalog_settings,
@@ -355,6 +358,62 @@ async def download_admin_logs_api(max_bytes: int = 500_000):
         data.get("text") or "",
         headers={"Content-Disposition": "attachment; filename=telegram-stremio-redacted.log"},
     )
+
+
+#----- NFO download (Kodi-style metadata; builders in helper/nfo_generator.py)
+
+def _nfo_safe_name(doc: dict) -> str:
+    title = doc.get("title_english") or doc.get("title") or "title"
+    year = doc.get("release_year") or ""
+    base = f"{title} ({year})" if year else str(title)
+    return re.sub(r"[^A-Za-z0-9 ._()-]+", "_", base).strip()[:120] or "title"
+
+
+def _nfo_xml_response(xml: str, filename: str):
+    return Response(
+        content=xml,
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+async def get_movie_nfo_api(imdb_id: str):
+    if not bool(getattr(Telegram, "NFO_DOWNLOAD_ENABLED", True)):
+        raise HTTPException(status_code=404, detail="NFO download disabled")
+    doc = await db.get_media_details(imdb_id=imdb_id)
+    if not doc or doc.get("media_type", "movie") != "movie":
+        raise HTTPException(status_code=404, detail="Movie not found")
+    return _nfo_xml_response(movie_nfo(doc), f"{_nfo_safe_name(doc)}.nfo")
+
+
+async def get_tv_nfo_api(imdb_id: str, season: Optional[int] = None, episode: Optional[int] = None):
+    if not bool(getattr(Telegram, "NFO_DOWNLOAD_ENABLED", True)):
+        raise HTTPException(status_code=404, detail="NFO download disabled")
+    doc = await db.get_media_details(imdb_id=imdb_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if season is not None and episode is not None:
+        ep_doc = None
+        for s in doc.get("seasons") or []:
+            try:
+                if int(s.get("season_number") or -1) != int(season):
+                    continue
+            except (TypeError, ValueError):
+                continue
+            for ep in s.get("episodes") or []:
+                try:
+                    if int(ep.get("episode_number") or -1) == int(episode):
+                        ep_doc = ep
+                        break
+                except (TypeError, ValueError):
+                    continue
+            if ep_doc:
+                break
+        if ep_doc is None:
+            raise HTTPException(status_code=404, detail="Episode not found")
+        name = f"{_nfo_safe_name(doc)} - S{int(season):02d}E{int(episode):02d}.nfo"
+        return _nfo_xml_response(episode_nfo(doc, int(season), ep_doc), name)
+    return _nfo_xml_response(tvshow_nfo(doc), f"{_nfo_safe_name(doc)}.nfo")
 
 
 async def export_config_api():

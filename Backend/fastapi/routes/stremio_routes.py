@@ -892,6 +892,14 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
         }
 
     metas = [convert_to_stremio_meta(item) for item in items]
+    # Fanart across catalog rows (same pattern as upstream): fanart.py's
+    # cache (6h), single-flight, semaphore(10) and error cache make the
+    # gather cheap after the first hit per title.
+    if SettingsManager.current().fanart_enabled and metas:
+        try:
+            await asyncio.gather(*(_apply_fanart(m, it) for m, it in zip(metas, items)))
+        except Exception:
+            pass
     return {
         "metas": metas,
         "cacheMaxAge": 0,
