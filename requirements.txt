@@ -2,10 +2,14 @@ aiofiles
 fastapi
 guessit
 httpx
+itsdangerous
+Jinja2
 motor
+parse-torrent-name
 parse-torrent-title
 pyrofork
 python-dotenv
+python-multipart
 pytz
 rapidfuzz
 tgcrypto
