@@ -27,8 +27,16 @@ jobs:
         run: python -m compileall -q Backend tests
 
       - name: Run test suite
-        # test_stremio_configure has a known pre-existing failure
-        # (SessionMiddleware missing in its test scope); excluded until fixed.
+        # Import-time constructors need plausible dummies (never dialed/connected
+        # in tests): Database() parses DATABASE URIs, pyrogram Clients build at
+        # import from bot.py. Excludes the documented pre-existing failure in
+        # test_stremio_configure (SessionMiddleware missing in its test scope).
+        env:
+          DATABASE: "mongodb://ci-dummy-tracker.local,mongodb://ci-dummy-storage.local"
+          API_ID: "12345"
+          API_HASH: "0123456789abcdef0123456789abcdef"
+          BOT_TOKEN: "123456789:TEST-token-ci-only"
+          HELPER_BOT_TOKEN: "123456789:TEST-helper-ci-only"
         run: |
           MODULES=$(ls tests/test_*.py | grep -v test_stremio_configure.py \
             | sed 's|^tests/|tests.|; s|\.py$||' | tr '\n' ' ')
