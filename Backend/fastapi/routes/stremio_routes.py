@@ -116,13 +116,21 @@ async def _apply_fanart(meta: dict, item: dict) -> None:
         meta["background"] = art["background"]
 
 
+def display_title(item: dict) -> str:
+    """Prefer the English/international title when we stored one (TMDb often
+    returns the original-language title as `title`), else the original."""
+    eng = (item.get("title_english") or "").strip()
+    title = (item.get("title") or "").strip()
+    return eng or title or "Unknown"
+
+
 def convert_to_stremio_meta(item: dict) -> dict:
     media_type = "series" if item.get("media_type") == "tv" else "movie"
-    
+
     meta = {
         "id": item.get('imdb_id'),
         "type": media_type,
-        "name": item.get("title"),
+        "name": display_title(item),
         "poster": _poster_url(item.get("imdb_id"), item.get("poster")),
         "logo": item.get("logo") or "",
         "year": item.get("release_year"),
@@ -958,7 +966,7 @@ async def get_meta(token: str, media_type: str, id: str, response: Response, tok
     meta_obj = {
         "id": id,
         "type": "series" if media.get("media_type") == "tv" else "movie",
-        "name": media.get("title", ""),
+        "name": display_title(media),
         "description": media.get("description", ""),
         "year": str(media.get("release_year", "")),
         "imdbRating": str(media.get("rating", "")),
