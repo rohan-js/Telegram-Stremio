@@ -15,16 +15,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
-          cache: pip
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      # Install from uv.lock so CI tests the exact dependency versions the
+      # production image runs (bare pip install floats and breaks on upstream
+      # releases, e.g. themoviedb's constructor rename).
+      - name: Install dependencies (locked)
+        run: uv sync --locked
 
       - name: Compile check
-        run: python -m compileall -q Backend tests
+        run: uv run python -m compileall -q Backend tests
 
       - name: Run test suite
         # Import-time constructors need plausible dummies (never dialed/connected
@@ -41,7 +44,7 @@ jobs:
           MODULES=$(ls tests/test_*.py | grep -v test_stremio_configure.py \
             | sed 's|^tests/|tests.|; s|\.py$||' | tr '\n' ' ')
           echo "Running: $MODULES"
-          python -m unittest $MODULES
+          uv run python -m unittest $MODULES
 
   build-push:
     needs: test
