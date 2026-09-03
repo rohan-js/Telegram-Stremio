@@ -165,6 +165,7 @@
                                 <span><i class="fas fa-network-wired"></i> <span>${uaEsc(u.isp || '—')}</span></span>
                                 <span><i class="fas fa-mobile-screen-button"></i> <span>${uaEsc(u.app)}${u.device ? ' · ' + uaEsc(u.device) : ''}</span></span>
                                 <span><i class="fas fa-globe"></i> <span>${uaEsc(u.ip || '—')}</span></span>
+                                ${u.streams24h ? `<span><i class="fas fa-clapperboard"></i> <span>${u.streams24h} today · ${u.streams ?? 0} total</span></span>` : ''}
                             </div>
                         </div>`;
                     }).join('');

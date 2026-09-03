@@ -465,6 +465,9 @@
                 <div class="ins-stat"><div class="ins-v" id="ins-total-data">—</div><div class="ins-l">Data Transferred</div></div>
                 <div class="ins-stat"><div class="ins-v" id="ins-avg-speed">—</div><div class="ins-l">Avg Speed</div></div>
                 <div class="ins-stat"><div class="ins-v" id="ins-active-users">—</div><div class="ins-l">Active Viewers</div></div>
+                <div class="ins-stat"><div class="ins-v" id="ins-ttfb-p95">—</div><div class="ins-l">TTFB p95</div></div>
+                <div class="ins-stat"><div class="ins-v" id="ins-buffering">—</div><div class="ins-l">Buffering Rate</div></div>
+                <div class="ins-stat"><div class="ins-v" id="ins-cache-hit">—</div><div class="ins-l">Cache Hit</div></div>
             </div>
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <div class="ins-col"><h3 class="ins-h">🔥 Top Titles</h3><div id="ins-top-titles" class="ins-list"></div></div>
@@ -617,9 +620,15 @@
     function hzMini(ok) { return `<span class="mini-dot" style="background:${ok ? '#22c55e' : '#ef4444'}"></span>`; }
 
     function hzInfraCard(sec) {
-        const icon = { databases: 'fa-database', tmdb: 'fa-film', base_url: 'fa-link' }[sec.key] || 'fa-circle-check';
+        const icon = { databases: 'fa-database', tmdb: 'fa-film', base_url: 'fa-link', telegram_clients: 'fa-robot' }[sec.key] || 'fa-circle-check';
         let body;
-        if (sec.key === 'databases') {
+        if (sec.key === 'telegram_clients') {
+            body = (sec.items || []).map(i => `
+                <div class="hz-item">
+                    <div class="lbl">${hzMini(i.connected)} ${escapeHtml(i.name)}</div>
+                    <div class="meta">DC ${i.dc ?? '—'} · load ${i.workload ?? 0} · fails ${i.failures ?? 0}</div>
+                </div>`).join('') || '<div class="hz-msg">No clients.</div>';
+        } else if (sec.key === 'databases') {
             body = (sec.items || []).map(i => `
                 <div class="hz-item">
                     <div class="lbl">${hzMini(i.status === 'ok')} ${escapeHtml(i.name)}</div>
@@ -646,7 +655,7 @@
             const label = { ok: 'Healthy', warning: 'Attention', critical: 'Critical' }[overall] || overall;
             const badge = document.getElementById('hz-overall-badge');
             if (badge) { badge.className = 'hz-badge s-' + overall; badge.textContent = label; }
-            const infra = (d.sections || []).filter(s => s.key !== 'bots');
+            const infra = (d.sections || []);
             document.getElementById('hz-infra').innerHTML = infra.map(hzInfraCard).join('');
             if (force) showToast('Health re-checked.', 'success', 'Health');
         } catch (e) { /* ignore transient errors */ }
@@ -679,6 +688,9 @@
         insText('ins-total-data', fmtBytes(s.total_bytes));
         insText('ins-avg-speed', (Number(s.avg_speed || 0)).toFixed(1) + ' MB/s');
         insText('ins-active-users', s.active_users ?? 0);
+        insText('ins-ttfb-p95', s.ttfb_p95_sec != null ? (Number(s.ttfb_p95_sec) * 1000).toFixed(0) + ' ms' : '—');
+        insText('ins-buffering', s.buffering_stream_rate != null ? (Number(s.buffering_stream_rate)).toFixed(1) + '%' : '—');
+        insText('ins-cache-hit', s.cache_hit_rate != null ? (Number(s.cache_hit_rate)).toFixed(1) + '%' : '—');
 
         const titles = d.top_titles || [];
         const maxT = Math.max(1, ...titles.map(t => t.streams || 0));

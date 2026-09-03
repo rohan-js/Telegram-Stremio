@@ -124,6 +124,18 @@ def display_title(item: dict) -> str:
     return eng or title or "Unknown"
 
 
+MAINTENANCE_VIDEO_URL = "https://bit.ly/3YZFKT5"
+
+
+def _maintenance_block(token_data: dict) -> bool:
+    """Maintenance mode hides the addon from everyone except admin/owner
+    tokens, so the operator can work (re-index, dead-link runs) without
+    viewers hitting a half-broken library."""
+    if not SettingsManager.current().maintenance_mode:
+        return False
+    return not bool(token_data.get("is_admin"))
+
+
 def convert_to_stremio_meta(item: dict) -> dict:
     media_type = "series" if item.get("media_type") == "tv" else "movie"
 
@@ -788,6 +800,9 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
     if Telegram.HIDE_CATALOG:
         raise HTTPException(status_code=404, detail="Catalog disabled")
 
+    if _maintenance_block(token_data):
+        return {"metas": [], "cacheMaxAge": 0, "staleRevalidate": 0, "staleError": 0}
+
     if media_type not in ["movie", "series", "tv"]:
         raise HTTPException(status_code=404, detail="Invalid catalog type")
 
@@ -889,7 +904,13 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
             )
         else:
             if "latest" in id:
-                sort_params = [("updated_on", "desc")]
+                # Immutable Telegram message numbers: upload order survives
+                # wipe/re-index (updated_on is rewritten by every re-scan,
+                # which permanently scrambled the Latest shelf).
+                if media_type == "movie":
+                    sort_params = [("telegram.origin_msg_id", "desc")]
+                else:
+                    sort_params = [("seasons.episodes.telegram.origin_msg_id", "desc")]
             elif "top" in id:
                 sort_params = [("rating", "desc")]
             else:
@@ -931,6 +952,9 @@ async def get_meta(token: str, media_type: str, id: str, response: Response, tok
     apply_stremio_no_cache(response)
     if Telegram.HIDE_CATALOG:
         raise HTTPException(status_code=404, detail="Catalog disabled")
+
+    if _maintenance_block(token_data):
+        return {"meta": {}, "cacheMaxAge": 0, "staleRevalidate": 0, "staleError": 0}
 
     if media_type == "tv" and id.startswith(IPTV_ID_PREFIX):
         channel_id = id.removeprefix(IPTV_ID_PREFIX)
@@ -1164,6 +1188,20 @@ async def get_streams(
             "staleError": 0,
         }
 
+    if _maintenance_block(token_data):
+        return {
+            "streams": [
+                {
+                    "name": "🛠 Under Maintenance",
+                    "title": "The server is temporarily under maintenance.\nPlease check back a little later.",
+                    "url": MAINTENANCE_VIDEO_URL,
+                }
+            ],
+            "cacheMaxAge": 0,
+            "staleRevalidate": 0,
+            "staleError": 0,
+        }
+
     if media_type == "tv" and id.startswith(IPTV_ID_PREFIX):
         settings = await get_iptv_settings(db)
         if not settings.get("enabled"):
@@ -1221,19 +1259,29 @@ async def get_streams(
                 "staleError": 0,
             }
         for quality in media_details.get("telegram", []):
-            # Episodes get a bingeGroup so Stremio auto-advances to the next
-            # episode keeping our source (pairs with the 90% binge prewarm).
-            episode_group = (
-                f"telegram-stremio-{imdb_id}"
-                if media_type == "series" and season_num is not None and episode_num is not None
-                else None
-            )
-            if quality.get("hidden_from_stremio"):
+            # Dead-link checker verdicts are honored here: flagged-dead files
+            # must not render in the picker (an admin purge removes them later).
+            if quality.get("hidden_from_stremio") or quality.get("is_dead"):
                 continue
             filename = quality.get("name", "")
             quality_str = quality.get("quality", "HD")
             size = quality.get("size", "")
             size_bytes = parse_size_to_bytes(size)
+
+            # behaviorHints: bingeGroup ties episodes for Stremio auto-advance
+            # (pairs with the 90% binge prewarm); videoSize is the standard
+            # size field several players read.
+            episode_group = (
+                f"telegram-stremio-{imdb_id}"
+                if media_type == "series" and season_num is not None and episode_num is not None
+                else None
+            )
+            stream_hints = {}
+            if episode_group:
+                stream_hints["bingeGroup"] = episode_group
+            if size_bytes > 0:
+                stream_hints["videoSize"] = size_bytes
+            episode_hints = stream_hints or None
 
             stream_name, stream_title = format_stream_details(
                 filename, quality_str, size
@@ -1290,9 +1338,6 @@ async def get_streams(
 
             original_url = f"{BASE_URL}/dl/{token}/{quality.get('id')}/video.mkv"
             proxy_url = f"{Telegram.HTTP_PROXY_URL}{original_url}" if Telegram.PROXY and Telegram.HTTP_PROXY_URL else None
-
-            # Episode bingeGroup (computed once per loop above)
-            episode_hints = {"bingeGroup": episode_group} if episode_group else None
 
             if Telegram.SHOW_PROXY_AND_NON_PROXY_BOTH and proxy_url:
                 streams.append({

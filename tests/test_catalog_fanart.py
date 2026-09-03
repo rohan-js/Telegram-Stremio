@@ -11,6 +11,7 @@ from Backend.fastapi.routes import stremio_routes
 
 def _fake_settings(fanart_enabled: bool) -> SimpleNamespace:
     return SimpleNamespace(
+        maintenance_mode=False,
         fanart_enabled=fanart_enabled,
         better_poster_enabled=False,
         better_poster="",

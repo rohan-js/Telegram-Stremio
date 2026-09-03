@@ -408,6 +408,14 @@
         <input id="announcement_channel" class="s-input" value="{{ settings.announcement_channel or '' }}" placeholder="-100... or @channel">
       </div>
       <div class="field">
+        <label class="toggle-wrap">
+          <input type="checkbox" id="maintenance_mode" class="toggle-input" {% if settings.maintenance_mode %}checked{% endif %}>
+          <span class="toggle-track"></span>
+          <span class="toggle-label">Maintenance Mode</span>
+        </label>
+        <p class="hint">Hides catalogs/streams from everyone except admin tokens while you work on the server.</p>
+      </div>
+      <div class="field">
         <label class="s-label">Skip Channel</label>
         <input id="skip_channel" class="s-input" value="{{ settings.skip_channel or '' }}" placeholder="-100... or @channel">
         <p class="hint">Uploads from this channel are skipped.</p>
@@ -614,6 +622,7 @@ const INPUTS = {
   fanart_shuffle_interval: 'fanart_shuffle_interval',
   content_requests_enabled: 'content_requests_enabled',
   content_requests_beta_only: 'content_requests_beta_only',
+  maintenance_mode: 'maintenance_mode',
   subscription: 'subscription',
   subscription_group_id: 'subscription_group_id',
   approver_ids: 'approver_ids',

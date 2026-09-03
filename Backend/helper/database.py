@@ -90,6 +90,18 @@ class Database:
             except Exception as e:
                 LOGGER.error(f"Failed creating tracking catalog indexes: {e}")
 
+            # TTL: stream analytics must not grow forever on the Atlas free
+            # tier — STREAM_LOG_RETENTION_DAYS was advisory-only until now.
+            try:
+                retention_days = max(1, int(getattr(Telegram, "STREAM_LOG_RETENTION_DAYS", 30) or 30))
+                await tracking["stream_analytics"].create_index(
+                    [("logged_at", ASCENDING)],
+                    expireAfterSeconds=retention_days * 86400,
+                    name="logged_at_retention_ttl",
+                )
+            except Exception as e:
+                LOGGER.error(f"Failed creating stream_analytics TTL index: {e}")
+
         for db_key in tuple(self.dbs):
             if db_key.startswith("storage_"):
                 await self._ensure_storage_indexes(db_key)

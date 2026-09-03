@@ -71,6 +71,7 @@ _MOVIE = {
 class CatalogDisplayTitleTests(unittest.IsolatedAsyncioTestCase):
     async def test_catalog_row_uses_english_name(self):
         fake_settings = SimpleNamespace(
+            maintenance_mode=False,
             fanart_enabled=False,
             better_poster_enabled=False,
             better_poster="",

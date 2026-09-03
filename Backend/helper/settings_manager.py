@@ -29,6 +29,7 @@ DEFAULTS: Dict[str, Any] = {
     "global_search_channels": [],
     "content_requests_enabled": False,
     "content_requests_beta_only": True,
+    "maintenance_mode": False,
     "announce_new_content": False,
     "announcement_channel": "",
     "skip_channel": "",
@@ -194,6 +195,10 @@ class Settings:
     @property
     def fanart_low_res_poster(self) -> bool:
         return bool(self._data.get("fanart_low_res_poster", True))
+
+    @property
+    def maintenance_mode(self) -> bool:
+        return bool(self._data.get("maintenance_mode", False))
 
 
 class SettingsManager:
