@@ -38,6 +38,7 @@ AUTO_CATALOG_DEFINITIONS = [
 
     {"key": "top_rated", "name": "Top Rated", "group": "Smart"},
     {"key": "recently_added", "name": "Recently Added", "group": "Smart"},
+    {"key": "trending", "name": "Trending Now", "group": "Smart"},
 
     {"key": "netflix", "name": "Netflix", "group": "OTT"},
     {"key": "prime_video", "name": "Prime Video", "group": "OTT"},
@@ -467,6 +468,111 @@ async def _write_status(db, data: dict) -> None:
     )
 
 
+#----- Trending Now: daily TMDb weekly-trending list intersected with the library
+TRENDING_DEFINITION_NAME = "Trending Now"
+TRENDING_AUTO_KEY = _catalog_key(TRENDING_DEFINITION_NAME)
+TRENDING_SYNC_INTERVAL_SEC = 20 * 60 * 60  # refresh at most ~once a day
+
+
+async def _fetch_trending_tmdb_ids() -> List[int]:
+    """Weekly trending movie+tv tmdb ids from TMDb (raw call, existing style)."""
+    api_key = _tmdb_api_key()
+    if not api_key:
+        return []
+    ids: List[int] = []
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for path in ("trending/movie/week", "trending/tv/week"):
+                resp = await client.get(
+                    f"https://api.themoviedb.org/3/{path}",
+                    params={"api_key": api_key},
+                )
+                resp.raise_for_status()
+                for entry in (resp.json() or {}).get("results") or []:
+                    tmdb_id = entry.get("id")
+                    if tmdb_id:
+                        ids.append(int(tmdb_id))
+    except Exception as exc:
+        LOGGER.warning(f"Trending fetch failed: {exc}")
+        return []
+    return ids
+
+
+async def sync_trending_catalog(db, *, force: bool = False) -> dict:
+    """Intersect TMDb weekly trending with our library and rebuild the
+    'Trending Now' auto catalog (items REPLACED daily, never appended)."""
+    if "trending" not in {d["key"] for d in AUTO_CATALOG_DEFINITIONS}:
+        return {"ok": False, "reason": "definition missing"}
+
+    collection = db.dbs["tracking"]["custom_catalogs"]
+    now = datetime.utcnow()
+
+    existing = await collection.find_one({"auto_key": TRENDING_AUTO_KEY})
+    last_sync = (existing or {}).get("last_auto_sync")
+    if (
+        not force
+        and last_sync
+        and (now - last_sync).total_seconds() < TRENDING_SYNC_INTERVAL_SEC
+    ):
+        return {"ok": True, "skipped": "recently synced"}
+
+    enabled_names = await _enabled_catalog_names(db)
+    if TRENDING_DEFINITION_NAME not in enabled_names:
+        return {"ok": True, "skipped": "trending not enabled"}
+
+    trending_ids = await _fetch_trending_tmdb_ids()
+    if not trending_ids:
+        return {"ok": True, "matched": 0}
+
+    items: List[dict] = []
+    for i in range(1, db.current_db_index + 1):
+        storage = db.dbs.get(f"storage_{i}")
+        if storage is None:
+            continue
+        for coll_name in ("movie", "tv"):
+            cursor = storage[coll_name].find(
+                {"tmdb_id": {"$in": trending_ids}},
+                {"tmdb_id": 1, "media_type": 1, "db_index": 1},
+            )
+            async for doc in cursor:
+                if doc.get("tmdb_id"):
+                    items.append(_doc_item(doc))
+
+    # dedupe, keep TMDb trending order (Mongo $in matches in natural order)
+    rank = {tmdb_id: idx for idx, tmdb_id in enumerate(trending_ids)}
+    seen = set()
+    unique_items = []
+    for item in sorted(items, key=lambda it: rank.get(int(it["tmdb_id"]), 10 ** 9)):
+        key = (item["media_type"], item["tmdb_id"], item["db_index"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_items.append(item)
+
+    if not unique_items:
+        return {"ok": True, "matched": 0}
+
+    await collection.update_one(
+        {"auto_key": TRENDING_AUTO_KEY},
+        {
+            "$set": {
+                "name": TRENDING_DEFINITION_NAME,
+                "visible": True,
+                "auto": True,
+                "auto_key": TRENDING_AUTO_KEY,
+                "items": unique_items,
+                "item_count": len(unique_items),
+                "updated_at": now,
+                "last_auto_sync": now,
+            },
+            "$setOnInsert": {"created_at": now},
+        },
+        upsert=True,
+    )
+    LOGGER.info(f"Trending Now catalog rebuilt with {len(unique_items)} library matches.")
+    return {"ok": True, "matched": len(unique_items)}
+
+
 async def run_auto_catalog_sync(db, *, force: bool = False, full_rebuild: bool = False, delay_seconds: int = 0) -> dict:
     if delay_seconds:
         await asyncio.sleep(delay_seconds)
@@ -667,6 +773,11 @@ async def start_auto_catalog_interval_loop(db) -> None:
             if not await has_auto_catalog_settings(db):
                 LOGGER.info("Hourly auto catalog quick sync skipped: no auto catalog selection saved yet.")
                 continue
+
+            try:
+                await sync_trending_catalog(db)
+            except Exception as exc:
+                LOGGER.error(f"Trending Now sync failed: {exc}")
 
             if _auto_sync_lock.locked() or (_auto_sync_task and not _auto_sync_task.done()):
                 LOGGER.info("Hourly auto catalog quick sync skipped: another sync is already running.")

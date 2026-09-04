@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Your Wrapped - TG Stremio{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <div class="glass-panel rounded-3xl p-6">
+    <p class="text-xs uppercase tracking-[0.24em] text-text-secondary font-bold">{{ year }} So Far</p>
+    <h1 class="text-3xl font-black mt-1">{{ name }}'s Watching</h1>
+    <p class="text-text-secondary mt-2">Your personal numbers from this server. Updated live.</p>
+  </div>
+
+  <div id="wrapped-closed" class="glass-panel rounded-3xl p-6 hidden">
+    <h2 class="text-xl font-black">Nothing to show yet</h2>
+    <p class="text-text-secondary mt-2">This link is not valid, or nothing has been watched on it.</p>
+  </div>
+
+  <div id="wrapped-content" class="space-y-6 hidden">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="glass-panel rounded-3xl p-5 text-center">
+        <div id="st-hours" class="text-3xl font-black">—</div>
+        <div class="text-text-secondary text-sm mt-1">Hours Watched</div>
+      </div>
+      <div class="glass-panel rounded-3xl p-5 text-center">
+        <div id="st-plays" class="text-3xl font-black">—</div>
+        <div class="text-text-secondary text-sm mt-1">Plays</div>
+      </div>
+      <div class="glass-panel rounded-3xl p-5 text-center">
+        <div id="st-titles" class="text-3xl font-black">—</div>
+        <div class="text-text-secondary text-sm mt-1">Different Titles</div>
+      </div>
+      <div class="glass-panel rounded-3xl p-5 text-center">
+        <div id="st-gb" class="text-3xl font-black">—</div>
+        <div class="text-text-secondary text-sm mt-1">GB Streamed</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="glass-panel rounded-3xl p-6">
+        <h2 class="text-xl font-black mb-3">Top Titles</h2>
+        <div id="wrapped-top" class="space-y-2"></div>
+      </div>
+      <div class="glass-panel rounded-3xl p-6">
+        <h2 class="text-xl font-black mb-3">Monthly Plays</h2>
+        <div id="wrapped-months" class="space-y-2"></div>
+        <p id="wrapped-fav" class="text-text-secondary text-sm mt-4"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(async () => {
+  const token = "{{ token }}";
+  try {
+    const res = await fetch(`/api/wrapped/${encodeURIComponent(token)}`);
+    if (!res.ok) {
+      document.getElementById('wrapped-closed').classList.remove('hidden');
+      return;
+    }
+    const d = await res.json();
+    document.getElementById('wrapped-content').classList.remove('hidden');
+    document.getElementById('st-hours').textContent = d.hours ?? 0;
+    document.getElementById('st-plays').textContent = d.total_plays ?? 0;
+    document.getElementById('st-titles').textContent = d.distinct_titles ?? 0;
+    document.getElementById('st-gb').textContent = d.gb ?? 0;
+
+    const top = d.top_titles || [];
+    const maxP = Math.max(1, ...top.map(t => t.plays || 0));
+    document.getElementById('wrapped-top').innerHTML = top.length
+      ? top.map(t => `
+          <div>
+            <div class="flex justify-between text-sm mb-1">
+              <span class="font-bold truncate">${t.title}</span>
+              <span class="text-text-secondary">${t.plays}×</span>
+            </div>
+            <div class="h-2 rounded-full bg-surface overflow-hidden">
+              <div class="h-full rounded-full bg-primary" style="width:${Math.round((t.plays / maxP) * 100)}%"></div>
+            </div>
+          </div>`).join('')
+      : '<p class="text-text-secondary text-sm">No plays recorded yet.</p>';
+
+    const months = d.months || [];
+    const maxM = Math.max(1, ...months.map(m => m.plays || 0));
+    document.getElementById('wrapped-months').innerHTML = months.length
+      ? months.map(m => `
+          <div>
+            <div class="flex justify-between text-sm mb-1">
+              <span class="text-text-secondary">${m.month}</span>
+              <span class="font-bold">${m.plays} plays${m.hours ? ' · ' + m.hours + 'h' : ''}</span>
+            </div>
+            <div class="h-2 rounded-full bg-surface overflow-hidden">
+              <div class="h-full rounded-full bg-primary" style="width:${Math.round((m.plays / maxM) * 100)}%"></div>
+            </div>
+          </div>`).join('')
+      : '<p class="text-text-secondary text-sm">No plays recorded yet.</p>';
+
+    const fav = [d.favorite_app, d.favorite_device].filter(Boolean).join(' on ');
+    document.getElementById('wrapped-fav').textContent = fav
+      ? `Usually watches on ${fav}.`
+      : '';
+  } catch (e) {
+    document.getElementById('wrapped-closed').classList.remove('hidden');
+  }
+})();
+</script>
+{% endblock %}

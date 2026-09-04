@@ -16,7 +16,8 @@ from Backend.fastapi.routes.template_routes import (
     media_management_page, edit_media_page, public_status_page, stremio_guide_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, vlc_redirect,
     custom_catalogs_page, watch_requests_page, live_tv_page, settings_page, tools_page,
-    launch_readiness_page, policy_page, admin_requests_page, public_request_page
+    launch_readiness_page, policy_page, admin_requests_page, public_request_page,
+    wrapped_page
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
@@ -64,7 +65,7 @@ from Backend.fastapi.routes.api_routes import (
     export_config_api, import_config_api, restart_app_api,
     resolve_subtitle_api, list_subtitle_languages_api, list_subtitles_api,
     add_subtitles_api, remove_subtitle_api,
-    get_movie_nfo_api, get_tv_nfo_api,
+    get_movie_nfo_api, get_tv_nfo_api, get_wrapped_api,
 )
 
 app = FastAPI(
@@ -151,6 +152,10 @@ async def takedown(request: Request):
 @app.get("/request", response_class=HTMLResponse)
 async def public_request(request: Request):
     return await public_request_page(request)
+
+@app.get("/wrapped/{token}", response_class=HTMLResponse)
+async def wrapped_view(request: Request, token: str):
+    return await wrapped_page(request, token)
 
 @app.get("/api/request/search")
 async def request_search(q: str = Query("", max_length=120)):
@@ -399,6 +404,11 @@ async def get_settings(_: bool = Depends(require_auth)):
 @app.put("/api/admin/settings")
 async def update_settings(payload: dict, _: bool = Depends(require_auth)):
     return await update_settings_api(payload)
+
+
+@app.get("/api/wrapped/{token}")
+async def wrapped_api(token: str):
+    return await get_wrapped_api(token)
 
 
 @app.get("/api/admin/nfo/movie/{imdb_id}")

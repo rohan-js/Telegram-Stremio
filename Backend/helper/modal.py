@@ -95,6 +95,7 @@ class TVShowSchema(BaseModel):
     poster: Optional[str] = None
     backdrop: Optional[str] = None
     logo: Optional[str] = None
+    trailer_youtube_id: Optional[str] = None
     cast: Optional[List[str]] = None
     runtime: Optional[str] = None
     media_type: str
@@ -128,6 +129,7 @@ class MovieSchema(BaseModel):
     poster: Optional[str] = None
     backdrop: Optional[str] = None
     logo: Optional[str] = None
+    trailer_youtube_id: Optional[str] = None
     cast: Optional[List[str]] = None
     runtime: Optional[str] = None
     media_type: str

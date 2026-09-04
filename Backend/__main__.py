@@ -157,6 +157,13 @@ async def start_services():
         except Exception:
             LOGGER.warning("Ops watch loop could not be started.", exc_info=True)
 
+        try:
+            from Backend.helper.production_ops import wrapped_rollup_loop
+
+            loop.create_task(wrapped_rollup_loop(db))
+        except Exception:
+            LOGGER.warning("Wrapped rollup loop could not be started.", exc_info=True)
+
         link_checker_task = DeadLinkChecker(db, app, check_interval_hours=24)
         loop.create_task(link_checker_task.start())
 

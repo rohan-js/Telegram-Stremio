@@ -298,3 +298,75 @@ async def ops_watch_loop() -> None:
             except Exception:
                 pass
         await asyncio.sleep(_OPS_DISK_INTERVAL_SEC)
+
+
+# -------------------------------
+# Family Wrapped: daily rollup of stream_analytics into wrapped_monthly
+# (immune to the raw-records TTL) + token stats for the /wrapped page
+# -------------------------------
+
+async def wrapped_rollup_yesterday(db) -> int:
+    """Aggregate yesterday's stream records per token into wrapped_monthly.
+    Returns the number of token-days written."""
+    from datetime import timedelta
+
+    tracking = db.dbs.get("tracking")
+    if tracking is None:
+        return 0
+    analytics = tracking["stream_analytics"]
+    wrapped = tracking["wrapped_monthly"]
+
+    now = datetime.utcnow()
+    day_start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
+
+    rows = await analytics.aggregate([
+        {"$match": {"logged_at": {"$gte": day_start, "$lt": day_end}, "token": {"$exists": True, "$ne": None}}},
+        {"$group": {
+            "_id": "$token",
+            "plays": {"$sum": 1},
+            "total_bytes": {"$sum": "$total_bytes"},
+            "seconds": {"$sum": "$duration_sec"},
+            "titles": {"$addToSet": "$title"},
+        }},
+    ]).to_list(None)
+
+    day_label = day_start.strftime("%Y-%m-%d")
+    written = 0
+    for row in rows:
+        token = row["_id"]
+        month_label = day_start.strftime("%Y-%m")
+        titles = [t for t in (row.get("titles") or []) if t]
+        top_title = max(set(titles), key=titles.count) if titles else ""
+        await wrapped.update_one(
+            {"_id": f"{token}:{month_label}"},
+            {
+                "$setOnInsert": {"token": token, "month": month_label},
+                "$inc": {
+                    "plays": int(row.get("plays") or 0),
+                    "total_bytes": int(row.get("total_bytes") or 0),
+                    "seconds": round(float(row.get("seconds") or 0), 1),
+                    f"days.{day_label}.plays": int(row.get("plays") or 0),
+                },
+                "$addToSet": {"titles": {"$each": titles}},
+                "$set": {f"days.{day_label}.top_title": top_title},
+            },
+            upsert=True,
+        )
+        written += 1
+    return written
+
+
+async def wrapped_rollup_loop(db) -> None:
+    """Daily rollup so Wrapped numbers survive stream_analytics TTL expiry."""
+    await asyncio.sleep(120)  # let the app finish booting
+    while True:
+        try:
+            written = await wrapped_rollup_yesterday(db)
+            if written:
+                LOGGER.info(f"Wrapped rollup wrote {written} token-day(s).")
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            LOGGER.exception("Wrapped rollup failed")
+        await asyncio.sleep(24 * 3600)

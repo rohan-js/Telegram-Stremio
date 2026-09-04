@@ -63,7 +63,7 @@ def get_tmdb_logo(images) -> str:
 
 def format_imdb_images(imdb_id: str) -> dict:
     if not imdb_id:
-        return {"poster": "", "backdrop": "", "logo": ""}
+        return {"poster": "", "backdrop": "", "logo": "", "trailer_youtube_id": ""}
     return {
         "poster": f"https://images.metahub.space/poster/small/{imdb_id}/img",
         "backdrop": f"https://images.metahub.space/background/medium/{imdb_id}/img",
@@ -525,6 +525,22 @@ async def _retry_api_call(label: str, func, attempts: int = 3, base_delay: float
     LOGGER.warning(f"{label} failed after {attempts} attempts: {last_error}")
     return None
 
+def _pick_trailer(videos) -> str:
+    """Pick the best YouTube trailer key from a TMDb Videos dataclass:
+    official Trailer > any Trailer > any YouTube video."""
+    try:
+        results = list(getattr(videos, "results", None) or [])
+    except Exception:
+        return ""
+    youtube = [v for v in results if (getattr(v, "site", "") or "") == "YouTube" and getattr(v, "key", None)]
+    if not youtube:
+        return ""
+    trailers = [v for v in youtube if (getattr(v, "type", "") or "") == "Trailer"]
+    pool = trailers or youtube
+    official = [v for v in pool if getattr(v, "official", False)]
+    return str((official or pool)[0].key or "")
+
+
 async def _tmdb_movie_details(movie_id):
     if movie_id in TMDB_DETAILS_CACHE:
         return TMDB_DETAILS_CACHE[movie_id]
@@ -532,7 +548,7 @@ async def _tmdb_movie_details(movie_id):
     async def fetch():
         async with API_SEMAPHORE:
             details = await tmdb.movie(movie_id).details(
-                append_to_response="external_ids,credits"
+                append_to_response="external_ids,credits,videos"
             )
             images = await tmdb.movie(movie_id).images()
             details.images = images
@@ -552,7 +568,7 @@ async def _tmdb_tv_details(tv_id):
     async def fetch():
         async with API_SEMAPHORE:
             details = await tmdb.tv(tv_id).details(
-                append_to_response="external_ids,credits"
+                append_to_response="external_ids,credits,videos"
             )
             images = await tmdb.tv(tv_id).images()
             details.images = images
@@ -961,6 +977,7 @@ async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, q
                 "poster": "",
                 "backdrop": "",
                 "logo": "",
+            "trailer_youtube_id": "",
                 "genres": [],
                 "media_type": "tv",
                 "cast": [],
@@ -1004,6 +1021,7 @@ async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, q
             "poster": format_tmdb_image(tv.poster_path),
             "backdrop": format_tmdb_image(tv.backdrop_path, "original"),
             "logo": get_tmdb_logo(getattr(tv, "images", None)),
+            "trailer_youtube_id": _pick_trailer(getattr(tv, "videos", None)),
             "genres": [g.name for g in (tv.genres or [])],
             "media_type": "tv",
             "cast": cast,
@@ -1038,6 +1056,7 @@ async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, q
         "poster": images["poster"],
         "backdrop": images["backdrop"],
         "logo": images["logo"],
+        "trailer_youtube_id": "",
         "cast": imdb.get("cast", []),
         "runtime": str(imdb.get("runtime") or ""),          
         "genres": imdb.get("genre", []),
@@ -1331,6 +1350,7 @@ async def fetch_selected_tv_metadata(selected_id: str) -> dict | None:
             "poster": format_tmdb_image(tv.poster_path),
             "backdrop": format_tmdb_image(tv.backdrop_path, "original"),
             "logo": get_tmdb_logo(getattr(tv, "images", None)),
+            "trailer_youtube_id": _pick_trailer(getattr(tv, "videos", None)),
             "genres": [g.name for g in (tv.genres or [])],
             "cast": cast,
             "runtime": str(runtime),
@@ -1348,6 +1368,7 @@ async def fetch_selected_tv_metadata(selected_id: str) -> dict | None:
         "poster": images["poster"],
         "backdrop": images["backdrop"],
         "logo": images["logo"],
+        "trailer_youtube_id": "",
         "genres": imdb_tv.get("genre", []),
         "cast": imdb_tv.get("cast", []),
         "runtime": str(imdb_tv.get("runtime") or ""),
@@ -1446,6 +1467,7 @@ async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, d
                 "poster": "",
                 "backdrop": "",
                 "logo": "",
+            "trailer_youtube_id": "",
                 "cast": [],
                 "runtime": "",
                 "media_type": "movie",
@@ -1475,6 +1497,7 @@ async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, d
             "poster": format_tmdb_image(movie.poster_path),
             "backdrop": format_tmdb_image(movie.backdrop_path, "original"),
             "logo": get_tmdb_logo(getattr(movie, "images", None)),
+            "trailer_youtube_id": _pick_trailer(getattr(movie, "videos", None)),
             "cast": cast_names,
             "runtime": str(runtime),
             "media_type": "movie",
@@ -1499,6 +1522,7 @@ async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, d
         "poster": images["poster"],
         "backdrop": images["backdrop"],
         "logo": images["logo"],
+        "trailer_youtube_id": "",
         "cast": imdb.get("cast", []),
         "runtime": str(imdb.get("runtime") or ""),
         "media_type": "movie",

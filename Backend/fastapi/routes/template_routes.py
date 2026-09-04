@@ -304,6 +304,20 @@ async def public_request_page(request: Request):
     })
 
 
+async def wrapped_page(request: Request, token: str):
+    theme_name = request.session.get("theme", DEFAULT_THEME)
+    theme = get_theme(theme_name)
+    return templates.TemplateResponse("wrapped.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "current_user": get_current_user(request) if is_authenticated(request) else None,
+        "is_authenticated": is_authenticated(request),
+        "token": token,
+    })
+
+
 async def policy_page(request: Request, policy: str):
     theme_name = request.session.get("theme", DEFAULT_THEME)
     theme = get_theme(theme_name)

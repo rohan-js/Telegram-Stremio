@@ -127,6 +127,27 @@ def display_title(item: dict) -> str:
 MAINTENANCE_VIDEO_URL = "https://bit.ly/3YZFKT5"
 
 
+async def _backfill_trailer(media: dict) -> None:
+    """One-time background fetch of a title's YouTube trailer key via TMDb;
+    stored so every later view serves it from Mongo. All failures swallowed."""
+    try:
+        if not Telegram.TMDB_API:
+            return
+        from Backend.helper.metadata import _pick_trailer, tmdb
+
+        media_type = media.get("media_type")
+        tmdb_id = int(media.get("tmdb_id"))
+        if media_type == "tv":
+            videos = await tmdb.tv(tmdb_id).videos()
+        else:
+            videos = await tmdb.movie(tmdb_id).videos()
+        key = _pick_trailer(videos)
+        if key:
+            await db.update_document(media_type, tmdb_id, media.get("db_index"), {"trailer_youtube_id": key})
+    except Exception as e:
+        LOGGER.debug(f"Trailer backfill failed for {media.get('imdb_id')}: {e}")
+
+
 def _maintenance_block(token_data: dict) -> bool:
     """Maintenance mode hides the addon from everyone except admin/owner
     tokens, so the operator can work (re-index, dead-link runs) without
@@ -979,6 +1000,13 @@ async def get_meta(token: str, media_type: str, id: str, response: Response, tok
             "staleRevalidate": 0,
             "staleError": 0,
         }
+    # Lazy trailer backfill: older titles predate the field — fetch once,
+    # in the background, then serve from Mongo on every later view.
+    if not media.get("trailer_youtube_id") and media.get("tmdb_id") and media.get("db_index") is not None:
+        try:
+            asyncio.create_task(_backfill_trailer(media))
+        except Exception:
+            pass
     if not _media_visible_to_token(media, token_data, allow_searchable_exclusive=True):
         return {
             "meta": {},
@@ -1004,6 +1032,9 @@ async def get_meta(token: str, media_type: str, id: str, response: Response, tok
         "cast": media.get("cast") or [],
         "runtime": media.get("runtime") or "",
     }
+    trailer_key = (media.get("trailer_youtube_id") or "").strip()
+    if trailer_key:
+        meta_obj["trailers"] = [{"source": trailer_key, "type": "Trailer"}]
     await _apply_fanart(meta_obj, media)
 
     if media.get("media_type") == "movie":

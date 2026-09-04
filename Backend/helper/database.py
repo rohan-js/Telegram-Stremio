@@ -139,6 +139,7 @@ class Database:
             "rating",
             "description",
             "poster",
+            "trailer_youtube_id",
             "backdrop",
             "logo",
             "genres",
@@ -1361,6 +1362,7 @@ class Database:
                 poster=metadata_info['poster'],
                 backdrop=metadata_info['backdrop'],
                 logo=metadata_info['logo'],
+                trailer_youtube_id=metadata_info.get('trailer_youtube_id') or None,
                 cast=metadata_info['cast'],
                 runtime=metadata_info['runtime'],
                 media_type=metadata_info['media_type'],
@@ -1404,6 +1406,7 @@ class Database:
                 poster=metadata_info['poster'],
                 backdrop=metadata_info['backdrop'],
                 logo=metadata_info['logo'],
+                trailer_youtube_id=metadata_info.get('trailer_youtube_id') or None,
                 cast=metadata_info['cast'],
                 runtime=metadata_info['runtime'],
                 media_type=metadata_info['media_type'],
@@ -3622,6 +3625,88 @@ class Database:
                         if group:
                             groups.append(group)
         return groups[:limit]
+
+    async def get_wrapped_stats(self, token: str) -> Optional[dict]:
+        """Family Wrapped numbers for one token: live current-month aggregates
+        merged with persisted monthly rollups (raw rows expire after 30d)."""
+        tracking = self.dbs.get("tracking")
+        if tracking is None or not token:
+            return None
+
+        now = datetime.utcnow()
+        year = now.year
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        #----- Live: current month from raw analytics
+        live = await tracking["stream_analytics"].aggregate([
+            {"$match": {"token": token, "logged_at": {"$gte": month_start}}},
+            {"$group": {
+                "_id": None,
+                "plays": {"$sum": 1},
+                "bytes": {"$sum": "$total_bytes"},
+                "seconds": {"$sum": "$duration_sec"},
+                "titles": {"$addToSet": "$title"},
+            }},
+        ]).to_list(None)
+        live = live[0] if live else {}
+        top_titles = await tracking["stream_analytics"].aggregate([
+            {"$match": {"token": token, "logged_at": {"$gte": month_start}, "title": {"$exists": True, "$ne": None}}},
+            {"$group": {"_id": "$title", "plays": {"$sum": 1}}},
+            {"$sort": {"plays": -1}},
+            {"$limit": 5},
+        ]).to_list(None)
+
+        #----- Persisted: closed months of this year from wrapped_monthly
+        prefix = f"{year}-"
+        rollups = await tracking["wrapped_monthly"].find(
+            {"token": token, "month": {"$regex": f"^{prefix}"}}
+        ).to_list(None)
+
+        months_by_label = {r.get("month"): r for r in rollups if r.get("month")}
+        months_by_label[now.strftime("%Y-%m")] = {  # live month overrides rollup
+            "month": now.strftime("%Y-%m"),
+            "plays": int(live.get("plays") or 0),
+            "total_bytes": int(live.get("bytes") or 0),
+            "seconds": float(live.get("seconds") or 0),
+            "titles": list(live.get("titles") or []),
+        }
+
+        months = []
+        total_plays = total_bytes = 0.0
+        total_seconds = 0.0
+        all_titles = set()
+        for label in sorted(months_by_label):
+            m = months_by_label[label]
+            plays = int(m.get("plays") or 0)
+            mbytes = int(m.get("total_bytes") or 0)
+            seconds = float(m.get("seconds") or 0)
+            months.append({"month": label, "plays": plays,
+                           "hours": round(seconds / 3600, 1),
+                           "gb": round(mbytes / 1024 ** 3, 2)})
+            total_plays += plays
+            total_bytes += mbytes
+            total_seconds += seconds
+            for t in (m.get("titles") or []):
+                if t:
+                    all_titles.add(t)
+
+        activity = await tracking["user_activity"].find_one({"_id": token}) or {}
+
+        return {
+            "token": token,
+            "name": activity.get("name") or "Viewer",
+            "year": year,
+            "total_plays": total_plays,
+            "hours": round(total_seconds / 3600, 1),
+            "gb": round(total_bytes / 1024 ** 3, 2),
+            "distinct_titles": len(all_titles),
+            "top_titles": [{"title": r["_id"], "plays": r["plays"]} for r in top_titles if r.get("_id")],
+            "months": months,
+            "favorite_app": activity.get("app") or "",
+            "favorite_device": activity.get("device") or "",
+            "lifetime_streams": int(activity.get("streams") or 0),
+            "generated_at": now.isoformat(),
+        }
 
 
 def _next_episode_quality_from_doc(tv_doc: dict, full_chat_id: int, msg_id: int) -> Optional[tuple]:

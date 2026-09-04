@@ -363,6 +363,18 @@ async def restart_app_api():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def get_wrapped_api(token: str):
+    from Backend.fastapi.security.tokens import get_cached_api_token
+
+    token_data = await get_cached_api_token(token)
+    if not token_data:
+        raise HTTPException(status_code=404, detail="Unknown token")
+    stats = await db.get_wrapped_stats(token)
+    if not stats:
+        raise HTTPException(status_code=404, detail="No data")
+    return JSONResponse(stats)
+
+
 async def get_admin_logs_api(max_bytes: int = 200_000) -> dict:
     return read_recent_logs(max_bytes=max_bytes)
 
