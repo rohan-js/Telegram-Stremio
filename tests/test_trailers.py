@@ -84,10 +84,9 @@ class MetaTrailerTests(unittest.IsolatedAsyncioTestCase):
             result = await stremio_routes.get_meta(
                 "tok", "movie", "tt0084602", Response(), token_data={},
             )
-        self.assertEqual(
-            result["meta"].get("trailers"),
-            [{"source": "ytKEY123", "type": "Trailer"}],
-        )
+        trailers = result["meta"].get("trailers")
+        self.assertIn({"source": "ytKEY123", "type": "Trailer"}, trailers)
+        self.assertIn({"title": "Official Trailer", "ytId": "ytKEY123"}, trailers)
 
     async def test_meta_omits_trailers_when_missing(self):
         with (

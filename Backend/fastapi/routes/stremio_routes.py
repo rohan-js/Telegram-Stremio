@@ -1034,7 +1034,12 @@ async def get_meta(token: str, media_type: str, id: str, response: Response, tok
     }
     trailer_key = (media.get("trailer_youtube_id") or "").strip()
     if trailer_key:
-        meta_obj["trailers"] = [{"source": trailer_key, "type": "Trailer"}]
+        # Legacy {source, type} shape + new Stream-Object shape (ytId plays
+        # in the built-in player) — clients render whichever they support.
+        meta_obj["trailers"] = [
+            {"source": trailer_key, "type": "Trailer"},
+            {"title": "Official Trailer", "ytId": trailer_key},
+        ]
     await _apply_fanart(meta_obj, media)
 
     if media.get("media_type") == "movie":
