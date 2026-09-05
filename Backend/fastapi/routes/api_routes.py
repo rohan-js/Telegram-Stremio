@@ -1256,6 +1256,12 @@ async def delete_media_api(
         media_type_formatted = "Movie" if media_type == "movie" else "Series"
         result = await db.delete_document(media_type_formatted, tmdb_id, db_index)
         if result:
+            # remove the announcement channel post for this title, if any
+            try:
+                from Backend.helper.announcer import delete_announcement_async
+                delete_announcement_async(media_type, tmdb_id)
+            except Exception:
+                pass
             return {"message": "Media deleted successfully"}
         else:
             raise HTTPException(status_code=404, detail="Media not found")
@@ -1311,6 +1317,9 @@ async def update_media_api(
                 except (ValueError, TypeError):
                     pass
         update_data = {k: v for k, v in update_data.items() if v != ""}
+        if "title" in update_data:
+            # search and display both key on title_english — keep it in sync
+            update_data["title_english"] = update_data["title"]
         result = await db.update_document(media_type, tmdb_id, db_index, update_data)
         if result:
             return {"message": "Media updated successfully"}

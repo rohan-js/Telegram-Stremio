@@ -90,6 +90,15 @@ class Database:
             except Exception as e:
                 LOGGER.error(f"Failed creating tracking catalog indexes: {e}")
 
+            # Subtitle lookups: ingest upsert keyed (chat_id, msg_id);
+            # serving queries by (imdb_id, season, episode).
+            try:
+                subs = tracking["subtitles"]
+                await subs.create_index([("chat_id", ASCENDING), ("msg_id", ASCENDING)], unique=True)
+                await subs.create_index([("imdb_id", ASCENDING), ("season", ASCENDING), ("episode", ASCENDING)])
+            except Exception as e:
+                LOGGER.error(f"Failed creating subtitle indexes: {e}")
+
             # TTL: stream analytics must not grow forever on the Atlas free
             # tier — STREAM_LOG_RETENTION_DAYS was advisory-only until now.
             try:
@@ -2602,6 +2611,28 @@ class Database:
                         return True
         return False
 
+    async def find_media_ref_by_origin(self, origin_chat_id: int, origin_msg_id: int) -> Optional[dict]:
+        """Lightweight (media_type, tmdb_id) lookup for a telegram-origin file,
+        used to clean up announcement posts when a message is deleted."""
+        for i in range(1, self.current_db_index + 1):
+            db = self.dbs.get(f"storage_{i}")
+            if db is None:
+                continue
+            movie = await db["movie"].find_one(
+                {"telegram.origin_chat_id": origin_chat_id, "telegram.origin_msg_id": origin_msg_id},
+                {"tmdb_id": 1},
+            )
+            if movie:
+                return {"media_type": "movie", "tmdb_id": movie.get("tmdb_id")}
+            tv = await db["tv"].find_one(
+                {"seasons.episodes.telegram.origin_chat_id": origin_chat_id,
+                 "seasons.episodes.telegram.origin_msg_id": origin_msg_id},
+                {"tmdb_id": 1},
+            )
+            if tv:
+                return {"media_type": "tv", "tmdb_id": tv.get("tmdb_id")}
+        return None
+
     async def delete_media_by_origin(self, origin_chat_id: int, origin_msg_id: int) -> bool:
         """Remove every quality entry created from a source Telegram post."""
         changed = False
@@ -2869,6 +2900,12 @@ class Database:
 
     async def revoke_api_token(self, token: str) -> bool:
         result = await self.dbs["tracking"]["api_tokens"].delete_one({"token": token})
+        if result.deleted_count > 0:
+            # cascade: revoked tokens must not linger as ghost activity rows
+            try:
+                await self.dbs["tracking"]["user_activity"].delete_one({"_id": token})
+            except Exception:
+                pass
         return result.deleted_count > 0
 
     @staticmethod

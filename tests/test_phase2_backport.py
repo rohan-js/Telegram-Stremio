@@ -119,7 +119,9 @@ class GlobalSearchPartTests(unittest.TestCase):
         self.assertEqual(global_search._resolve_channel_ids(["123", "-100456", "789"]), [-100123, -100456, -100789])
 
     def test_title_score_measures_token_overlap(self):
-        self.assertEqual(global_search._title_score("Movie One 2024", "movie one"), 1.0)
+        # F1 scoring: the extra "2024" token lowers the score below 1.0
+        # but stays above the 0.7 threshold (harmless release-tag).
+        self.assertAlmostEqual(global_search._title_score("Movie One 2024", "movie one"), 0.8)
         self.assertEqual(global_search._title_score("Unrelated", "movie one"), 0.0)
 
 

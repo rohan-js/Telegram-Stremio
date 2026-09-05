@@ -239,6 +239,20 @@ async def _process_ingest_job(job: dict) -> None:
         if match_details:
             job["match_details"] = match_details
         await _finalize_failed_status_or_reply(job, reason)
+        if job.get("source_type") == "telegram" and job.get("channel") and job.get("msg_id"):
+            try:
+                from Backend.pyrofork.bot import StreamBot as _skip_client
+                skip_task = None
+                try:
+                    msg_ref = await _skip_client.get_messages(int(job["channel"]), int(job["msg_id"]))
+                    if msg_ref:
+                        skip_task = asyncio.create_task(route_to_skip_channel(_skip_client, msg_ref))
+                except Exception as skip_err:
+                    LOGGER.debug(f"Skip-channel route skipped: {skip_err}")
+                if skip_task:
+                    skip_task.add_done_callback(lambda t: t.exception() and LOGGER.debug(f"Skip route failed: {t.exception()}"))
+            except Exception:
+                pass
         LOGGER.warning(f"Metadata failed for queued {job.get('source_type')} item: {title} (ID: {job.get('msg_id')})")
         return
 
@@ -915,6 +929,8 @@ async def _handle_torrent_message(client: Client, message: Message) -> bool:
 
 @Client.on_message(filters.channel & (filters.document | filters.video | filters.text))
 async def file_receive_handler(client: Client, message: Message):
+    if is_skip_channel(message):
+        return
     is_manual = _manual_channel(message.chat.id)
     if str(message.chat.id) in Telegram.AUTH_CHANNEL or is_manual:
         try:
@@ -1086,12 +1102,19 @@ async def file_deleted_handler(client: Client, messages: list[Message]):
                 msg_id = message.id
                 try:
                     stream_id_hash = await encode_string({"chat_id": int(channel), "msg_id": msg_id})
+                    media_ref = await db.find_media_ref_by_origin(int(message.chat.id), int(msg_id))
                     deleted = await db.delete_media_by_origin(int(message.chat.id), int(msg_id))
                     if not deleted:
                         deleted = await db.delete_media_by_stream_id(stream_id_hash)
                     sub_deleted = await remove_subtitle(int(message.chat.id), int(msg_id))
                     if deleted:
                         LOGGER.info(f"Automatically purged deleted message {msg_id} from database.")
+                        if media_ref and media_ref.get("tmdb_id"):
+                            try:
+                                from Backend.helper.announcer import delete_announcement_async
+                                delete_announcement_async(media_ref["media_type"], media_ref["tmdb_id"])
+                            except Exception:
+                                pass
                     if sub_deleted:
                         LOGGER.info(f"Automatically purged deleted subtitle {msg_id} from database.")
                 except Exception as ex:

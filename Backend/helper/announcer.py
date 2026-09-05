@@ -81,15 +81,24 @@ async def _announce(info: dict) -> None:
         markup = InlineKeyboardMarkup(rows)
     poster = info.get("backdrop") or info.get("poster")
     try:
+        sent = None
         if poster:
             try:
-                await StreamBot.send_photo(chat, poster, caption=_caption(info), parse_mode=ParseMode.HTML, reply_markup=markup)
-                return
+                sent = await StreamBot.send_photo(chat, poster, caption=_caption(info), parse_mode=ParseMode.HTML, reply_markup=markup)
             except FloodWait:
                 raise
             except Exception:
-                pass
-        await StreamBot.send_message(chat, _caption(info), parse_mode=ParseMode.HTML, reply_markup=markup, disable_web_page_preview=True)
+                sent = None
+        if sent is None:
+            sent = await StreamBot.send_message(chat, _caption(info), parse_mode=ParseMode.HTML, reply_markup=markup, disable_web_page_preview=True)
+        # remember where the announcement lives so media removal can delete it
+        try:
+            await db.dbs["tracking"]["announced"].update_one(
+                {"_id": f"{info.get('media_type')}:{info.get('tmdb_id')}"},
+                {"$set": {"chat_id": chat, "message_id": sent.id}},
+            )
+        except Exception:
+            pass
     except FloodWait as exc:
         LOGGER.warning("Announcement FloodWait for %ss", exc.value)
     except Exception as exc:
@@ -103,3 +112,35 @@ def announce_new_media(info: dict) -> None:
         create_task(_announce(dict(info or {})))
     except RuntimeError:
         LOGGER.debug("Announcement skipped: no running event loop")
+
+
+#----- Delete the announcement post when the media leaves the library
+async def delete_announcement(media_type: str, tmdb_id) -> None:
+    if not tmdb_id:
+        return
+    key = f"{media_type}:{tmdb_id}"
+    try:
+        doc = await db.dbs["tracking"]["announced"].find_one_and_delete({"_id": key})
+    except Exception as e:
+        LOGGER.warning(f"Failed to look up announcement for {key}: {e}")
+        return
+    if not doc:
+        return
+    chat_id = doc.get("chat_id")
+    message_id = doc.get("message_id")
+    if not chat_id or not message_id:
+        return
+    try:
+        await StreamBot.delete_messages(chat_id, message_id)
+        LOGGER.info(f"Deleted announcement message {message_id} for {key}")
+    except FloodWait as e:
+        LOGGER.warning(f"FloodWait deleting announcement for {key}: {e.value}s")
+    except Exception as e:
+        LOGGER.warning(f"Could not delete announcement for {key}: {e}")
+
+
+def delete_announcement_async(media_type: str, tmdb_id) -> None:
+    try:
+        create_task(delete_announcement(media_type, tmdb_id))
+    except RuntimeError:
+        LOGGER.debug("Announcement delete skipped: no running event loop")

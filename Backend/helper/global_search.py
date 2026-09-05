@@ -27,7 +27,7 @@ MAX_RESULTS = 50
 MAX_RESULTS_PER_CHAT = 50
 SEARCH_COOLDOWN_SECONDS = 5
 MAX_CONCURRENT_SEARCHES = 3
-MIN_TITLE_SCORE = 0.6
+MIN_TITLE_SCORE = 0.7
 
 _last_search_ts: Dict[str, float] = {}
 _inflight_queries: set = set()
@@ -58,8 +58,18 @@ def _tokens(value: str) -> set:
 
 
 def _title_score(result_title: str, expected_title: str) -> float:
+    # F1 (precision x recall harmonic mean): penalizes results stuffed with
+    # extra junk tokens, not just measures expected-token coverage.
     expected = _tokens(expected_title)
-    return len(expected & _tokens(result_title)) / len(expected) if expected else 0.0
+    result = _tokens(result_title)
+    if not expected or not result:
+        return 0.0
+    common = len(expected & result)
+    if common == 0:
+        return 0.0
+    precision = common / len(result)
+    recall = common / len(expected)
+    return (2 * precision * recall) / (precision + recall)
 
 
 def _matches_episode(parsed: dict, season: Optional[int], episode: Optional[int]) -> bool:

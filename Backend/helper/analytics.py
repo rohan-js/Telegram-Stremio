@@ -244,6 +244,22 @@ async def get_activity_overview(page: int = 1, per_page: int = 12) -> dict:
     coll = db.dbs["tracking"]["user_activity"]
     stream_coll = db.dbs["tracking"]["stream_analytics"]
 
+    #----- Valid tokens only: revoked/pruned tokens must not linger as ghost
+    #----- activity rows (orphan cleanup ported from upstream v5.0.2).
+    valid_tokens = set()
+    try:
+        async for doc in db.dbs["tracking"]["api_tokens"].find({}, {"token": 1}):
+            tok = doc.get("token")
+            if tok:
+                valid_tokens.add(tok)
+    except Exception:
+        valid_tokens = set()
+    if valid_tokens:
+        try:
+            await coll.delete_many({"_id": {"$nin": list(valid_tokens)}})
+        except Exception:
+            pass
+
     #----- Real-time: a token is "playing" only while its stream entry is
     #----- actively delivering bytes (entry["last_ts"] refreshes per chunk).
     playing = {}
@@ -254,15 +270,18 @@ async def get_activity_overview(page: int = 1, per_page: int = 12) -> dict:
         tok = meta.get("token")
         if not tok:
             continue
+        if valid_tokens and tok not in valid_tokens:
+            continue
         playing[tok] = meta.get("title") or "Streaming"
         last_ts = info.get("last_ts") or info.get("start_ts") or now_ts
         if now_ts - last_ts <= ONLINE_PLAY_WINDOW:
             playing_fresh_tokens.add(tok)
             playing_fresh += 1
 
+    base_match = {"_id": {"$in": list(valid_tokens)}} if valid_tokens else {}
     try:
-        total = await coll.count_documents({})
-        online_count = await coll.count_documents({"last_play_active": {"$gte": cutoff}})
+        total = await coll.count_documents(base_match)
+        online_count = await coll.count_documents({**base_match, "last_play_active": {"$gte": cutoff}})
     except Exception:
         total, online_count = 0, 0
     online_count = max(online_count, playing_fresh)
@@ -285,11 +304,12 @@ async def get_activity_overview(page: int = 1, per_page: int = 12) -> dict:
     per_page = max(1, min(int(per_page or 12), 60))
     online_tokens = list(playing_fresh_tokens)
     try:
-        query = (
+        live_clause = (
             {"$or": [{"last_play_active": {"$gte": cutoff}}, {"_id": {"$in": online_tokens}}]}
             if online_tokens
             else {"last_play_active": {"$gte": cutoff}}
         )
+        query = {"$and": [live_clause, base_match]} if base_match else live_clause
         docs = await coll.find(query).sort("last_active", -1).limit(100).to_list(100)
     except Exception:
         docs = []
