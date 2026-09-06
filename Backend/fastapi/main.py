@@ -118,8 +118,8 @@ async def logout_route(request: Request):
     return await logout(request)
 
 @app.post("/set-theme")
-async def set_theme_route(request: Request, theme: str = Form(...)):
-    return await set_theme(request, theme)
+async def set_theme_route(request: Request, theme: str = Form(None), style: str = Form(None)):
+    return await set_theme(request, theme, style)
 
 @app.get("/status", response_class=HTMLResponse)
 async def public_status(request: Request):

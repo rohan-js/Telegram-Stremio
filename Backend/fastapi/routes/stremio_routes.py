@@ -756,7 +756,7 @@ async def configure_addon(request: Request, token: str):
         "status_kind": status_kind,
         "status_text": status_text,
         "token": token,
-        "theme": get_theme(request.session.get("theme", DEFAULT_THEME)),
+        "theme": get_theme(request.session.get("theme", DEFAULT_THEME), request.session.get("style", DEFAULT_STYLE)),
         "themes": get_all_themes(),
         "current_theme": request.session.get("theme", DEFAULT_THEME),
     })

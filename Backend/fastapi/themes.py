@@ -1,4 +1,11 @@
 DEFAULT_THEME = "graphite_amber"
+DEFAULT_STYLE = "default"
+
+STYLES = {
+    "default": {"name": "Default"},
+    "glassy": {"name": "Glassy"},
+    "neo_brutal": {"name": "Neo Brutalism"},
+}
 
 THEMES = {
     "graphite_amber": {
@@ -199,10 +206,19 @@ THEMES = {
 }
 
 #----- Resolve a theme by name, falling back to the default
-def get_theme(theme_name: str = DEFAULT_THEME):
-    return THEMES.get(theme_name, THEMES[DEFAULT_THEME])
+def get_theme(theme_name: str = DEFAULT_THEME, style_name: str = DEFAULT_STYLE):
+    # shallow copy so per-user style injection never mutates the registry
+    base = dict(THEMES.get(theme_name, THEMES[DEFAULT_THEME]))
+    style = style_name if style_name in STYLES else DEFAULT_STYLE
+    base["style"] = style
+    return base
 
 
 #----- Return the full theme registry
 def get_all_themes():
     return THEMES
+
+
+#----- Return the full style registry (default / glassy / neo_brutal)
+def get_all_styles():
+    return STYLES
