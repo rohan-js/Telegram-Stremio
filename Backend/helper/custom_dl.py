@@ -382,7 +382,21 @@ def record_route_failure(
 ) -> None:
     client_index = int(client_index)
     target_dc = int(target_dc or 0)
-    client_failures[client_index] = client_failures.get(client_index, 0) + 1
+    now_ts = time.time()
+    try:
+        decay_sec = max(0, int(getattr(Telegram, "SMART_ROUTING_FAILURE_DECAY_SEC", 1800)))
+    except Exception:
+        decay_sec = 1800
+    try:
+        prev_ts = float((client_last_errors.get(client_index) or {}).get("ts", 0) or 0)
+    except Exception:
+        prev_ts = 0.0
+    if decay_sec > 0 and prev_ts > 0 and (now_ts - prev_ts) > decay_sec:
+        # Stale incident: previous failure predates the decay window, so this
+        # is a fresh incident, not a continuation of the old one.
+        client_failures[client_index] = 1
+    else:
+        client_failures[client_index] = client_failures.get(client_index, 0) + 1
     client_last_errors[client_index] = {
         "reason": str(reason)[:240],
         "target_dc": target_dc,
@@ -437,6 +451,53 @@ def smart_client_score(client_index: int, target_dc: int):
         -global_speed,
         client_index,
     )
+
+
+def maybe_send_stream_slo_alerts(entry: Dict[str, Any]) -> None:
+    """Owner DM on stream SLO breaches (hedge-storm, buffering, slow TTFB).
+
+    Pure visibility: the LOGGER warnings above already exist, but hedges that
+    rescue chunks never trip buffering counters, so a jittering route (e.g.
+    2026-09-20: 15 hedge rescues, zero buffering_events) would otherwise stay
+    silent. Per-DC keys + STREAM_SLO_ALERT_COOLDOWN_SEC bound DM volume.
+    """
+    try:
+        meta = entry.get("meta", {}) or {}
+        dc_id = entry.get("dc_id")
+        client_index = entry.get("client_index")
+        title = entry.get("title") or meta.get("title") or "?"
+        stream_id = entry.get("stream_id")
+        cooldown_sec = max(60, int(getattr(Telegram, "STREAM_SLO_ALERT_COOLDOWN_SEC", 3600) or 3600))
+        from Backend.helper.owner_alerts import schedule_owner_alert
+
+        hedges = int(entry.get("hedge_rescues", 0) or 0)
+        hedge_warn = max(0, int(getattr(Telegram, "STREAM_SLO_HEDGE_WARN_COUNT", 5) or 5))
+        if hedge_warn > 0 and hedges >= hedge_warn:
+            schedule_owner_alert(
+                f"🟡 Hedge-storm: {hedges} rescues stream={stream_id} client={client_index} dc={dc_id} title={str(title)[:60]}",
+                key=f"slo-hedge:dc{dc_id}",
+                cooldown_sec=cooldown_sec,
+            )
+
+        buffering_rate = float(entry.get("buffering_rate", 0.0) or 0.0)
+        buffering_warn_rate = float(getattr(Telegram, "STREAM_SLO_BUFFERING_WARN_RATE", 0.05) or 0.05)
+        if buffering_warn_rate > 0 and buffering_rate >= buffering_warn_rate:
+            schedule_owner_alert(
+                f"🟡 Stream buffering: rate={buffering_rate:.3f} stream={stream_id} client={client_index} dc={dc_id} title={str(title)[:60]}",
+                key=f"slo-buffering:dc{dc_id}",
+                cooldown_sec=cooldown_sec,
+            )
+
+        ttfb = entry.get("ttfb_sec")
+        ttfb_warn = float(getattr(Telegram, "STREAM_SLO_TTFB_WARN_SEC", 3.0) or 3.0)
+        if isinstance(ttfb, (int, float)) and ttfb_warn > 0 and float(ttfb) > ttfb_warn:
+            schedule_owner_alert(
+                f"🟡 Slow stream open: TTFB={float(ttfb):.2f}s stream={stream_id} client={client_index} dc={dc_id} title={str(title)[:60]}",
+                key=f"slo-ttfb:dc{dc_id}",
+                cooldown_sec=cooldown_sec,
+            )
+    except Exception:
+        pass
 
 
 def get_adaptive_chunk_size(client_index: int) -> int:
@@ -1690,6 +1751,11 @@ class ByteStreamer:
                                 entry.get("client_index"),
                                 entry.get("dc_id"),
                             )
+                    except Exception:
+                        pass
+
+                    try:
+                        maybe_send_stream_slo_alerts(entry)
                     except Exception:
                         pass
 

@@ -421,6 +421,20 @@ def select_best_client(target_dc: int) -> int:
     return 0
 
 
+def rank_pool_extras(candidates, target_dc: int) -> list:
+    """Order chunk-pool extras by live route score (DC TTFB/speed, failures).
+
+    The pool previously sorted extras by raw work_loads only, so a client
+    with a slow/jittering route to the file's DC could feed chunks ahead of a
+    faster one (2026-09-20: worst-TTFB client in a DC4 pool). Scores already
+    blend cooldown, same-DC, failure load, and measured DC speed.
+    """
+    try:
+        return sorted(candidates, key=lambda idx: smart_client_score(idx, int(target_dc or 0)))
+    except Exception:
+        return list(candidates)
+
+
 def get_streamer(index: int) -> ByteStreamer:
     if index == USERBOT_CLIENT_INDEX:
         if Userbot is None:
@@ -1766,9 +1780,9 @@ async def media_streamer(
         # Build a multi-client chunk pool: other healthy helpers feed the same
         # file in parallel (round-robin by chunk), multiplying per-stream
         # throughput. Cooldowns are respected; failures are skipped.
-        other_indices = sorted(
-            (i for i in multi_clients if i != index and not is_client_cooled_down(i, target_dc or real_dc)),
-            key=lambda i: work_loads.get(i, 0),
+        other_indices = rank_pool_extras(
+            [i for i in multi_clients if i != index and not is_client_cooled_down(i, target_dc or real_dc)],
+            target_dc or real_dc,
         )
         want = parallelism - 1
 

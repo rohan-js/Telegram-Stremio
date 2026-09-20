@@ -111,12 +111,13 @@ class Telegram:
         SMART_ROUTING_PROBE_OVERLAP_SEC = 0.4
     try:
         # When a chunk fetch stalls beyond this delay, race a parallel fetch on
-        # another healthy helper bot to eliminate micro-freezes.
+        # another healthy helper bot to eliminate micro-freezes. 0.5s since
+        # the 2026-09-20 DC4 jitter incident (15 hedge rescues in one movie).
         SMART_ROUTING_HEDGE_ENABLED = getenv("SMART_ROUTING_HEDGE_ENABLED", "true").lower() == "true"
-        SMART_ROUTING_HEDGE_DELAY_SEC = float(getenv("SMART_ROUTING_HEDGE_DELAY_SEC", "0.8") or 0.8)
+        SMART_ROUTING_HEDGE_DELAY_SEC = float(getenv("SMART_ROUTING_HEDGE_DELAY_SEC", "0.5") or 0.5)
     except Exception:
         SMART_ROUTING_HEDGE_ENABLED = True
-        SMART_ROUTING_HEDGE_DELAY_SEC = 0.8
+        SMART_ROUTING_HEDGE_DELAY_SEC = 0.5
     try:
         # Pre-warm MTProto sessions to common Telegram DCs at boot and maintain
         # periodic keep-alive pings so cold opens take <1s instead of ~4.8s.
@@ -447,7 +448,7 @@ class Telegram:
     NGINX_ACCEL_REDIRECT_LOCATION = getenv("NGINX_ACCEL_REDIRECT_LOCATION", "/_cache/")
 
     # -------------------------------
-    # Streaming SLO warnings (logs only)
+    # Streaming SLO warnings (logs + owner DM alerts)
     # -------------------------------
     try:
         STREAM_SLO_TTFB_WARN_SEC = float(getenv("STREAM_SLO_TTFB_WARN_SEC", "3") or 3)
@@ -461,6 +462,17 @@ class Telegram:
         STREAM_SLO_BUFFERING_WARN_RATE = float(getenv("STREAM_SLO_BUFFERING_WARN_RATE", "0.05") or 0.05)
     except Exception:
         STREAM_SLO_BUFFERING_WARN_RATE = 0.05
+    try:
+        # Hedge-storm: this many hedge-race wins in one stream means the
+        # primary route is jittering (2026-09-20: 15 rescues, buf counters 0).
+        STREAM_SLO_HEDGE_WARN_COUNT = int(getenv("STREAM_SLO_HEDGE_WARN_COUNT", "5") or 5)
+    except Exception:
+        STREAM_SLO_HEDGE_WARN_COUNT = 5
+    try:
+        # Per-DC-key cooldown so one bad evening can't DM-spam the owner.
+        STREAM_SLO_ALERT_COOLDOWN_SEC = int(getenv("STREAM_SLO_ALERT_COOLDOWN_SEC", "3600") or 3600)
+    except Exception:
+        STREAM_SLO_ALERT_COOLDOWN_SEC = 3600
 
     # -------------------------------
     # Adaptive Telegram stream safety
@@ -491,6 +503,14 @@ class Telegram:
         SMART_ROUTING_COOLDOWN_SEC = int(getenv("SMART_ROUTING_COOLDOWN_SEC", "180") or 180)
     except Exception:
         SMART_ROUTING_COOLDOWN_SEC = 180
+    try:
+        # Failure counters reset to a fresh incident when a client's previous
+        # failure is older than this (seconds). Without decay the counter grows
+        # forever (seen: 247 on one client) and permanently skews routing
+        # scores long after the Telegram path recovers.
+        SMART_ROUTING_FAILURE_DECAY_SEC = int(getenv("SMART_ROUTING_FAILURE_DECAY_SEC", "1800") or 1800)
+    except Exception:
+        SMART_ROUTING_FAILURE_DECAY_SEC = 1800
 
     # -------------------------------
     # Torrent tracker scrape stats (optional, lightweight)
