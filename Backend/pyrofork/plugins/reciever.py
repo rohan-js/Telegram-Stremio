@@ -35,6 +35,12 @@ from Backend.helper.watch_links import (
     telegram_user_display_name,
     watch_callback_data,
 )
+from Backend.helper.youtube_links import (
+    extract_youtube_ids,
+    fetch_youtube_oembed,
+    strip_youtube_urls,
+    youtube_watch_url,
+)
 from Backend.logger import LOGGER
 from Backend.helper.disk_cache import PRECACHE_MANAGER, PrecacheJob
 from Backend.helper.announcer import announce_new_media
@@ -289,6 +295,26 @@ async def _process_ingest_job(job: dict) -> None:
             "torrent_file_msg_id": torrent.get("torrent_file_msg_id"),
         })
 
+    if job.get("source_type") == "youtube":
+        youtube = job.get("youtube") or {}
+        youtube_id = str(youtube.get("youtube_id") or "").strip()
+        encoded_string = await encode_string({
+            "source_type": "youtube",
+            "chat_id": int(job["channel"]),
+            "msg_id": int(job["msg_id"]),
+            "youtube_id": youtube_id,
+            "name": job.get("file_name") or title,
+        })
+        metadata_info.update({
+            "source_type": "youtube",
+            "encoded_string": encoded_string,
+            "youtube_id": youtube_id,
+            "filename": job.get("file_name") or title,
+            "video_size": None,
+            "origin_chat_id": int(job["chat_id"]),
+            "origin_msg_id": int(job["msg_id"]),
+        })
+
     await _set_status(job, "indexing stream")
     insert_status: dict = {}
     updated_id = await db.insert_media(
@@ -496,6 +522,9 @@ async def send_reply_messages():
             )
             if source_type == "torrent":
                 help_note = "🧲 Torrent stream. Playback speed depends on seeders/peers.\n\n"
+                stream_note = ""
+            elif source_type == "youtube":
+                help_note = "▶️ YouTube stream. Plays inside Stremio via YouTube (quality Auto + captions in the player).\n\n"
                 stream_note = ""
             else:
                 help_note = (
@@ -891,6 +920,81 @@ async def _queue_torrent_item(message: Message, item: TorrentItem, override_id: 
     return True
 
 
+def _youtube_title(video_id: str, text: str) -> str:
+    """Matcher title intent for a YouTube link: cleaned caption first,
+    YouTube oEmbed title as fallback."""
+    cleaned = remove_urls(strip_youtube_urls(text or "")).strip()
+    if cleaned:
+        return cleaned
+    try:
+        oembed = fetch_youtube_oembed(video_id)
+        if oembed and oembed.get("title"):
+            return str(oembed["title"])
+    except Exception as e:
+        LOGGER.debug(f"YouTube oEmbed lookup failed for {video_id}: {e}")
+    return f"YouTube {video_id}"
+
+
+async def _queue_youtube_item(message: Message, video_id: str, override_id: str | None) -> bool:
+    msg_id = message.id
+    raw_text = _message_text(message)
+    title = _youtube_title(video_id, raw_text)
+    if not title:
+        return False
+
+    display_title = remove_urls(title)
+    await _enqueue_ingest_job(message, {
+        "source_type": "youtube",
+        "source_key": f"youtube:{message.chat.id}:{msg_id}:{video_id}",
+        "item_key": f"youtube:{video_id}",
+        "channel": int(str(message.chat.id).replace("-100", "")),
+        "chat_id": int(message.chat.id),
+        "msg_id": msg_id,
+        "original_msg_id": message.id,
+        "title": title,
+        "file_name": display_title or title,
+        "display_name": display_title or title,
+        "size": "YouTube",
+        "override_id": override_id,
+        "message": message,
+        "youtube": {
+            "youtube_id": video_id,
+            "watch_url": youtube_watch_url(video_id),
+        },
+    })
+    return True
+
+
+async def _handle_youtube_message(client: Client, message: Message) -> bool:
+    del client
+    text = _message_text(message)
+    if not text:
+        return False
+    try:
+        video_ids = extract_youtube_ids(text)
+    except Exception as e:
+        LOGGER.debug(f"YouTube link scan failed for message {message.id}: {e}")
+        return False
+    if not video_ids:
+        return False
+
+    override_id = extract_default_id(text)
+    queued = 0
+    for video_id in video_ids:
+        try:
+            if await _queue_youtube_item(message, video_id, override_id):
+                queued += 1
+        except Exception as e:
+            LOGGER.warning(f"Failed to queue YouTube link {video_id} in message {message.id}: {e}")
+
+    if queued == 0:
+        LOGGER.warning(f"No supported YouTube links found in message {message.id}.")
+        return True
+
+    LOGGER.info(f"Queued {queued} YouTube stream(s) from message {message.id}.")
+    return True
+
+
 async def _handle_torrent_message(client: Client, message: Message) -> bool:
     text = _message_text(message)
     override_id = extract_default_id(text) if text else None
@@ -946,6 +1050,9 @@ async def file_receive_handler(client: Client, message: Message):
                 return
 
             if await _handle_torrent_message(client, message):
+                return
+
+            if await _handle_youtube_message(client, message):
                 return
 
             is_video_doc = _is_video_document(message)
@@ -1042,6 +1149,9 @@ async def file_edited_handler(client: Client, message: Message):
                 return
 
             if await _handle_torrent_message(client, message):
+                return
+
+            if await _handle_youtube_message(client, message):
                 return
 
             if message.video or _is_video_document(message):

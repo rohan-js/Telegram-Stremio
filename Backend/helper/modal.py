@@ -22,6 +22,7 @@ class QualityDetail(BaseModel):
     source_type: str = "telegram"
     info_hash: Optional[str] = None
     file_idx: Optional[int] = None
+    youtube_id: Optional[str] = None
     sources: Optional[List[str]] = None
     filename: Optional[str] = None
     video_size: Optional[int] = None

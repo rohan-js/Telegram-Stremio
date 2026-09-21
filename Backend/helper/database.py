@@ -1479,6 +1479,7 @@ class Database:
             source_type=metadata_info.get("source_type", "telegram"),
             info_hash=metadata_info.get("info_hash"),
             file_idx=metadata_info.get("file_idx"),
+            youtube_id=metadata_info.get("youtube_id"),
             sources=metadata_info.get("sources"),
             filename=metadata_info.get("filename") or name,
             video_size=metadata_info.get("video_size"),
@@ -1549,6 +1550,11 @@ class Database:
             info_hash = str(quality.get("info_hash") or "").lower()
             if info_hash:
                 return f"torrent:{info_hash}:{quality.get('file_idx')}"
+
+        if source_type == "youtube":
+            youtube_id = str(quality.get("youtube_id") or "").strip()
+            if youtube_id:
+                return f"youtube:{youtube_id}"
 
         if source_type == "local_vps":
             rel_path = str(quality.get("local_rel_path") or "").replace("\\", "/").lstrip("/")

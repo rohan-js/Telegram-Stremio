@@ -327,6 +327,41 @@ def build_torrent_stream(
     return stream
 
 
+def build_youtube_stream(
+    quality: dict,
+    stream_name: str,
+    stream_title: str,
+    binge_group: Optional[str] = None,
+) -> Optional[dict]:
+    """Client-side YouTube playback (Stremio's built-in player via ytId).
+
+    The VPS never fetches or proxies video bytes — same zero-bandwidth class
+    as native torrent streams. Quality/captions are handled by Stremio's
+    YouTube player (Auto default + manual picker + YouTube caption tracks);
+    embedding-disabled or age-restricted videos will not play (YouTube-side).
+    """
+    youtube_id = str(quality.get("youtube_id") or "").strip()
+    if not youtube_id:
+        return None
+
+    youtube_name = stream_name.replace("Telegram", "YouTube", 1)
+    title_parts = [stream_title]
+    title_parts.extend(["▶ YouTube stream", "Plays via YouTube. Quality Auto + captions in player."])
+    stream = {
+        "name": youtube_name,
+        "title": "\n".join(title_parts),
+        "ytId": youtube_id,
+    }
+
+    behavior_hints = {}
+    if binge_group:
+        behavior_hints["bingeGroup"] = binge_group
+    if behavior_hints:
+        stream["behaviorHints"] = behavior_hints
+
+    return stream
+
+
 async def build_downloaded_torrent_stream(
     token: str,
     quality: dict,
@@ -1367,6 +1402,13 @@ async def get_streams(
                 if downloaded_stream:
                     downloaded_stream["_recommended"] = bool(quality.get("recommended"))
                     streams.append(downloaded_stream)
+                continue
+
+            if source_type == "youtube":
+                youtube_stream = build_youtube_stream(quality, stream_name, stream_title, binge_group=episode_group)
+                if youtube_stream:
+                    youtube_stream["_recommended"] = bool(quality.get("recommended"))
+                    streams.append(youtube_stream)
                 continue
 
             if not quality.get("id"):

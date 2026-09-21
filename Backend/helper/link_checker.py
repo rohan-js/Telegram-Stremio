@@ -3,6 +3,13 @@ from datetime import datetime
 from Backend.logger import LOGGER
 from Backend.helper.encrypt import decode_string
 
+
+def is_liveness_checkable(quality: dict) -> bool:
+    """Only Telegram-hosted files can be liveness-checked via chat/message
+    resolution. Torrent/local_vps/youtube qualities use different identity
+    schemes (info_hash, local path, video ID) and must never be flagged."""
+    return (quality.get("source_type") or "telegram") == "telegram"
+
 class DeadLinkChecker:
     def __init__(self, db, app, check_interval_hours: int = 24):
         self.db = db
@@ -57,6 +64,11 @@ class DeadLinkChecker:
                 async for movie in movie_cursor:
                     tmdb_id = movie.get("tmdb_id")
                     for quality in movie.get("telegram", []):
+                        # Only Telegram-hosted files can be liveness-checked via
+                        # chat/message resolution (torrent/local_vps/youtube use
+                        # different identity schemes and must never be flagged).
+                        if not is_liveness_checkable(quality):
+                            continue
                         if not quality.get("is_dead"):
                             is_alive = await self._check_file_alive(client, quality.get("id"))
                             if not is_alive:
@@ -78,6 +90,8 @@ class DeadLinkChecker:
                     for season in tv.get("seasons", []):
                         for ep in season.get("episodes", []):
                             for quality in ep.get("telegram", []):
+                                if not is_liveness_checkable(quality):
+                                    continue
                                 if not quality.get("is_dead"):
                                     is_alive = await self._check_file_alive(client, quality.get("id"))
                                     if not is_alive:
