@@ -159,19 +159,21 @@ find_oci() {
 }
 
 do_reboot() {
+  # Prints the failure reason on stdout (caller alert-once's it) — never
+  # sends Telegram directly here, so a missing key can't DM-spam every cycle.
   if [ "${MODE}" = "dry-run" ]; then
     echo "[DRY_RUN] would run: oci compute instance action --instance-id <stremio-ocid> --action RESET"
     logw "dry_run reboot (not executed)"
     return 0
   fi
   if ! load_cfg; then
-    tg_send "🔴 stremio-watchdog: auto-reboot SKIPPED — ${CFG_FILE} missing INSTANCE_OCID. ${INSTANCE_NAME} still DOWN."
+    echo "config missing INSTANCE_OCID in ${CFG_FILE}"
     logw "error: no OCID configured, reboot skipped"
     return 1
   fi
   local oci_bin
   if ! oci_bin=$(find_oci); then
-    tg_send "🔴 stremio-watchdog: auto-reboot UNAVAILABLE (oci-cli not installed) — ${INSTANCE_NAME} still DOWN, needs manual Console."
+    echo "oci-cli not installed"
     logw "error: oci-cli missing"
     return 1
   fi
@@ -183,7 +185,7 @@ do_reboot() {
     echo "[auto-reboot issued]"
     return 0
   fi
-  tg_send "🔴 stremio-watchdog: auto-reboot FAILED (oci-cli error, see ${WATCHDOG_LOG}) — ${INSTANCE_NAME} still DOWN."
+  echo "oci-cli error (see ${WATCHDOG_LOG})"
   logw "error: oci RESET failed"
   return 1
 }
@@ -242,6 +244,7 @@ CYCLES_SINCE_ALERT=$(sget cycles_since_alert); [ -n "${CYCLES_SINCE_ALERT}" ] ||
 REBOOT_FIRED=$(sget reboot_fired); [ -n "${REBOOT_FIRED}" ] || REBOOT_FIRED=0
 LAST_REBOOT=$(sget last_reboot_epoch); [ -n "${LAST_REBOOT}" ] || LAST_REBOOT=0
 MANUAL_ALERTED=$(sget manual_alerted); [ -n "${MANUAL_ALERTED}" ] || MANUAL_ALERTED=0
+SKIP_ALERTED=$(sget skip_alerted); [ -n "${SKIP_ALERTED}" ] || SKIP_ALERTED=0
 INCIDENT=$(sget incident);    [ -n "${INCIDENT}" ] || INCIDENT=0
 
 if [ "${CYCLE_OK}" -eq 1 ]; then
@@ -253,12 +256,12 @@ if [ "${CYCLE_OK}" -eq 1 ]; then
     INCIDENT=$((INCIDENT + 1))
     save_state "status=UP" "fail_count=0" "cycles_since_alert=0" \
                "reboot_fired=0" "last_reboot_epoch=${LAST_REBOOT}" \
-               "manual_alerted=0" "incident=${INCIDENT}" "last_ok_epoch=$(now_epoch)"
+               "manual_alerted=0" "skip_alerted=0" "incident=${INCIDENT}" "last_ok_epoch=$(now_epoch)"
   else
     logw "status=ok login=${PROBE_LOGIN} root=${PROBE_ROOT}"
     save_state "status=UP" "fail_count=0" "cycles_since_alert=0" \
                "reboot_fired=0" "last_reboot_epoch=${LAST_REBOOT}" \
-               "manual_alerted=0" "incident=${INCIDENT}" "last_ok_epoch=$(now_epoch)"
+               "manual_alerted=0" "skip_alerted=0" "incident=${INCIDENT}" "last_ok_epoch=$(now_epoch)"
   fi
   exit 0
 fi
@@ -285,12 +288,19 @@ fi
 # Auto-reboot: 3rd consecutive failed cycle, once per incident, 30-min cooldown.
 if [ "${FAIL_COUNT}" -ge "${REBOOT_FAIL_COUNT}" ] && [ "${REBOOT_FIRED}" -eq 0 ]; then
   if [ $((NOW - LAST_REBOOT)) -ge "${REBOOT_COOLDOWN_SEC}" ]; then
-    if do_reboot; then
+    if REBOOT_OUT=$(do_reboot); then
       REBOOT_FIRED=1
       LAST_REBOOT="${NOW}"
       ACTION="reboot"
-      if [ "${MODE}" != "dry-run" ]; then
-        tg_send "🔁 stremio-watchdog: auto-reboot (RESET) issued for ${INSTANCE_NAME} at ${STAMP} — expecting recovery in ~2 min."
+      echo "${REBOOT_OUT}"     # dry-run action line / "[auto-reboot issued]"
+      tg_send "🔁 stremio-watchdog: auto-reboot (RESET) issued for ${INSTANCE_NAME} at ${STAMP} — expecting recovery in ~2 min."
+    else
+      # Reboot not possible (missing key/OCID/oci-cli): alert ONCE per
+      # incident, then only log — a long outage must not DM every 5 min.
+      if [ "${SKIP_ALERTED}" -eq 0 ]; then
+        tg_send "🚨 stremio-watchdog: ${INSTANCE_NAME} DOWN and auto-reboot NOT possible (${REBOOT_OUT}) — needs manual Console intervention."
+        SKIP_ALERTED=1
+        ACTION="manual_needed"
       fi
     fi
   else
@@ -309,7 +319,8 @@ fi
 save_state "status=${STATUS}" "fail_count=${FAIL_COUNT}" \
            "cycles_since_alert=${CYCLES_SINCE_ALERT}" \
            "reboot_fired=${REBOOT_FIRED}" "last_reboot_epoch=${LAST_REBOOT}" \
-           "manual_alerted=${MANUAL_ALERTED}" "incident=${INCIDENT}"
+           "manual_alerted=${MANUAL_ALERTED}" "skip_alerted=${SKIP_ALERTED}" \
+           "incident=${INCIDENT}"
 
 logw "status=fail fail_count=${FAIL_COUNT} down=$( [ "${STATUS}" = "DOWN" ] && echo 1 || echo 0 ) login=${PROBE_LOGIN} root=${PROBE_ROOT} action=${ACTION} mode=${MODE}"
 exit 1
