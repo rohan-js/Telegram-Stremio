@@ -193,7 +193,7 @@ do_reboot() {
   if "${oci_bin}" compute instance action \
       --instance-id "${INSTANCE_OCID}" \
       --action RESET \
-      --auth config_file 2>>"${WATCHDOG_LOG}"; then
+      --auth api_key 2>>"${WATCHDOG_LOG}"; then
     echo "[auto-reboot issued]"
     return 0
   fi
