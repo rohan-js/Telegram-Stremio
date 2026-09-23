@@ -473,6 +473,15 @@ class Telegram:
         STREAM_SLO_ALERT_COOLDOWN_SEC = int(getenv("STREAM_SLO_ALERT_COOLDOWN_SEC", "3600") or 3600)
     except Exception:
         STREAM_SLO_ALERT_COOLDOWN_SEC = 3600
+    # ----- Ops watch: memory/load thresholds (Sep-15 + Sep-23 freezes —
+    # ----- both were userland CPU starvation with zero warnings sent)
+    OPS_MEM_WARN_MB = int(getenv("OPS_MEM_WARN_MB", "200") or 200)
+    OPS_MEM_CRIT_MB = int(getenv("OPS_MEM_CRIT_MB", "120") or 120)
+    try:
+        OPS_LOAD_WARN = float(getenv("OPS_LOAD_WARN", "2.0") or 2.0)
+    except Exception:
+        OPS_LOAD_WARN = 2.0
+    OPS_WATCH_INTERVAL_MIN = int(getenv("OPS_WATCH_INTERVAL_MIN", "5") or 5)
 
     # -------------------------------
     # Adaptive Telegram stream safety

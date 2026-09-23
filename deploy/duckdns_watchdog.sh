@@ -19,6 +19,8 @@ fi
 STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 BASE_URL=$(grep -E "^BASE_URL=" "${CONFIG}" | cut -d= -f2- || true)
 ADDON_TOKEN=$(grep -E "^DEFAULT_ADDON_TOKEN=" "${CONFIG}" | cut -d= -f2- || true)
+OWNER_TG_ID=$(grep -E "^OWNER_ID=" "${CONFIG}" | cut -d= -f2- || true)
+BOT_TOKEN=$(grep -E "^BOT_TOKEN=" "${CONFIG}" | cut -d= -f2- || true)
 
 if [ -z "${BASE_URL}" ] || [ -z "${ADDON_TOKEN}" ]; then
   echo "${STAMP} status=error reason=missing_config_values" >> "${LOG_FILE}"
@@ -111,6 +113,35 @@ wait_for_local_ready() {
   return 1
 }
 
+# --- Owner Telegram alert (curl direct to api.telegram.org): works even
+# --- when the FastAPI app is dead, unlike in-app owner_alerts. Per-event
+# --- cooldown files keep a persistent problem chatty-but-not-spammy
+# --- (one message per event type per 30 min). Token never echoed/logged.
+ALERT_STATE_DIR="${ALERT_STATE_DIR:-/home/ubuntu/.duckdns_watchdog}"
+ALERT_COOLDOWN_SEC="${ALERT_COOLDOWN_SEC:-1800}"
+
+tg_alert() {
+  local key="$1"
+  local text="$2"
+  [ -n "${BOT_TOKEN:-}" ] && [ -n "${OWNER_TG_ID:-}" ] || return 0
+  mkdir -p "${ALERT_STATE_DIR}" 2>/dev/null || return 0
+  local now last=0
+  now=$(date -u +%s)
+  if [ -f "${ALERT_STATE_DIR}/last_alert_${key}" ]; then
+    last=$(cat "${ALERT_STATE_DIR}/last_alert_${key}" 2>/dev/null || echo 0)
+  fi
+  if [ $((now - last)) -lt "${ALERT_COOLDOWN_SEC}" ]; then
+    return 0
+  fi
+  if curl -fsS --max-time 10 -o /dev/null \
+      -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+      --data-urlencode "chat_id=${OWNER_TG_ID}" \
+      --data-urlencode "text=${text}" 2>/dev/null; then
+    echo "${now}" > "${ALERT_STATE_DIR}/last_alert_${key}"
+  fi
+  return 0
+}
+
 log_line() {
   local status="$1"
   shift || true
@@ -165,6 +196,7 @@ if [ "${DNS_OK}" -eq 1 ] && [ "${PUBLIC_OK}" -eq 1 ] && [ "${LOCAL_OK}" -eq 1 ] 
 fi
 
 log_line "degraded" "dns_ok=${DNS_OK} public_ok=${PUBLIC_OK} local_ok=${LOCAL_OK} container_ok=${CONTAINER_OK} mem_critical=${MEM_CRITICAL} disk_critical=${DISK_CRITICAL}"
+tg_alert "degraded" "🔴 tg-stremio watchdog: DEGRADED at ${STAMP} dns=${DNS_OK} public=${PUBLIC_OK} local=${LOCAL_OK} container=${CONTAINER_OK} mem_crit=${MEM_CRITICAL} disk_crit=${DISK_CRITICAL} streams=${ACTIVE_STREAMS}"
 
 if [ -x "${DUCKDNS_UPDATE}" ]; then
   "${DUCKDNS_UPDATE}" || true
@@ -184,17 +216,21 @@ fi
 if [ -n "${RESTART_REASON}" ]; then
   if [ "${ACTIVE_STREAMS}" -gt 0 ] 2>/dev/null && [ "${LOCAL_OK}" -eq 1 ]; then
     log_line "restart_skipped" "reason=${RESTART_REASON} active_streams=${ACTIVE_STREAMS}"
+    tg_alert "restart_skipped" "⏳ tg-stremio watchdog: restart SKIPPED (${RESTART_REASON}) — ${ACTIVE_STREAMS} active stream(s) at ${STAMP}"
   elif [ "${RESTART_REASON}" != "memory_critical" ] && [ "${CONTAINER_UPTIME_SEC}" -ge 0 ] 2>/dev/null && [ "${CONTAINER_UPTIME_SEC}" -lt "${STARTUP_GRACE_SECONDS}" ] 2>/dev/null; then
     log_line "restart_skipped" "reason=${RESTART_REASON} startup_grace=true uptime_sec=${CONTAINER_UPTIME_SEC} grace_sec=${STARTUP_GRACE_SECONDS}"
   elif docker inspect "${CONTAINER}" >/dev/null 2>&1; then
     log_line "restarting" "reason=${RESTART_REASON}"
+    tg_alert "restarting" "🔁 tg-stremio watchdog: restarting ${CONTAINER} (${RESTART_REASON}) at ${STAMP}"
     docker restart "${CONTAINER}" >/dev/null || true
   else
     if COMPOSE_CMD=$(compose_cmd); then
       log_line "recreating" "reason=${RESTART_REASON} compose=${COMPOSE_CMD// /_}"
+      tg_alert "restarting" "🔁 tg-stremio watchdog: recreating ${CONTAINER} (${RESTART_REASON}) at ${STAMP}"
       (cd "${APP_DIR}" && ${COMPOSE_CMD} up -d --no-build --remove-orphans) || true
     else
       log_line "recreate_failed" "reason=${RESTART_REASON} docker_compose_v2=missing"
+      tg_alert "recreate_failed" "🔴 tg-stremio watchdog: RECREATE FAILED (${RESTART_REASON}, docker compose v2 missing) at ${STAMP} — manual intervention needed"
     fi
   fi
 fi
@@ -203,8 +239,10 @@ wait_for_local_ready 120 || true
 
 if curl -fsS --max-time 15 -o /dev/null "${MANIFEST_URL}" && check_local_ready; then
   log_line "recovered"
+  tg_alert "recovered" "✅ tg-stremio watchdog: RECOVERED at ${STAMP}"
   exit 0
 fi
 
 log_line "still_degraded"
+tg_alert "still_degraded" "🔴 tg-stremio watchdog: STILL DEGRADED at ${STAMP} after recovery attempt (mem=${MEM_AVAIL_MB}MB root_used=${ROOT_USED_PCT}%)"
 exit 1

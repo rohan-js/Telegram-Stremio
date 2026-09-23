@@ -213,14 +213,67 @@ async def get_launch_readiness(db) -> dict:
 
 
 # -------------------------------
-# Ops watch loop — disk + TLS expiry owner alerts
+# Ops watch loop — disk + TLS + memory/load owner alerts
 # -------------------------------
 
-_OPS_DISK_INTERVAL_SEC = 30 * 60
 _OPS_TLS_INTERVAL_SEC = 6 * 60 * 60
 _OPS_DISK_MIN_FREE_GB = 10.0
 _OPS_DISK_MIN_FREE_PCT = 15.0
 _OPS_TLS_WARN_DAYS = 14
+
+
+def _ops_watch_interval_sec() -> int:
+    try:
+        minutes = int(getattr(Telegram, "OPS_WATCH_INTERVAL_MIN", 5) or 5)
+    except Exception:
+        minutes = 5
+    return max(1, minutes) * 60
+
+
+def _loadavg_1m() -> float | None:
+    """1-minute load average (None if /proc/loadavg uncheckable)."""
+    try:
+        with open("/proc/loadavg", "r", encoding="utf-8") as fh:
+            return float(fh.read().split()[0])
+    except Exception:
+        return None
+
+
+async def _check_load_memory() -> None:
+    """Freeze early-warning: memory starvation + CPU saturation alerts.
+
+    Sep-15 and Sep-23 instance freezes were userland CPU starvation with
+    zero warnings sent — this check fires while a deploy-free fix (shed
+    streams) is still possible.
+    """
+    from Backend.helper.owner_alerts import schedule_owner_alert
+
+    warn_mb = int(getattr(Telegram, "OPS_MEM_WARN_MB", 200) or 200)
+    crit_mb = int(getattr(Telegram, "OPS_MEM_CRIT_MB", 120) or 120)
+    load_warn = float(getattr(Telegram, "OPS_LOAD_WARN", 2.0) or 2.0)
+
+    available = _meminfo().get("available_mb")
+    if available is not None:
+        if available < crit_mb:
+            schedule_owner_alert(
+                f"🔴 CRITICAL memory: MemAvailable {available} MB (< {crit_mb} MB) — starvation risk",
+                key="mem-critical",
+                cooldown_sec=10 * 60,
+            )
+        elif available < warn_mb:
+            schedule_owner_alert(
+                f"⚠️ Memory low: MemAvailable {available} MB (< {warn_mb} MB)",
+                key="mem-warn",
+                cooldown_sec=30 * 60,
+            )
+
+    load1 = _loadavg_1m()
+    if load1 is not None and load1 > load_warn:
+        schedule_owner_alert(
+            f"⚠️ High load: 1-min load {load1:.2f} (> {load_warn}) — CPU starvation risk",
+            key="load-high",
+            cooldown_sec=30 * 60,
+        )
 
 
 async def _check_disk_paths() -> None:
@@ -281,14 +334,19 @@ async def _check_tls_expiry() -> None:
 
 
 async def ops_watch_loop() -> None:
-    """Background ops monitor: periodic disk-space and TLS-expiry alerts."""
+    """Background ops monitor: disk + memory/load every few minutes, TLS every 6h."""
     import time as _time
 
-    LOGGER.info("Ops watch loop started (disk every 30m, TLS every 6h)")
+    interval = _ops_watch_interval_sec()
+    LOGGER.info(f"Ops watch loop started (disk+mem/load every {interval // 60}m, TLS every 6h)")
     last_tls = 0.0
     while True:
         try:
             await _check_disk_paths()
+        except Exception:
+            pass
+        try:
+            await _check_load_memory()
         except Exception:
             pass
         if _time.monotonic() - last_tls >= _OPS_TLS_INTERVAL_SEC:
@@ -297,7 +355,7 @@ async def ops_watch_loop() -> None:
                 await _check_tls_expiry()
             except Exception:
                 pass
-        await asyncio.sleep(_OPS_DISK_INTERVAL_SEC)
+        await asyncio.sleep(interval)
 
 
 # -------------------------------
