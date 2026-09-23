@@ -74,25 +74,34 @@ logw() {
 grab_token() {
   mkdir -p "${STATE_DIR}"
   chmod 700 "${STATE_DIR}"
-  local token=""
+  local token="" token_file="" owner=""
   token=$(docker inspect file_stream_bot --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
     | sed -n 's/^BOT_TOKEN=//p' | head -1)
   if [ -z "${token}" ]; then
-    # fallback: compose env file next to the bot's compose project
+    # fallback: compose env files (file_stream_bot uses env_file, so the
+    # token never appears in docker inspect Config.Env)
     local f
-    for f in /home/ubuntu/filelink/*.env /home/ubuntu/filelink/.env /home/ubuntu/*.env; do
+    for f in /home/ubuntu/file-stream-bot/config.env \
+             /home/ubuntu/filelink/*.env /home/ubuntu/filelink/.env; do
       [ -f "${f}" ] || continue
       token=$(sed -n 's/^BOT_TOKEN=//p' "${f}" 2>/dev/null | head -1)
-      [ -n "${token}" ] && break
+      if [ -n "${token}" ]; then
+        token_file="${f}"
+        break
+      fi
     done
   fi
   if [ -z "${token}" ]; then
     echo "ERROR: could not locate BOT_TOKEN (container env or compose env file)" >&2
     return 1
   fi
+  if [ -n "${token_file}" ]; then
+    owner=$(sed -n 's/^OWNER_ID=//p' "${token_file}" 2>/dev/null | head -1)
+  fi
+  [ -n "${owner}" ] || owner="${DEFAULT_OWNER_ID}"
   {
     printf '%s\n' "${token}"
-    printf '%s\n' "${DEFAULT_OWNER_ID}"
+    printf '%s\n' "${owner}"
   } > "${TG_FILE}"
   chmod 600 "${TG_FILE}"
   echo "token stored in ${TG_FILE} (mode 600)."
@@ -149,10 +158,13 @@ load_cfg() {
 # Auto-reboot via oci-cli (runs as ubuntu; config+key in ~/.oci, 0600).
 # ---------------------------------------------------------------------------
 find_oci() {
-  if command -v oci >/dev/null 2>&1; then
-    command -v oci
+  # cron doesn't source ~/.profile, so check install locations explicitly.
+  if [ -x "${HOME}/bin/oci" ]; then
+    echo "${HOME}/bin/oci"
   elif [ -x "${HOME}/.local/bin/oci" ]; then
     echo "${HOME}/.local/bin/oci"
+  elif command -v oci >/dev/null 2>&1; then
+    command -v oci
   else
     return 1
   fi
@@ -189,6 +201,26 @@ do_reboot() {
   logw "error: oci RESET failed"
   return 1
 }
+
+# ---------------------------------------------------------------------------
+# Subcommand dispatch (install-time helpers).
+# ---------------------------------------------------------------------------
+case "${1:-}" in
+  --grab-token)
+    grab_token
+    exit $?
+    ;;
+  --print-mode)
+    echo "${MODE}"
+    exit 0
+    ;;
+  ""|--cycle)
+    ;;   # fall through to a normal watchdog cycle
+  *)
+    echo "usage: $0 [--grab-token|--print-mode|--cycle]" >&2
+    exit 2
+    ;;
+esac
 
 # ---------------------------------------------------------------------------
 # State helpers
