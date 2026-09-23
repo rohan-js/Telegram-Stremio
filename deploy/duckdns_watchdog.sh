@@ -30,6 +30,27 @@ fi
 HOST=$(echo "${BASE_URL}" | sed -E "s#https?://([^/]+).*#\1#")
 MANIFEST_URL="${BASE_URL%/}/stremio/${ADDON_TOKEN}/manifest.json"
 
+# --- Cert expiry check (log-only metrics + critical owner alert) ---
+CERT_DAYS_LEFT=-1
+CERT_WARN=0
+CERT_CRITICAL=0
+CERT_PATH="/etc/letsencrypt/live/telegram-stremio.duckdns.org/cert.pem"
+if sudo test -f "${CERT_PATH}"; then
+  EXPIRY_DATE=$(sudo openssl x509 -in "${CERT_PATH}" -noout -enddate 2>/dev/null | cut -d= -f2)
+  if [ -n "${EXPIRY_DATE}" ]; then
+    EXPIRY_EPOCH=$(date -u -d "${EXPIRY_DATE}" +%s 2>/dev/null || echo "")
+    NOW_EPOCH=$(date -u +%s)
+    if [ -n "${EXPIRY_EPOCH}" ]; then
+      CERT_DAYS_LEFT=$(( (EXPIRY_EPOCH - NOW_EPOCH) / 86400 ))
+      if [ "${CERT_DAYS_LEFT}" -lt 7 ]; then
+        CERT_CRITICAL=1
+      elif [ "${CERT_DAYS_LEFT}" -lt 30 ]; then
+        CERT_WARN=1
+      fi
+    fi
+  fi
+fi
+
 metric_mem_available_mb() {
   awk '/MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo
 }
@@ -155,7 +176,7 @@ log_line() {
   app_response_ms=$(metric_app_response_ms)
   active_streams=$(metric_active_streams)
   last_stream_error=$(metric_last_stream_error)
-  echo "${STAMP} status=${status} $* mem_avail_mb=${mem_avail_mb} swap_free_mb=${swap_free_mb} swap_total_mb=${swap_total_mb} root_used_pct=${root_used_pct} container=${state} container_uptime_sec=${uptime_sec} app_response_ms=${app_response_ms} active_streams=${active_streams} last_stream_error=${last_stream_error:-none}" >> "${LOG_FILE}"
+  echo "${STAMP} status=${status} $* mem_avail_mb=${mem_avail_mb} swap_free_mb=${swap_free_mb} swap_total_mb=${swap_total_mb} root_used_pct=${root_used_pct} container=${state} container_uptime_sec=${uptime_sec} app_response_ms=${app_response_ms} active_streams=${active_streams} last_stream_error=${last_stream_error:-none} cert_days_left=${CERT_DAYS_LEFT} cert_warn=${CERT_WARN} cert_critical=${CERT_CRITICAL}" >> "${LOG_FILE}"
 }
 
 DNS_OK=0
@@ -188,6 +209,10 @@ fi
 
 if [ "${ROOT_USED_PCT}" -ge 95 ]; then
   DISK_CRITICAL=1
+fi
+
+if [ "${CERT_CRITICAL}" -eq 1 ]; then
+  tg_alert "cert_critical" "🔴 tg-stremio watchdog: TLS cert expires in ${CERT_DAYS_LEFT}d (${STAMP}) — run certbot renew"
 fi
 
 if [ "${DNS_OK}" -eq 1 ] && [ "${PUBLIC_OK}" -eq 1 ] && [ "${LOCAL_OK}" -eq 1 ] && [ "${CONTAINER_OK}" -eq 1 ] && [ "${MEM_CRITICAL}" -eq 0 ] && [ "${DISK_CRITICAL}" -eq 0 ]; then
@@ -227,7 +252,10 @@ if [ -n "${RESTART_REASON}" ]; then
     if COMPOSE_CMD=$(compose_cmd); then
       log_line "recreating" "reason=${RESTART_REASON} compose=${COMPOSE_CMD// /_}"
       tg_alert "restarting" "🔁 tg-stremio watchdog: recreating ${CONTAINER} (${RESTART_REASON}) at ${STAMP}"
-      (cd "${APP_DIR}" && ${COMPOSE_CMD} up -d --no-build --remove-orphans) || true
+      # Golden Rule #3: ALWAYS the wgkernel override pair, ONLY the
+      # telegram-stremio service — plain `up --remove-orphans` once deleted
+      # wgcf_kernel and killed the WARP tunnel (2026-08-09 incident).
+      (cd "${APP_DIR}" && ${COMPOSE_CMD} -f docker-compose.yaml -f docker-compose.wgkernel.yml up -d --no-deps --no-build telegram-stremio) || true
     else
       log_line "recreate_failed" "reason=${RESTART_REASON} docker_compose_v2=missing"
       tg_alert "recreate_failed" "🔴 tg-stremio watchdog: RECREATE FAILED (${RESTART_REASON}, docker compose v2 missing) at ${STAMP} — manual intervention needed"
