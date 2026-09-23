@@ -5,8 +5,16 @@ from unittest.mock import patch
 
 from Backend.helper import production_ops as pops
 
+_REAL_STEAL_PERCENT = pops._steal_percent
+
 
 class OpsWatchTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Default: steal check silent unless a test opts in explicitly.
+        patcher = patch.object(pops, "_steal_percent", lambda path="/proc/stat": None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_low_disk_alerts_with_key(self):
         sent = []
 
@@ -149,6 +157,53 @@ class OpsWatchTests(unittest.IsolatedAsyncioTestCase):
             await pops._check_load_memory()
 
         self.assertEqual(sent, [])
+
+    # ---- steal detection (Oracle-side throttling) ----
+
+    async def test_steal_alert_fires(self):
+        sent = []
+
+        with (
+            patch.object(pops, "_steal_percent", lambda path="/proc/stat": 43.4),
+            patch.object(pops, "_meminfo", lambda: {"available_mb": 450}),
+            patch.object(pops, "_loadavg_1m", lambda: 0.4),
+            patch("Backend.helper.owner_alerts.schedule_owner_alert", side_effect=lambda m, **k: sent.append((m, k.get("key")))),
+        ):
+            await pops._check_load_memory()
+
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0][1], "cpu-steal")
+        self.assertIn("steal", sent[0][0])
+
+    async def test_moderate_steal_silent(self):
+        sent = []
+
+        with (
+            patch.object(pops, "_steal_percent", lambda path="/proc/stat": 12.0),
+            patch.object(pops, "_meminfo", lambda: {"available_mb": 450}),
+            patch.object(pops, "_loadavg_1m", lambda: 0.4),
+            patch("Backend.helper.owner_alerts.schedule_owner_alert", side_effect=lambda m, **k: sent.append(m)),
+        ):
+            await pops._check_load_memory()
+
+        self.assertEqual(sent, [])
+
+    def test_steal_percent_delta_from_proc_samples(self):
+        import os
+        import tempfile
+
+        pops._STEAL_LAST = None
+        self.addCleanup(setattr, pops, "_STEAL_LAST", None)
+        with tempfile.NamedTemporaryFile("w", suffix=".stat", delete=False) as fh:
+            fh.write("cpu  10 0 10 100 0 0 0 0 0 0\n")
+            first = fh.name
+        with tempfile.NamedTemporaryFile("w", suffix=".stat", delete=False) as fh:
+            fh.write("cpu  20 0 20 200 0 0 0 40 0 0\n")
+            second = fh.name
+        self.addCleanup(os.unlink, first)
+        self.addCleanup(os.unlink, second)
+        self.assertIsNone(_REAL_STEAL_PERCENT(path=first))
+        self.assertEqual(_REAL_STEAL_PERCENT(path=second), 25.0)
 
     def test_watch_interval_defaults_to_5min(self):
         from Backend.config import Telegram

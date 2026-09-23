@@ -482,6 +482,10 @@ class Telegram:
     except Exception:
         OPS_LOAD_WARN = 2.0
     OPS_WATCH_INTERVAL_MIN = int(getenv("OPS_WATCH_INTERVAL_MIN", "5") or 5)
+    try:
+        OPS_STEAL_WARN_PCT = float(getenv("OPS_STEAL_WARN_PCT", "20.0") or 20.0)
+    except Exception:
+        OPS_STEAL_WARN_PCT = 20.0
 
     # -------------------------------
     # Adaptive Telegram stream safety

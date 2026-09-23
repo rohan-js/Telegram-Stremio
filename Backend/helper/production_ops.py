@@ -239,6 +239,36 @@ def _loadavg_1m() -> float | None:
         return None
 
 
+_STEAL_LAST: tuple[int, int] | None = None
+
+
+def _steal_percent(path: str = "/proc/stat") -> float | None:
+    """Hypervisor CPU steal % since the previous call (None on first call).
+
+    The Sep-23 15:40 near-miss measured 43% steal: E2.1.Micro burst
+    throttling hands the core to other tenants and no on-box fix exists,
+    so chronic steal is the early signal that the shape itself is the
+    bottleneck (A1.Flex is the only cure).
+    """
+    global _STEAL_LAST
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            fields = fh.readline().split()[1:]
+        total = sum(int(value) for value in fields)
+        steal = int(fields[7])
+    except Exception:
+        return None
+    if _STEAL_LAST is None or total <= _STEAL_LAST[1]:
+        _STEAL_LAST = (steal, total)
+        return None
+    delta_total = total - _STEAL_LAST[1]
+    delta_steal = steal - _STEAL_LAST[0]
+    _STEAL_LAST = (steal, total)
+    if delta_total <= 0:
+        return None
+    return round(100.0 * delta_steal / delta_total, 1)
+
+
 async def _check_load_memory() -> None:
     """Freeze early-warning: memory starvation + CPU saturation alerts.
 
@@ -273,6 +303,16 @@ async def _check_load_memory() -> None:
             f"⚠️ High load: 1-min load {load1:.2f} (> {load_warn}) — CPU starvation risk",
             key="load-high",
             cooldown_sec=30 * 60,
+        )
+
+    steal_pct = _steal_percent()
+    steal_warn = float(getattr(Telegram, "OPS_STEAL_WARN_PCT", 20.0) or 20.0)
+    if steal_pct is not None and steal_pct > steal_warn:
+        schedule_owner_alert(
+            f"🕵️ Hypervisor steal {steal_pct:.0f}% (> {steal_warn:.0f}%) — Oracle is throttling the VM "
+            "(burst limit / noisy neighbors). Nothing on-box can stop it; if chronic, A1.Flex is the cure",
+            key="cpu-steal",
+            cooldown_sec=6 * 60 * 60,
         )
 
 
