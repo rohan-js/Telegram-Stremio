@@ -8,7 +8,7 @@ from typing import Optional
 from urllib.parse import unquote, quote
 from Backend.config import Telegram
 from Backend import db, __version__
-from Backend.fastapi.themes import get_theme, get_all_themes, DEFAULT_THEME
+from Backend.fastapi.themes import get_theme, get_all_themes, DEFAULT_STYLE, DEFAULT_THEME
 import PTN
 from datetime import datetime, timezone, timedelta
 from Backend.fastapi.security.tokens import verify_token
