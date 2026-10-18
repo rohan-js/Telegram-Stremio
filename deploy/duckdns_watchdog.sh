@@ -203,7 +203,11 @@ SWAP_TOTAL_MB=$(metric_swap_total_mb)
 SWAP_FREE_MB=$(metric_swap_free_mb)
 ROOT_USED_PCT=$(metric_root_used_pct)
 
-if [ "${MEM_AVAIL_MB}" -lt 80 ] && { [ "${SWAP_TOTAL_MB}" -eq 0 ] || [ "${SWAP_FREE_MB}" -lt 128 ]; }; then
+# Memory-only critical gate (2026-10-18): the old check ANDed a swap
+# condition, so the RAM-only collapse (6% mem / 53% swap free) never
+# flagged degraded and earlyoom's own old rule never fired either. Fold
+# swap in only where it is genuinely exhausted.
+if [ "${MEM_AVAIL_MB}" -lt 120 ] || { [ "${SWAP_TOTAL_MB}" -gt 0 ] && [ "${SWAP_FREE_MB}" -lt 96 ]; }; then
   MEM_CRITICAL=1
 fi
 

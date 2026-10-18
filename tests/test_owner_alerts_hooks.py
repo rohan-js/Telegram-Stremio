@@ -1,7 +1,7 @@
 """Tests: new owner-alert hooks — ops watch loop (disk/TLS) behavior."""
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from Backend.helper import production_ops as pops
 
@@ -216,6 +216,34 @@ class OpsWatchTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(Telegram, "OPS_WATCH_INTERVAL_MIN", 1):
             self.assertEqual(pops._ops_watch_interval_sec(), 60)
+
+
+class TelegramReachabilityTests(unittest.IsolatedAsyncioTestCase):
+    """The DC reachability probe: alert only when ALL endpoints fail."""
+
+    async def test_all_endpoints_failing_alerts(self):
+        sent = []
+        with (
+            patch.object(pops, "_tcp_connect_ok", AsyncMock(return_value=False)),
+            patch("Backend.helper.owner_alerts.schedule_owner_alert", side_effect=lambda m, **k: sent.append((m, k.get("key")))),
+        ):
+            await pops._check_telegram_reachability()
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0][1], "telegram-unreach")
+
+    async def test_one_endpoint_alive_is_silent(self):
+        sent = []
+        results = iter([False, True])
+
+        async def fake_connect(host, port, timeout=6.0):
+            return next(results)
+
+        with (
+            patch.object(pops, "_tcp_connect_ok", side_effect=fake_connect),
+            patch("Backend.helper.owner_alerts.schedule_owner_alert", side_effect=lambda m, **k: sent.append(m)),
+        ):
+            await pops._check_telegram_reachability()
+        self.assertEqual(sent, [])
 
 
 if __name__ == "__main__":

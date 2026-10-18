@@ -492,6 +492,9 @@ class Telegram:
     except Exception:
         OPS_LOAD_WARN = 2.0
     OPS_WATCH_INTERVAL_MIN = int(getenv("OPS_WATCH_INTERVAL_MIN", "5") or 5)
+    # Telegram DC reachability probe cadence (TCP connect from inside the
+    # WARP namespace; alert-only, no auto-recreate).
+    OPS_TELEGRAM_PROBE_MIN = int(getenv("OPS_TELEGRAM_PROBE_MIN", "15") or 15)
     try:
         OPS_STEAL_WARN_PCT = float(getenv("OPS_STEAL_WARN_PCT", "20.0") or 20.0)
     except Exception:

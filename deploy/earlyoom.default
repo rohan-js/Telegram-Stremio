@@ -1,0 +1,8 @@
+# Memory-only kill rule (Option B, 2026-10-18): earlyoom requires BOTH mem and
+# swap below minimum, so the RAM-only collapse (6% mem / 53% swap free) never
+# fired and the box froze into a softdog reboot. The v1.6.2 comparison is
+# 'MemAvailablePercent <= mem_kill && SwapFreePercent <= swap_kill', so
+# -s 100 makes the swap side unconditionally true; decisions are then
+# memory-only: SIGTERM at 20%, SIGKILL at 12%. The app is --prefer'd and
+# restarts in ~1 min (compose restart policy + 25s stop grace).
+EARLYOOM_ARGS="-m 20,12 -s 100,100 --prefer 'Backend' --avoid 'sshd|systemd|nginx|dockerd|containerd|qbittorrent-nox|watchdog_petter'"

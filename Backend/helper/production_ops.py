@@ -221,6 +221,13 @@ _OPS_DISK_MIN_FREE_GB = 10.0
 _OPS_DISK_MIN_FREE_PCT = 15.0
 _OPS_TLS_WARN_DAYS = 14
 
+#: Stable public endpoints for the egress reachability probe (run from
+#: inside the WARP namespace — the app shares wgcf_kernel's netns).
+_TELEGRAM_PROBE_ENDPOINTS = (
+    ("149.154.167.91", 443),  # Telegram DC4
+    ("91.108.56.130", 443),   # Telegram DC5
+)
+
 
 def _ops_watch_interval_sec() -> int:
     try:
@@ -373,29 +380,91 @@ async def _check_tls_expiry() -> None:
         )
 
 
+async def _tcp_connect_ok(host: str, port: int, timeout: float = 6.0) -> bool:
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+async def _check_telegram_reachability() -> None:
+    """Light Telegram DC reachability probe from inside the WARP namespace.
+
+    Total TCP failure to both well-known DC endpoints means egress is
+    degraded (tunnel desync / routing) — the class behind the recurring
+    slow-stream incidents. Alert-only by design: the documented manual
+    recreate (AGENTS §11) stays stream-gated and operator-driven.
+    """
+    from Backend.helper.owner_alerts import schedule_owner_alert
+
+    results = await asyncio.gather(
+        *[_tcp_connect_ok(host, port) for host, port in _TELEGRAM_PROBE_ENDPOINTS],
+        return_exceptions=True,
+    )
+    if any(result is True for result in results):
+        return
+    LOGGER.warning("Telegram DC reachability probe failed for all endpoints")
+    schedule_owner_alert(
+        "🟠 Telegram DC unreachable from the VPS (all probe endpoints failed) — egress/WARP degraded; playback may stall until it recovers. Manual tunnel recreate (stream-gated) is the known fix.",
+        key="telegram-unreach",
+        cooldown_sec=30 * 60,
+    )
+
+
 async def ops_watch_loop() -> None:
-    """Background ops monitor: disk + memory/load every few minutes, TLS every 6h."""
+    """Background ops monitor.
+
+    Memory/load are checked every 60 s (the 2026-10-18 collapse took ~90 s
+    from healthy to frozen — a 5-min cadence can miss it entirely), disk
+    every OPS_WATCH_INTERVAL_MIN, TLS every 6 h, and a light Telegram DC
+    reachability probe every OPS_TELEGRAM_PROBE_MIN.
+    """
     import time as _time
 
     interval = _ops_watch_interval_sec()
-    LOGGER.info(f"Ops watch loop started (disk+mem/load every {interval // 60}m, TLS every 6h)")
+    try:
+        probe_interval = max(300, int(getattr(Telegram, "OPS_TELEGRAM_PROBE_MIN", 15) or 15) * 60)
+    except Exception:
+        probe_interval = 15 * 60
+    LOGGER.info(
+        "Ops watch loop started (mem/load every 60s, disk every %dm, TLS every 6h, Telegram probe every %dm)",
+        interval // 60,
+        probe_interval // 60,
+    )
     last_tls = 0.0
+    last_disk = 0.0
+    last_probe = 0.0
     while True:
-        try:
-            await _check_disk_paths()
-        except Exception:
-            pass
+        now_mono = _time.monotonic()
         try:
             await _check_load_memory()
         except Exception:
             pass
-        if _time.monotonic() - last_tls >= _OPS_TLS_INTERVAL_SEC:
-            last_tls = _time.monotonic()
+        if now_mono - last_disk >= interval:
+            last_disk = now_mono
+            try:
+                await _check_disk_paths()
+            except Exception:
+                pass
+        if now_mono - last_tls >= _OPS_TLS_INTERVAL_SEC:
+            last_tls = now_mono
             try:
                 await _check_tls_expiry()
             except Exception:
                 pass
-        await asyncio.sleep(interval)
+        if now_mono - last_probe >= probe_interval:
+            last_probe = now_mono
+            try:
+                await _check_telegram_reachability()
+            except Exception:
+                pass
+        await asyncio.sleep(60)
 
 
 # -------------------------------
