@@ -115,9 +115,15 @@ class Telegram:
         # the 2026-09-20 DC4 jitter incident (15 hedge rescues in one movie).
         SMART_ROUTING_HEDGE_ENABLED = getenv("SMART_ROUTING_HEDGE_ENABLED", "true").lower() == "true"
         SMART_ROUTING_HEDGE_DELAY_SEC = float(getenv("SMART_ROUTING_HEDGE_DELAY_SEC", "0.5") or 0.5)
+        # Ceiling on simultaneous hedge races across the whole process. During
+        # a slow-DC storm every chunk hedges, doubling Telegram load on the
+        # exact route that is already struggling (2026-10-18); beyond this cap
+        # chunks simply wait out the primary timeout instead.
+        SMART_ROUTING_HEDGE_MAX_CONCURRENT = int(getenv("SMART_ROUTING_HEDGE_MAX_CONCURRENT", "6") or 6)
     except Exception:
         SMART_ROUTING_HEDGE_ENABLED = True
         SMART_ROUTING_HEDGE_DELAY_SEC = 0.5
+        SMART_ROUTING_HEDGE_MAX_CONCURRENT = 6
     try:
         # Pre-warm MTProto sessions to common Telegram DCs at boot and maintain
         # periodic keep-alive pings so cold opens take <1s instead of ~4.8s.
@@ -175,6 +181,9 @@ class Telegram:
         # file so backward seeks / replays / second viewers never re-fetch MTProto.
         SPILL_CACHE_ENABLED = getenv("SPILL_CACHE_ENABLED", "true").lower() == "true"
         SPILL_CACHE_MAX_GB = float(getenv("SPILL_CACHE_MAX_GB", "2.0") or 2.0)
+        # Byte cap for the in-flight spill write queue (chunks dropped beyond
+        # it; also auto-shrinks to 0 while MemAvailable is critically low).
+        SPILL_CACHE_QUEUE_MAX_MB = int(getenv("SPILL_CACHE_QUEUE_MAX_MB", "16") or 16)
         # Runway-aware adaptive prefetch — boost PRE_FETCH toward PARALLEL when the
         # measured Telegram feed falls behind the file's bitrate, relax when ahead.
         RUNWAY_PREFETCH_ENABLED = getenv("RUNWAY_PREFETCH_ENABLED", "true").lower() == "true"
@@ -214,6 +223,7 @@ class Telegram:
         STREAM_INDEX_MAX_KEYFRAMES = 4096
         SPILL_CACHE_ENABLED = True
         SPILL_CACHE_MAX_GB = 2.0
+        SPILL_CACHE_QUEUE_MAX_MB = 16
         SPILL_CACHE_PIN_TOP_N = 5
         SPILL_CACHE_PIN_TTL_SEC = 3600
         RUNWAY_PREFETCH_ENABLED = True

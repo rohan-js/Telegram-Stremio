@@ -30,6 +30,16 @@ from Backend.helper.disk_cache import _hash_key, cache_root_dir
 
 _RANGE_SUFFIX = ".ranges.bin"
 _WRITE_QUEUE_MAX = 64
+# Byte cap for the in-flight write queue. 64 x 1 MiB entries could pin 64 MiB
+# of RAM (~7% of the box) while NVMe writes stall behind kswapd/qBittorrent
+# I/O; the byte cap (and the low-memory shrink below) bounds that.
+_QUEUE_BYTE_CAP_DEFAULT = 16 * 1024 * 1024
+_QUEUE_BYTE_CAP_LOWMEM = 4 * 1024 * 1024
+_QUEUE_MEM_WARN_BYTES = 150 * 1024 * 1024
+_QUEUE_MEM_DISABLE_BYTES = 100 * 1024 * 1024
+
+_queued_bytes = 0
+_mem_cache: Dict[str, float] = {"ts": 0.0, "avail": -1.0}
 
 # key: (chat_id, msg_id, unique_id) -> entry dict:
 #   {"path": Path, "ranges": [(start, end_exclusive), ...] merged,
@@ -101,15 +111,57 @@ async def get_spill_stats() -> dict:
     }
 
 
+def _mem_available_bytes() -> Optional[int]:
+    """MemAvailable from /proc/meminfo, cached for 5 s. None when unreadable."""
+    now = time.time()
+    if now - float(_mem_cache.get("ts", 0.0)) < 5.0:
+        avail = _mem_cache.get("avail", -1.0)
+        return int(avail) if avail and avail > 0 else None
+    avail: Optional[int] = None
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    avail = int(line.split()[1]) * 1024
+                    break
+    except Exception:
+        avail = None
+    _mem_cache["ts"] = now
+    _mem_cache["avail"] = float(avail if avail is not None else -1)
+    return avail
+
+
+def _queue_byte_cap() -> int:
+    """In-flight spill queue budget, shrinking (to 0) under memory pressure."""
+    try:
+        cap = int(getattr(Telegram, "SPILL_CACHE_QUEUE_MAX_MB", 16) or 16) * 1024 * 1024
+    except Exception:
+        cap = _QUEUE_BYTE_CAP_DEFAULT
+    if cap <= 0:
+        return 0
+    avail = _mem_available_bytes()
+    if avail is not None:
+        if avail < _QUEUE_MEM_DISABLE_BYTES:
+            return 0
+        if avail < _QUEUE_MEM_WARN_BYTES:
+            return min(cap, _QUEUE_BYTE_CAP_LOWMEM)
+    return cap
+
+
 # ---------------------------------------------------------------------------
 # Write path (called from the live streaming consumer — must never block)
 # ---------------------------------------------------------------------------
 def enqueue_spill(chat_id: int, msg_id: int, unique_id: str, offset: int, chunk: bytes) -> None:
     """Queue one delivered chunk for background disk write. Sync + non-blocking."""
-    global _dropped_chunks, _swept_at_startup
+    global _dropped_chunks, _swept_at_startup, _queued_bytes
     if not spill_enabled() or not chunk or not unique_id:
         return
     try:
+        cap = _queue_byte_cap()
+        if cap <= 0 or _queued_bytes + len(chunk) > cap:
+            # Streaming always wins: drop the spill copy instead of pinning RAM.
+            _dropped_chunks += 1
+            return
         if not _swept_at_startup:
             # Stale range files from a previous process are unusable (extent
             # map is gone) — sweep once on first use instead of at import so
@@ -118,13 +170,13 @@ def enqueue_spill(chat_id: int, msg_id: int, unique_id: str, offset: int, chunk:
             _purge_all_range_files()
         q = _ensure_write_queue()
         _ensure_writer_task()
-        q.put_nowait((int(chat_id), int(msg_id), unique_id, int(offset), chunk))
-    except asyncio.QueueFull:
+        _queued_bytes += len(chunk)
         try:
+            q.put_nowait((int(chat_id), int(msg_id), unique_id, int(offset), chunk))
+        except asyncio.QueueFull:
             # best-effort: avoid contending the event loop
+            _queued_bytes = max(0, _queued_bytes - len(chunk))
             _dropped_chunks += 1  # type: ignore  # atomic on CPython GIL
-        except Exception:
-            pass
     except Exception:
         pass
 
@@ -137,10 +189,14 @@ def _ensure_write_queue() -> asyncio.Queue:
 
 
 async def _spill_writer_loop() -> None:
-    global _dropped_chunks
+    global _dropped_chunks, _queued_bytes
     q = _ensure_write_queue()
     while True:
         item = await q.get()
+        try:
+            _queued_bytes = max(0, _queued_bytes - len(item[4]))
+        except Exception:
+            _queued_bytes = 0
         try:
             await _handle_write(item)
         except Exception as exc:

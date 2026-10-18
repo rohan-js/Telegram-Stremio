@@ -27,6 +27,7 @@ from Backend.pyrofork.bot import (
 )
 from Backend.config import Telegram
 from Backend.helper import spill_cache
+from Backend.helper import pyrogram_patches
 
 ACTIVE_STREAMS: Dict[str, Dict] = {}
 RECENT_STREAMS = deque(maxlen=20)
@@ -353,6 +354,23 @@ def is_client_cooled_down(client_index: int, target_dc: int = 0, now: Optional[f
     return False
 
 
+#: Concurrent hedge races across the process. During a slow-DC storm every
+#: chunk hedges, doubling Telegram load on the already-struggling route
+#: (2026-10-18); beyond SMART_ROUTING_HEDGE_MAX_CONCURRENT, chunks wait out
+#: the primary timeout instead of racing.
+_hedge_inflight = 0
+
+
+def _increment_hedge_inflight() -> None:
+    global _hedge_inflight
+    _hedge_inflight += 1
+
+
+def _release_hedge_slot(_task: Any = None) -> None:
+    global _hedge_inflight
+    _hedge_inflight = max(0, _hedge_inflight - 1)
+
+
 def get_client_cooldown_state(now: Optional[float] = None) -> dict:
     now = time.time() if now is None else now
     states = {}
@@ -408,28 +426,39 @@ def record_route_failure(
 
     threshold = max(1, int(getattr(Telegram, "SMART_ROUTING_COOLDOWN_FAILURES", 2) or 2))
     if client_failures.get(client_index, 0) >= threshold:
+        # A failure arriving while this (client, DC) is ALREADY cooled is part
+        # of the same incident: extend the cooldown quietly. Logging/alerting
+        # every failure spammed ~2 warnings/sec during the 2026-10-18 storm
+        # (failures reached 1533); one log+alert per incident is the signal.
+        already_cooled = is_client_cooled_down(client_index, target_dc, now=now_ts)
         until = time.time() + max(30, int(getattr(Telegram, "SMART_ROUTING_COOLDOWN_SEC", 180) or 180))
         client_cooldowns[client_index] = until
         if target_dc:
             client_dc_cooldowns[(client_index, target_dc)] = until
-        LOGGER.warning(
-            "Client cooldown: client=%s target_dc=%s reason=%s failures=%s until=%s",
-            client_index,
-            target_dc,
-            reason,
-            client_failures.get(client_index),
-            int(until),
-        )
-        try:
-            from Backend.helper.owner_alerts import schedule_owner_alert
-
-            schedule_owner_alert(
-                f"Telegram route cooldown: client={client_index} dc={target_dc} failures={client_failures.get(client_index)} reason={str(reason)[:120]}",
-                key=f"route-cooldown:{client_index}:{target_dc}:{reason}",
-                cooldown_sec=600,
+        if already_cooled:
+            # Keep the counter informative while the cooldown keeps extending.
+            cap = max(threshold * 4, 8)
+            if client_failures.get(client_index, 0) > cap:
+                client_failures[client_index] = cap
+        else:
+            LOGGER.warning(
+                "Client cooldown: client=%s target_dc=%s reason=%s failures=%s until=%s",
+                client_index,
+                target_dc,
+                reason,
+                client_failures.get(client_index),
+                int(until),
             )
-        except Exception:
-            pass
+            try:
+                from Backend.helper.owner_alerts import schedule_owner_alert
+
+                schedule_owner_alert(
+                    f"Telegram route cooldown: client={client_index} dc={target_dc} failures={client_failures.get(client_index)} reason={str(reason)[:120]}",
+                    key=f"route-cooldown:{client_index}:{target_dc}:{reason}",
+                    cooldown_sec=600,
+                )
+            except Exception:
+                pass
 
 
 def smart_client_score(client_index: int, target_dc: int):
@@ -1083,6 +1112,30 @@ class ByteStreamer:
                 slot_entry = session_pool[slot]
                 use_client_idx, use_session, use_loc_box, _slot_streamer = slot_entry
                 use_location = use_loc_box[0]
+                if tries == 0 and len(session_pool) > 1 and is_client_cooled_down(use_client_idx, target_dc):
+                    # The slot's client is in a cooldown for this DC. Dispatching
+                    # to it anyway burns a full timeout and re-extends the
+                    # cooldown on every chunk — the self-sustaining storm from
+                    # 2026-10-18 — so substitute the best non-cooled pool
+                    # member for this chunk. (If every member is cooled the
+                    # route is DC-wide sick and we fall through to the slot.)
+                    substitute = None
+                    for cand_entry in session_pool:
+                        if cand_entry[0] == use_client_idx or is_client_cooled_down(cand_entry[0], target_dc):
+                            continue
+                        if substitute is None or smart_client_score(cand_entry[0], target_dc) < smart_client_score(substitute[0], target_dc):
+                            substitute = cand_entry
+                    if substitute is not None:
+                        use_client_idx, use_session, use_loc_box, _slot_streamer = substitute
+                        use_location = use_loc_box[0]
+                        remember_route_attempt({
+                            "event": "cooled_slot_substituted",
+                            "seq": seq_idx,
+                            "offset": off,
+                            "slot_client": slot_entry[0],
+                            "client": use_client_idx,
+                            "target_dc": target_dc,
+                        })
                 if tries >= 1 and len(multi_clients) > 1:
                     # Pick the best other helper for this file's Telegram DC.
                     fallback_pool = [
@@ -1146,11 +1199,19 @@ class ByteStreamer:
                         "target_dc": target_dc,
                     })
 
+                    hedge_rescued_client_idx = None
                     hedge_enabled = (
                         bool(getattr(Telegram, "SMART_ROUTING_HEDGE_ENABLED", True))
                         and len(session_pool) > 1
                         and tries == 0
                     )
+                    if hedge_enabled:
+                        try:
+                            hedge_max = int(getattr(Telegram, "SMART_ROUTING_HEDGE_MAX_CONCURRENT", 6) or 6)
+                        except Exception:
+                            hedge_max = 6
+                        if hedge_max > 0 and _hedge_inflight >= hedge_max:
+                            hedge_enabled = False
                     hedge_delay = float(getattr(Telegram, "SMART_ROUTING_HEDGE_DELAY_SEC", 0.8) or 0.8)
 
                     primary_task = asyncio.create_task(
@@ -1199,6 +1260,8 @@ class ByteStreamer:
                                     stream_stats=registry_entry,
                                 )
                             )
+                            _increment_hedge_inflight()
+                            hedge_task.add_done_callback(_release_hedge_slot)
 
                             remaining_timeout = max(0.5, timeout - hedge_delay)
                             done, pending = await asyncio.wait(
@@ -1225,6 +1288,7 @@ class ByteStreamer:
 
                             if winner_task is hedge_task:
                                 actual_client_idx = hedge_client_idx
+                                hedge_rescued_client_idx = use_client_idx
                                 registry_entry["hedge_rescues"] = int(registry_entry.get("hedge_rescues", 0) or 0) + 1
                                 remember_route_attempt({
                                     "event": "hedge_race_won",
@@ -1256,10 +1320,14 @@ class ByteStreamer:
                         mbps = (len(chunk_bytes) / (1024 * 1024)) / elapsed
                         update_client_dc_metrics(actual_client_idx, target_dc, mbps, elapsed)
 
-                    # If we succeeded via a fallback or hedge bot, mark primary as degraded
-                    if actual_client_idx != client_index:
+                    # A hedge win means the chunk's assigned client lagged, so
+                    # degrade THAT client. Chunks served by non-primary pool
+                    # slots through the normal round-robin are not failures —
+                    # counting them inflated failure counters on every chunk
+                    # and drove the 2026-10-18 cooldown storm.
+                    if hedge_rescued_client_idx is not None:
                         record_route_failure(
-                            client_index,
+                            hedge_rescued_client_idx,
                             target_dc,
                             "fallback_needed",
                             stream_id=stream_id,
@@ -1570,6 +1638,25 @@ class ByteStreamer:
 
                     chunks_seen = registry_entry.get("_chunks_seen", 0) + 1
                     registry_entry["_chunks_seen"] = chunks_seen
+
+                    # --- live SLO evaluation (at most once per ~20 s) --------
+                    # Storms must alert DURING the stream: on 2026-10-18 the
+                    # hedge/cooldown storm ran for ~an hour and the end-of-
+                    # stream evaluation never fired because the box froze
+                    # first. maybe_send_stream_slo_alerts applies its own
+                    # per-key cooldowns, so repeat calls are safe.
+                    if now_ts - float(registry_entry.get("_slo_live_checked_at", 0.0) or 0.0) >= 20.0:
+                        registry_entry["_slo_live_checked_at"] = now_ts
+                        try:
+                            pc = int(registry_entry.get("part_count", 0) or 0)
+                            events = int(registry_entry.get("chunk_timeouts", 0) or 0) + int(
+                                registry_entry.get("zero_pad_chunks", 0) or 0
+                            )
+                            registry_entry["buffering_events"] = events
+                            registry_entry["buffering_rate"] = round(events / pc, 4) if pc > 0 else 0.0
+                            maybe_send_stream_slo_alerts(registry_entry)
+                        except Exception:
+                            pass
 
                     # Runway-aware prefetch: compare measured feed speed with
                     # the file bitrate (from the container index) and adjust
@@ -2113,6 +2200,21 @@ async def _dc_keepalive_loop():
                 client = streamer.client
                 if not getattr(client, "is_connected", False):
                     continue
+
+                # Janitor: cancelled fetches must never orphan Session.results
+                # entries filled with chunk bytes (2026-10-18 leak class).
+                sessions = [getattr(client, "session", None)]
+                sessions.extend(list(getattr(client, "media_sessions", {}).values()))
+                for sess in sessions:
+                    if sess is None:
+                        continue
+                    purged = pyrogram_patches.sweep_session_results(sess)
+                    if purged:
+                        LOGGER.debug(
+                            "pyrogram_patches: purged %s stale Session.results entry(ies) for client %s",
+                            purged,
+                            idx,
+                        )
 
                 for dc_id, session in list(client.media_sessions.items()):
                     try:

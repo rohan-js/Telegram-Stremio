@@ -1,5 +1,10 @@
 from pyrogram import Client
 from Backend.config import Telegram
+from Backend.helper.pyrogram_patches import apply_patches
+
+# Install the Session.results cancellation-cleanup patch before any client
+# (and therefore any Session) is constructed. See pyrogram_patches docstring.
+apply_patches()
 
 StreamBot = Client(
     name='bot',

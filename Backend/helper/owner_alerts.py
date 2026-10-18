@@ -6,6 +6,19 @@ from Backend.config import Telegram
 from Backend.logger import LOGGER
 
 _LAST_ALERT_AT: dict[str, float] = {}
+_LAST_ALERT_MAX = 512
+_LAST_ALERT_PRUNE_AGE = 24 * 3600
+
+
+def _prune_last_alerts(now: float) -> None:
+    """Bound the cooldown bookkeeping: stream-scoped keys (chunk-fail:{id},
+    stall:{id}) accumulate one entry per failed stream for the process
+    lifetime; drop anything older than a day once the dict gets large."""
+    if len(_LAST_ALERT_AT) <= _LAST_ALERT_MAX:
+        return
+    cutoff = now - _LAST_ALERT_PRUNE_AGE
+    for key in [k for k, ts in _LAST_ALERT_AT.items() if ts < cutoff]:
+        _LAST_ALERT_AT.pop(key, None)
 
 
 async def send_owner_alert(message: str, *, key: Optional[str] = None, cooldown_sec: int = 300) -> bool:
@@ -19,6 +32,7 @@ async def send_owner_alert(message: str, *, key: Optional[str] = None, cooldown_
     if now - _LAST_ALERT_AT.get(alert_key, 0) < cooldown_sec:
         return False
     _LAST_ALERT_AT[alert_key] = now
+    _prune_last_alerts(now)
     try:
         from Backend.pyrofork.bot import Helper, StreamBot
 

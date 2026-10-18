@@ -78,10 +78,27 @@ from pyrogram.file_id import FileId
 router = APIRouter(tags=["Streaming"])
 
 _streamer_by_client: Dict = {}
-_failure_decay_started: bool = False
 
 _title_cache: Dict[str, tuple] = {}
 _TITLE_CACHE_TTL = 300
+_TITLE_CACHE_MAX = 512
+
+
+def _prune_title_cache() -> None:
+    """Bound the TTL cache: expired entries first, then oldest-by-expiry.
+
+    The TTL was checked on read but entries were never removed, so the dict
+    grew with every stream id ever seen for the process lifetime."""
+    if len(_title_cache) <= _TITLE_CACHE_MAX:
+        return
+    now = time.time()
+    for key in [k for k, v in _title_cache.items() if now >= v[1]]:
+        _title_cache.pop(key, None)
+    overflow = len(_title_cache) - _TITLE_CACHE_MAX
+    if overflow > 0:
+        oldest = sorted(_title_cache.items(), key=lambda kv: kv[1][1])[:overflow]
+        for key, _ in oldest:
+            _title_cache.pop(key, None)
 
 
 async def _lookup_title(stream_id_hash: str, decoded_name: str) -> str:
@@ -94,6 +111,7 @@ async def _lookup_title(stream_id_hash: str, decoded_name: str) -> str:
         return cached[0] or decoded_name
     db_title = await db.get_title_by_stream_id(stream_id_hash)
     _title_cache[stream_id_hash] = (db_title, now + _TITLE_CACHE_TTL)
+    _prune_title_cache()
     return db_title or decoded_name
 
 
@@ -280,6 +298,14 @@ async def stream_file_range_with_usage(
 
 # In-flight first-N-MiB head-cache fills (dedup by cache relpath).
 _first_fill_inflight: set = set()
+# Fill guardrails (2026-10-18 storm): bound concurrent fills process-wide,
+# skip fills while the file's DC feed is measurably starved (the live viewer
+# needs that bandwidth more than the cache does), and abort any single fill
+# that outlives its deadline instead of trickling for minutes.
+_FIRST_FILL_MAX_CONCURRENT = 2
+_FIRST_FILL_DEADLINE_SEC = 90.0
+_FIRST_FILL_MIN_CAP_BPS = 1 * 1024 * 1024
+_fills_active = 0
 
 
 async def _fill_first_cache_head(
@@ -297,16 +323,38 @@ async def _fill_first_cache_head(
     DISK_CACHE_MAX_BYTES budget and eviction apply. ``target_bytes`` (runway
     head-boost) may raise the fill size above the default first-MB window.
     """
+    global _fills_active
     rel = first_cache_relpath(chat_id, msg_id, unique_id)
     if rel in _first_fill_inflight:
         return
+    if _fills_active >= _FIRST_FILL_MAX_CONCURRENT:
+        return
     _first_fill_inflight.add(rel)
+    _fills_active += 1
     try:
         streamer = get_streamer(client_index)
         fid = await streamer.get_file_properties(chat_id=chat_id, message_id=msg_id)
         size = int(getattr(fid, "file_size", 0) or 0)
         if size <= 0:
             return
+        dc_id = int(getattr(fid, "dc_id", 0) or 0)
+        # Starved-DC skip: only trust a measurement for the file's OWN DC
+        # (never the global fallback — another DC's speed says nothing about
+        # this one) and only when the DC id is real.
+        if dc_id > 0:
+            _cap = None
+            try:
+                for (_idx, _dc), _mbps in client_dc_avg_mbps.items():
+                    if int(_dc) == dc_id and _mbps and _mbps > 0:
+                        _cap = max(_cap or 0.0, float(_mbps))
+            except Exception:
+                _cap = None
+            if _cap is not None and _cap < _FIRST_FILL_MIN_CAP_BPS:
+                LOGGER.debug(
+                    "First-cache fill skipped chat_id=%s msg_id=%s: DC %s feed cap %.2f MB/s (starved)",
+                    chat_id, msg_id, dc_id, _cap / 1048576.0,
+                )
+                return
         want = min(int(target_bytes or expected_bytes), size)
         if want <= 0:
             return
@@ -325,9 +373,16 @@ async def _fill_first_cache_head(
 
         written = 0
         chunk_size = 512 * 1024
+        fill_deadline = time.monotonic() + _FIRST_FILL_DEADLINE_SEC
         try:
             with open(str(tmp), "wb") as f:
                 while written < want:
+                    if time.monotonic() > fill_deadline:
+                        LOGGER.info(
+                            "First-cache fill deadline reached chat_id=%s msg_id=%s (%s/%s bytes)",
+                            chat_id, msg_id, written, want,
+                        )
+                        break
                     limit = min(chunk_size, want - written)
                     data = await streamer._fetch_file_bytes(
                         media_session,
@@ -363,6 +418,7 @@ async def _fill_first_cache_head(
         LOGGER.debug("First-cache fill skipped chat_id=%s msg_id=%s: %s", chat_id, msg_id, exc)
     finally:
         _first_fill_inflight.discard(rel)
+        _fills_active = max(0, _fills_active - 1)
 
 
 @router.get("/sub/{token}/{id}/{name}")
@@ -804,6 +860,20 @@ async def downloaded_torrent_stream_handler(
 #----- Serve a Telegram video/document thumbnail (public artwork source)
 _thumb_cache: Dict[str, tuple] = {}
 _THUMB_CACHE_TTL = 3600
+_THUMB_CACHE_MAX = 128  # ~a few MB of JPEG bytes; it holds image data, so bound it
+
+
+def _prune_thumb_cache() -> None:
+    if len(_thumb_cache) <= _THUMB_CACHE_MAX:
+        return
+    now = time.time()
+    for key in [k for k, v in _thumb_cache.items() if now >= v[1]]:
+        _thumb_cache.pop(key, None)
+    overflow = len(_thumb_cache) - _THUMB_CACHE_MAX
+    if overflow > 0:
+        oldest = sorted(_thumb_cache.items(), key=lambda kv: kv[1][1])[:overflow]
+        for key, _ in oldest:
+            _thumb_cache.pop(key, None)
 
 
 @router.get("/thumb/{id}")
@@ -839,6 +909,7 @@ async def thumb_handler(id: str):
             LOGGER.warning(f"[THUMB] fetch failed for {id}: {e}")
             raise HTTPException(status_code=404, detail="Thumbnail unavailable")
         _thumb_cache[id] = (data, now + _THUMB_CACHE_TTL)
+        _prune_thumb_cache()
 
     return _ThumbResponse(
         content=data,
@@ -1215,14 +1286,9 @@ async def media_streamer(
     forced_client_index: int | None = None,
     source_type: str = "telegram",
 ):
-    global _failure_decay_started
-    if not _failure_decay_started:
-        try:
-            asyncio.create_task(decay_client_failures())
-            _failure_decay_started = True
-        except Exception:
-            pass
-
+    # NOTE: failure decay runs from a single background task started at app
+    # startup (Backend/fastapi/main.py); a second lazy start here used to
+    # double the decay rate.
     base_index = forced_client_index if forced_client_index is not None else select_best_client(target_dc or 0)
     base_streamer = get_streamer(base_index)
 
