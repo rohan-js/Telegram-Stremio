@@ -29,6 +29,12 @@ jobs:
       - name: Compile check
         run: uv run python -m compileall -q Backend tests
 
+      - name: Static analysis (undefined names + syntax)
+        # F821 catches the NameError class that compileall cannot see: the
+        # 2026-09-06 stremio_routes DEFAULT_STYLE miss (41 days in prod) and
+        # the reciever.py asyncio miss both fail here instead of at runtime.
+        run: uv run ruff check --select F821,E9 Backend tests
+
       - name: Run test suite
         # Import-time constructors need plausible dummies (never dialed/connected
         # in tests): Database() parses DATABASE URIs, pyrogram Clients build at

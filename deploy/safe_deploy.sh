@@ -28,8 +28,17 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 compose_args=(-f "${COMPOSE_FILE_PRIMARY}")
-if [ "${USE_COMPOSE_OVERRIDE}" != "false" ] && [ -f "${COMPOSE_OVERRIDE}" ]; then
-  compose_args+=(-f "${COMPOSE_OVERRIDE}")
+if [ "${USE_COMPOSE_OVERRIDE}" != "false" ]; then
+  if [ -f "${COMPOSE_OVERRIDE}" ]; then
+    compose_args+=(-f "${COMPOSE_OVERRIDE}")
+  else
+    # Silently skipping the override recreates tg_stremio with its own :8000
+    # mapping, collides with wgcf_kernel and tears the WARP tunnel down
+    # (2026-08-09 class). Refuse instead; USE_COMPOSE_OVERRIDE=false bypasses.
+    echo "Deployment refused: override file '${COMPOSE_OVERRIDE}' not found in ${APP_DIR}." >&2
+    echo "The wgkernel override is required for this service (or set USE_COMPOSE_OVERRIDE=false deliberately)." >&2
+    exit 3
+  fi
 fi
 
 compose() {

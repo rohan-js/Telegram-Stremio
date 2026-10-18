@@ -252,7 +252,7 @@ async def _process_ingest_job(job: dict) -> None:
                 try:
                     msg_ref = await _skip_client.get_messages(int(job["channel"]), int(job["msg_id"]))
                     if msg_ref:
-                        skip_task = asyncio.create_task(route_to_skip_channel(_skip_client, msg_ref))
+                        skip_task = create_task(route_to_skip_channel(_skip_client, msg_ref))
                 except Exception as skip_err:
                     LOGGER.debug(f"Skip-channel route skipped: {skip_err}")
                 if skip_task:

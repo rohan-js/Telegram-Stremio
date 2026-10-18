@@ -1,0 +1,28 @@
+services:
+  wgcf_kernel:
+    image: wgcf-kernel:local
+    container_name: wgcf_kernel
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./warp_private/wgcf_kernel_test:/wg:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./wg-entrypoint.sh:/wg-entrypoint.sh:ro
+    entrypoint: ["sh", "/wg-entrypoint.sh"]
+
+  telegram-stremio:
+    network_mode: "service:wgcf_kernel"
+    extra_hosts: !reset []
+    depends_on:
+      wgcf_kernel:
+        condition: service_started
+      qbittorrent:
+        condition: service_started
+    ports: !reset []
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro

@@ -39,6 +39,10 @@ services:
     ports:
       - "8000:8000"
     restart: unless-stopped
+    # Graceful earlyoom path (Option B, 2026-10-18): when memory pressure
+    # makes earlyoom SIGTERM the app, give stream handlers and the DB layer
+    # a real window to close cleanly before Docker escalates to SIGKILL.
+    stop_grace_period: 25s
     mem_limit: 768m
     memswap_limit: 1536m
     # Reserve host CPU so sshd/systemd/watchdogs stay schedulable during app
