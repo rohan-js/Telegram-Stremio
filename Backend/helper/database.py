@@ -1540,6 +1540,27 @@ class Database:
             and self._source_type(existing_quality) == self._source_type(new_quality)
         )
 
+    def _duplicate_resolution(self, existing_qualities, new_quality: dict, tmdb_id) -> Optional[str]:
+        """Exact-duplicate behavior when REPLACE_MODE is off.
+
+        Returns "skip" (duplicate_protection on — discard the new quality),
+        "flag" (protection off — keep it but mark flagged_duplicate so it
+        renders with a badge; the admin decides), or None (append as-is).
+        Personal media is never touched.
+        """
+        if is_personal_media(tmdb_id):
+            return None
+        key = self._dup_key(new_quality)
+        duplicate_found = any(
+            not q.get("group_key") and self._dup_key(q) == key
+            for q in (existing_qualities or [])
+        )
+        if not duplicate_found:
+            return None
+        if SettingsManager.current().duplicate_protection:
+            return "skip"
+        return "flag"
+
     def _source_identity_key(self, quality: dict) -> Optional[str]:
         source_type = self._source_type(quality)
 
@@ -1844,15 +1865,18 @@ class Database:
             existing_qualities.append(quality_to_update)
 
         else:
-            # REPLACE_MODE off: skip exact duplicates when protection is on, else stack.
-            if SettingsManager.current().duplicate_protection and not is_personal_media(tmdb_id):
-                key = self._dup_key(quality_to_update)
-                for q in existing_qualities:
-                    if not q.get("group_key") and self._dup_key(q) == key:
-                        LOGGER.info(f"Duplicate protection: skipped existing stream '{quality_to_update.get('name')}'.")
-                        if status is not None:
-                            status["duplicate_skipped"] = True
-                        return movie_id
+            # REPLACE_MODE off: skip exact duplicates when protection is on;
+            # when it's off, still FLAG an identical quality as a duplicate so
+            # it renders with a badge — the admin decides, we never auto-hide.
+            resolution = self._duplicate_resolution(existing_qualities, quality_to_update, tmdb_id)
+            if resolution == "skip":
+                LOGGER.info(f"Duplicate protection: skipped existing stream '{quality_to_update.get('name')}'.")
+                if status is not None:
+                    status["duplicate_skipped"] = True
+                return movie_id
+            if resolution == "flag":
+                quality_to_update["flagged_duplicate"] = True
+                LOGGER.info(f"Auto-flagged duplicate stream '{quality_to_update.get('name')}'.")
             existing_qualities.append(quality_to_update)
 
         existing_movie["telegram"] = existing_qualities
@@ -1986,17 +2010,18 @@ class Database:
                         existing_episode["telegram"].append(quality)
 
                     else:
-                        # REPLACE_MODE off: skip exact duplicates when protection is on, else stack.
-                        if SettingsManager.current().duplicate_protection and not is_personal_media(tmdb_id):
-                            key = self._dup_key(quality)
-                            if any(
-                                not q.get("group_key") and self._dup_key(q) == key
-                                for q in existing_episode["telegram"]
-                            ):
-                                LOGGER.info(f"Duplicate protection: skipped existing stream '{quality.get('name')}'.")
-                                if status is not None:
-                                    status["duplicate_skipped"] = True
-                                continue
+                        # REPLACE_MODE off: skip exact duplicates when protection
+                        # is on; when off, still FLAG an identical quality (badge
+                        # only — the admin decides).
+                        resolution = self._duplicate_resolution(existing_episode["telegram"], quality, tmdb_id)
+                        if resolution == "skip":
+                            LOGGER.info(f"Duplicate protection: skipped existing stream '{quality.get('name')}'.")
+                            if status is not None:
+                                status["duplicate_skipped"] = True
+                            continue
+                        if resolution == "flag":
+                            quality["flagged_duplicate"] = True
+                            LOGGER.info(f"Auto-flagged duplicate stream '{quality.get('name')}'.")
                         existing_episode["telegram"].append(quality)
 
         existing_tv["updated_on"] = datetime.utcnow()

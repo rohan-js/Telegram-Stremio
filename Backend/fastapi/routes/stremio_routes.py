@@ -157,11 +157,29 @@ def _maintenance_block(token_data: dict) -> bool:
     return not bool(token_data.get("is_admin"))
 
 
+def _synthetic_media_id(item: dict) -> Optional[str]:
+    """Fallback catalog id for docs whose identity repair has not run yet.
+
+    Follows the manual-add convention (``tg<abs(tmdb_id)>``, see
+    api_routes media manual-add) so the id resolves through the same
+    imdb_id field once the reconciliation backfills it. Without this the
+    catalog emitted ``id: null`` for imdb-less docs and the item was
+    unclickable (2026-10-17 Machante incident).
+    """
+    tmdb = item.get("tmdb_id")
+    try:
+        if tmdb is None or tmdb == "":
+            return None
+        return f"tg{abs(int(tmdb))}"
+    except (TypeError, ValueError):
+        return None
+
+
 def convert_to_stremio_meta(item: dict) -> dict:
     media_type = "series" if item.get("media_type") == "tv" else "movie"
 
     meta = {
-        "id": item.get('imdb_id'),
+        "id": item.get('imdb_id') or _synthetic_media_id(item),
         "type": media_type,
         "name": display_title(item),
         "poster": _poster_url(item.get("imdb_id"), item.get("poster")),

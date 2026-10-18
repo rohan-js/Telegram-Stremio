@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from Backend.helper.database import Database
 
@@ -157,6 +159,60 @@ class DatabaseQualityDedupeTests(unittest.TestCase):
         self.assertEqual(existing["tmdb_id"], 132117)
         self.assertEqual(existing["release_year"], 2023)
         self.assertEqual(existing["description"], "Manual description")
+
+
+class DuplicateResolutionTests(unittest.TestCase):
+    """REPLACE_MODE off: identical (quality, name, size) qualities are skipped
+    when duplicate_protection is on, but still auto-FLAGGED (badge only, never
+    hidden) when it's off — the 2026-10-17 double-upload case."""
+
+    def setUp(self):
+        self.database = object.__new__(Database)
+        self.existing = [
+            {
+                "source_type": "telegram",
+                "id": "enc-1",
+                "quality": "1080p",
+                "name": "Machante.Maalakha.2025.1080p.mkv",
+                "size": "3.03GB",
+            }
+        ]
+        self.incoming = {
+            "source_type": "telegram",
+            "id": "enc-2",
+            "quality": "1080p",
+            "name": "Machante.Maalakha.2025.1080p.mkv",
+            "size": "3.03GB",
+        }
+
+    def test_flags_when_protection_off(self):
+        from Backend.helper.settings_manager import SettingsManager
+
+        with patch.object(SettingsManager, "current", return_value=SimpleNamespace(duplicate_protection=False)):
+            resolution = self.database._duplicate_resolution(self.existing, self.incoming, tmdb_id=1503565)
+        self.assertEqual(resolution, "flag")
+
+    def test_skips_when_protection_on(self):
+        from Backend.helper.settings_manager import SettingsManager
+
+        with patch.object(SettingsManager, "current", return_value=SimpleNamespace(duplicate_protection=True)):
+            resolution = self.database._duplicate_resolution(self.existing, self.incoming, tmdb_id=1503565)
+        self.assertEqual(resolution, "skip")
+
+    def test_different_size_is_not_a_duplicate(self):
+        from Backend.helper.settings_manager import SettingsManager
+
+        other = dict(self.incoming, size="4.10GB")
+        with patch.object(SettingsManager, "current", return_value=SimpleNamespace(duplicate_protection=False)):
+            resolution = self.database._duplicate_resolution(self.existing, other, tmdb_id=1503565)
+        self.assertIsNone(resolution)
+
+    def test_personal_media_never_flagged(self):
+        from Backend.helper.settings_manager import SettingsManager
+
+        with patch.object(SettingsManager, "current", return_value=SimpleNamespace(duplicate_protection=False)):
+            resolution = self.database._duplicate_resolution(self.existing, self.incoming, tmdb_id=-1234)
+        self.assertIsNone(resolution)
 
 
 if __name__ == "__main__":

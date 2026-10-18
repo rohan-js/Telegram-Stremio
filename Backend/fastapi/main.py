@@ -565,6 +565,12 @@ async def admin_spill_delete(chat_id: int, msg_id: int, _: bool = Depends(requir
 async def admin_logs(max_bytes: int = 200000, _: bool = Depends(require_auth)):
     return await get_admin_logs_api(max_bytes)
 
+@app.get("/api/admin/identity-audit")
+async def admin_identity_audit(limit: int = 200, _: bool = Depends(require_auth)):
+    from Backend.helper.identity_repair import list_imdb_less_docs
+
+    return await list_imdb_less_docs(limit=max(1, min(int(limit), 500)))
+
 @app.get("/api/admin/logs/download")
 async def admin_logs_download(max_bytes: int = 500000, _: bool = Depends(require_auth)):
     return await download_admin_logs_api(max_bytes)

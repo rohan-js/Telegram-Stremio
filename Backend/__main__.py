@@ -164,6 +164,14 @@ async def start_services():
         except Exception:
             LOGGER.warning("Wrapped rollup loop could not be started.", exc_info=True)
 
+        try:
+            from Backend.helper.identity_repair import start_identity_repair_service
+
+            # Heal imdb-less docs (Machante class) shortly after boot, then daily.
+            start_identity_repair_service()
+        except Exception:
+            LOGGER.warning("Identity repair service could not be started.", exc_info=True)
+
         link_checker_task = DeadLinkChecker(db, app, check_interval_hours=24)
         loop.create_task(link_checker_task.start())
 

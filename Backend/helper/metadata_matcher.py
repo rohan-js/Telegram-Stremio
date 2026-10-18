@@ -77,6 +77,25 @@ class MatchDecision:
     extra: dict | None = None
 
 
+# Two provider spellings of the same title ("Machante Maalakha" vs
+# "Machante Malakha") must still share external ids: a one-letter difference
+# previously left the stored doc without an imdb id, so /meta and /stream
+# lookups by the IMDb id returned nothing and the title looked missing
+# (2026-10-17 Machante incident).
+_FUZZY_IDENTITY_MIN_SIMILARITY = 95.0
+
+
+def _titles_equivalent(left: str, right: str) -> bool:
+    """Near-identical normalized titles (provider spelling variants)."""
+    if not left or not right:
+        return False
+    if abs(len(left) - len(right)) > 3:
+        return False
+    if len(left.split()) != len(right.split()):
+        return False
+    return title_similarity(left, right) >= _FUZZY_IDENTITY_MIN_SIMILARITY
+
+
 def enrich_candidate_identity(
     selected: MatchCandidate | None,
     candidates: list[MatchCandidate],
@@ -91,8 +110,18 @@ def enrich_candidate_identity(
     for candidate in candidates:
         if candidate is selected or candidate.media_type != selected.media_type:
             continue
-        if normalize_title(candidate.title) != selected_title:
-            continue
+        candidate_title = normalize_title(candidate.title)
+        exact_match = candidate_title == selected_title
+        if not exact_match:
+            # Fuzzy merge is delimited hard: both sides must carry a year and
+            # neither title may be generic — a missing-year near-duplicate
+            # must never donate its ids (collision-prone titles).
+            if not (selected.year and candidate.year):
+                continue
+            if is_generic_title(selected_title) or is_generic_title(candidate_title):
+                continue
+            if not _titles_equivalent(selected_title, candidate_title):
+                continue
         if selected.year and candidate.year and abs(int(selected.year) - int(candidate.year)) > 1:
             continue
         if selected.year and not candidate.year and selected_title in GENERIC_TITLES:
