@@ -537,3 +537,68 @@ async def wrapped_rollup_loop(db) -> None:
         except Exception:
             LOGGER.exception("Wrapped rollup failed")
         await asyncio.sleep(24 * 3600)
+
+
+# -------------------------------
+# Viewer Insights daily digest (owner-only DM)
+# -------------------------------
+
+async def send_insights_digest(db) -> bool:
+    """Build + DM yesterday's viewing summary; False when silent.
+
+    Owner-only by construction — schedule_owner_alert() only ever messages
+    Telegram.OWNER_ID (the owner).  Zero-activity days send nothing.
+    """
+    from datetime import datetime, timedelta
+
+    from Backend.helper import insights_agg
+    from Backend.helper.owner_alerts import schedule_owner_alert
+
+    now = datetime.utcnow()
+    day_start = datetime(now.year, now.month, now.day) - timedelta(days=1)
+    day_end = day_start + timedelta(days=1)
+    records = await db.fetch_insight_records(since=day_start, until=day_end, limit=5000)
+    if not records:
+        return False
+    sessions = insights_agg.build_sessions(records)
+    token_map = await db.get_token_user_map()
+    message = insights_agg.digest_message(
+        sessions, token_map, day_label=day_start.strftime("%d %b %Y")
+    )
+    if not message:
+        return False
+    schedule_owner_alert(message, key="insights-digest", cooldown_sec=20 * 3600)
+    LOGGER.info(
+        "Insights digest sent: %s play(s), %s viewer(s)",
+        len(sessions),
+        len({insights_agg.classify_identity(s, token_map)["key"] for s in sessions}),
+    )
+    return True
+
+
+async def insights_digest_loop(db) -> None:
+    """Daily owner DM once the clock passes INSIGHTS_DIGEST_HOUR_UTC."""
+    from datetime import datetime
+
+    if not bool(getattr(Telegram, "INSIGHTS_DIGEST_ENABLED", True)):
+        LOGGER.info("Insights digest disabled via config.")
+        return
+    try:
+        target_hour = max(0, min(23, int(getattr(Telegram, "INSIGHTS_DIGEST_HOUR_UTC", 3) or 3)))
+    except Exception:
+        target_hour = 3
+    LOGGER.info(f"Viewer-insights digest loop started (daily at {target_hour}:00 UTC, owner-only).")
+    await asyncio.sleep(180)  # let the app finish booting
+    last_sent_date = None
+    while True:
+        try:
+            now = datetime.utcnow()
+            today = now.strftime("%Y-%m-%d")
+            if now.hour >= target_hour and last_sent_date != today:
+                last_sent_date = today
+                await send_insights_digest(db)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            LOGGER.exception("Insights digest failed")
+        await asyncio.sleep(600)

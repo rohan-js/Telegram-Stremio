@@ -172,6 +172,14 @@ async def start_services():
         except Exception:
             LOGGER.warning("Identity repair service could not be started.", exc_info=True)
 
+        try:
+            from Backend.helper.production_ops import insights_digest_loop
+
+            # Daily owner-only viewer-insights digest (~08:30 IST).
+            loop.create_task(insights_digest_loop(db))
+        except Exception:
+            LOGGER.warning("Insights digest loop could not be started.", exc_info=True)
+
         link_checker_task = DeadLinkChecker(db, app, check_interval_hours=24)
         loop.create_task(link_checker_task.start())
 

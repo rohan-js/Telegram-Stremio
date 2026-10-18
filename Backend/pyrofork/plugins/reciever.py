@@ -181,6 +181,14 @@ async def _finalize_failed_status_or_reply(job: dict, reason: str) -> None:
 
 async def _enqueue_ingest_job(message: Message, job: dict) -> None:
     title = job.get("display_name") or job.get("title") or job.get("file_name") or "unknown"
+    # Capture who put this file in the channel (Insights "Uploaded by").
+    if "uploader" not in job:
+        try:
+            from Backend.helper.uploader import uploader_from_message
+
+            job["uploader"] = uploader_from_message(message)
+        except Exception:
+            job["uploader"] = None
     position = file_queue.qsize() + 1
     status_chat_id, status_msg_id = await _send_status_message(message, title, position)
     job.update({
@@ -314,6 +322,10 @@ async def _process_ingest_job(job: dict) -> None:
             "origin_chat_id": int(job["chat_id"]),
             "origin_msg_id": int(job["msg_id"]),
         })
+
+    uploader = job.get("uploader")
+    if uploader:
+        metadata_info["uploader"] = uploader
 
     await _set_status(job, "indexing stream")
     insert_status: dict = {}

@@ -17,7 +17,7 @@ from Backend.fastapi.routes.template_routes import (
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, vlc_redirect,
     custom_catalogs_page, watch_requests_page, live_tv_page, settings_page, tools_page,
     launch_readiness_page, policy_page, admin_requests_page, public_request_page,
-    wrapped_page
+    wrapped_page, insights_page
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
@@ -62,6 +62,8 @@ from Backend.fastapi.routes.api_routes import (
     request_search_api, request_popular_api, request_submit_api,
     get_requests_api, update_request_api, delete_request_api,
     get_health_api, get_admin_logs_api, download_admin_logs_api,
+    get_insights_overview_api, get_insights_title_api, get_insights_viewer_api,
+    get_insights_export_api, get_token_activity_api, get_media_viewers_api,
     export_config_api, import_config_api, restart_app_api,
     resolve_subtitle_api, list_subtitle_languages_api, list_subtitles_api,
     add_subtitles_api, remove_subtitle_api,
@@ -570,6 +572,53 @@ async def admin_identity_audit(limit: int = 200, _: bool = Depends(require_auth)
     from Backend.helper.identity_repair import list_imdb_less_docs
 
     return await list_imdb_less_docs(limit=max(1, min(int(limit), 500)))
+
+@app.get("/admin/insights", response_class=HTMLResponse)
+async def admin_insights(request: Request, _: bool = Depends(require_auth)):
+    return await insights_page(request, _)
+
+@app.get("/api/admin/insights/overview")
+async def admin_insights_overview(days: int = 30, _: bool = Depends(require_auth)):
+    return await get_insights_overview_api(days)
+
+@app.get("/api/admin/insights/title")
+async def admin_insights_title(
+    days: int = 90,
+    imdb_id: str = None,
+    tmdb_id: int = None,
+    db_index: int = None,
+    media_type: str = None,
+    title: str = None,
+    _: bool = Depends(require_auth),
+):
+    return await get_insights_title_api(days, imdb_id, tmdb_id, db_index, media_type, title)
+
+@app.get("/api/admin/insights/viewer")
+async def admin_insights_viewer(
+    days: int = 90,
+    viewer_key: str = None,
+    token: str = None,
+    _: bool = Depends(require_auth),
+):
+    return await get_insights_viewer_api(days, viewer_key, token)
+
+@app.get("/api/admin/insights/export")
+async def admin_insights_export(scope: str = "plays", days: int = 90, _: bool = Depends(require_auth)):
+    return await get_insights_export_api(scope, days)
+
+@app.get("/api/admin/access/tokens/{token}/activity")
+async def admin_token_activity(token: str, days: int = 90, _: bool = Depends(require_auth)):
+    return await get_token_activity_api(token, days)
+
+@app.get("/api/media/{media_type}/{tmdb_id}/viewers")
+async def media_viewers(
+    media_type: str,
+    tmdb_id: int,
+    db_index: int = None,
+    days: int = 90,
+    _: bool = Depends(require_auth),
+):
+    return await get_media_viewers_api(media_type, tmdb_id, db_index, days)
 
 @app.get("/api/admin/logs/download")
 async def admin_logs_download(max_bytes: int = 500000, _: bool = Depends(require_auth)):

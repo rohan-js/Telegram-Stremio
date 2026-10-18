@@ -571,9 +571,66 @@
     </div>
 </div>
 
+<!-- Per-token viewer activity (Insights) -->
+<div id="token-activity-modal" class="modal-overlay hidden">
+    <div class="modal-content glass-panel rounded-3xl w-[min(94vw,60rem)] max-h-[84vh] overflow-y-auto p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xl font-black">Token Activity</h3>
+            <button onclick="closeTokenActivity()" class="glass-btn rounded-full w-10 h-10 flex items-center justify-center">
+                <i class="fas fa-xmark"></i>
+            </button>
+        </div>
+        <div id="token-activity-body"><p class="text-soft text-sm">Loading…</p></div>
+    </div>
+</div>
+
 <script>
     let allTokens = [];
     let currentPage = 1;
+
+    //----- Token activity (Insights per-viewer profile)
+    function closeTokenActivity() {
+        document.getElementById('token-activity-modal').classList.add('hidden');
+    }
+
+    async function openTokenActivity(token) {
+        const modal = document.getElementById('token-activity-modal');
+        const body = document.getElementById('token-activity-body');
+        modal.classList.remove('hidden');
+        body.innerHTML = '<p class="text-soft text-sm">Loading…</p>';
+        try {
+            const data = await (await fetch(`/api/admin/access/tokens/${encodeURIComponent(token)}/activity?days=90`)).json();
+            const v = data.viewer || {};
+            const t = data.totals || {};
+            if (!v.key || !(t.plays > 0)) {
+                body.innerHTML = '<p class="text-soft text-sm">No playback recorded for this token in the last 90 days.</p>';
+                return;
+            }
+            const wr = data.watch_requests;
+            const rows = (data.history || []).slice(0, 80).map(h => `<tr>
+                <td class="py-1.5 pr-3">${escHtml(h.when || '')}</td>
+                <td class="py-1.5 pr-3"><b>${escHtml(h.title || '')}</b></td>
+                <td class="py-1.5 pr-3">${escHtml(h.watch_time || '')}</td>
+                <td class="py-1.5 pr-3">${h.completion != null ? Math.round(h.completion * 100) + '%' : '—'}</td>
+                <td class="py-1.5 pr-3">${escHtml(h.device || '')}</td>
+                <td class="py-1.5">${escHtml(h.city || '')}${h.country ? ', ' + escHtml(h.country) : ''}</td>
+            </tr>`).join('');
+            body.innerHTML = `
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <div><div class="text-2xl font-black">${t.plays || 0}</div><div class="text-soft text-xs uppercase tracking-wider">Plays</div></div>
+                    <div><div class="text-2xl font-black">${escHtml(t.watch_time || '0m')}</div><div class="text-soft text-xs uppercase tracking-wider">Watch time</div></div>
+                    <div><div class="text-2xl font-black">${t.unique_titles || 0}</div><div class="text-soft text-xs uppercase tracking-wider">Titles</div></div>
+                    <div><div class="text-2xl font-black">${t.avg_completion != null ? Math.round(t.avg_completion * 100) + '%' : '—'}</div><div class="text-soft text-xs uppercase tracking-wider">Avg completion</div></div>
+                </div>
+                <div class="text-sm mb-4"><span class="text-soft">Identity:</span> ${escHtml(v.label || '—')} ${v.username ? '@' + escHtml(v.username) : ''} ${v.mode === 'ip' ? '<span class="text-xs border border-hairline rounded-full px-2 py-0.5 ml-1">shared token · viewer picked by IP</span>' : ''}
+                ${(data.places || []).length ? `<div class="text-xs text-soft mt-1">Locations: ${(data.places || []).slice(0, 4).map(p => escHtml(p.place) + ' ×' + p.plays).join(' · ')}</div>` : ''}
+                ${(data.devices || []).length ? `<div class="text-xs text-soft mt-1">Devices: ${(data.devices || []).slice(0, 4).map(d => escHtml(d.device) + ' ×' + d.plays).join(' · ')}</div>` : ''}</div>
+                ${wr && wr.count ? `<div class="text-xs rounded-2xl border border-primary/30 bg-primary/10 p-3 mb-4"><b>Requested-vs-watched:</b> clicked Watch ${wr.count} time(s).</div>` : ''}
+                <table class="w-full text-sm"><thead><tr class="text-soft text-xs uppercase tracking-wider text-left"><th class="pb-2 pr-3">When</th><th class="pb-2 pr-3">Title</th><th class="pb-2 pr-3">Time</th><th class="pb-2 pr-3">Done</th><th class="pb-2 pr-3">Device</th><th class="pb-2">Where</th></tr></thead><tbody>${rows}</tbody></table>`;
+        } catch (error) {
+            body.innerHTML = `<p class="text-red-400 text-sm">Could not load activity: ${escHtml(error.message || 'error')}</p>`;
+        }
+    }
 
     function fmtDate(iso) {
         if (!iso) return '—';
@@ -695,6 +752,9 @@
         }
 
         const revokeTokenBtn = t.token ? `
+            <button onclick="openTokenActivity('${escHtml(t.token)}')" class="action-chip glass-btn">
+                Activity
+            </button>
             <button onclick="toggleLifetime('${escHtml(t.token)}', ${t.lifetime ? 'false' : 'true'})" class="action-chip ${t.lifetime ? 'glass-btn-warning' : 'glass-btn-success'}">
                 ${t.lifetime ? 'Remove Lifetime' : 'Lifetime'}
             </button>

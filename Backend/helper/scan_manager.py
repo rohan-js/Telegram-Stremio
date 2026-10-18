@@ -288,6 +288,15 @@ class ScanManager:
 
         title = finalize_media_name(title, is_split=bool(metadata_info.get("group_key")))
 
+        try:
+            from Backend.helper.uploader import uploader_from_message
+
+            uploader = uploader_from_message(message)
+            if uploader:
+                metadata_info["uploader"] = uploader
+        except Exception:
+            pass
+
         updated = await self._db.insert_media(
             metadata_info,
             channel=channel_int,

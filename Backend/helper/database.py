@@ -101,15 +101,60 @@ class Database:
 
             # TTL: stream analytics must not grow forever on the Atlas free
             # tier — STREAM_LOG_RETENTION_DAYS was advisory-only until now.
+            # Mongo cannot alter a TTL index in place: when the configured
+            # window changes (30 → 90, 2026-10-18) drop and recreate.
             try:
                 retention_days = max(1, int(getattr(Telegram, "STREAM_LOG_RETENTION_DAYS", 30) or 30))
-                await tracking["stream_analytics"].create_index(
-                    [("logged_at", ASCENDING)],
-                    expireAfterSeconds=retention_days * 86400,
-                    name="logged_at_retention_ttl",
-                )
+                ttl_seconds = retention_days * 86400
+                analytics = tracking["stream_analytics"]
+                try:
+                    await analytics.create_index(
+                        [("logged_at", ASCENDING)],
+                        expireAfterSeconds=ttl_seconds,
+                        name="logged_at_retention_ttl",
+                    )
+                except Exception as exc:
+                    message = str(exc)
+                    if "IndexOptionsConflict" in message or "already exists with different options" in message:
+                        LOGGER.info(
+                            "stream_analytics TTL window changed — recreating index at %s days",
+                            retention_days,
+                        )
+                        await analytics.drop_index("logged_at_retention_ttl")
+                        await analytics.create_index(
+                            [("logged_at", ASCENDING)],
+                            expireAfterSeconds=ttl_seconds,
+                            name="logged_at_retention_ttl",
+                        )
+                    else:
+                        raise
             except Exception as e:
                 LOGGER.error(f"Failed creating stream_analytics TTL index: {e}")
+
+            # Insights lookups: per-viewer, per-origin-file, per-playback and
+            # per-title queries over the TTL'd collection (idempotent).
+            try:
+                analytics = tracking["stream_analytics"]
+                await analytics.create_index(
+                    [("token", ASCENDING), ("logged_at", DESCENDING)],
+                    name="insights_token_logged_at",
+                )
+                await analytics.create_index(
+                    [("chat_id", ASCENDING), ("msg_id", ASCENDING), ("logged_at", DESCENDING)],
+                    name="insights_origin_logged_at",
+                )
+                await analytics.create_index(
+                    [("playback_id", ASCENDING)],
+                    name="insights_playback_id",
+                    sparse=True,
+                )
+                await analytics.create_index(
+                    [("media.imdb_id", ASCENDING), ("logged_at", DESCENDING)],
+                    name="insights_media_imdb_logged_at",
+                    sparse=True,
+                )
+            except Exception as e:
+                LOGGER.error(f"Failed creating insights indexes: {e}")
 
         for db_key in tuple(self.dbs):
             if db_key.startswith("storage_"):
@@ -1491,6 +1536,7 @@ class Database:
             torrent_file_msg_id=metadata_info.get("torrent_file_msg_id"),
             local_rel_path=metadata_info.get("local_rel_path"),
             local_size=metadata_info.get("local_size"),
+            uploader=self._normalize_uploader(metadata_info.get("uploader")),
             hidden_from_stremio=bool(metadata_info.get("hidden_from_stremio", False)),
             recommended=bool(metadata_info.get("recommended", False)),
             quality_note=metadata_info.get("quality_note"),
@@ -1527,6 +1573,33 @@ class Database:
         name = re.sub(r"\s+", " ", str(quality.get("name") or "").strip().lower())
         size = str(quality.get("size") or "").strip().lower()
         return (quality.get("quality"), name, size)
+
+    @staticmethod
+    def _normalize_uploader(value) -> Optional[dict]:
+        """Sanitize an uploader descriptor for storage (None-safe, whitelist)."""
+        if not isinstance(value, dict):
+            return None
+        try:
+            uid = int(value.get("id")) if value.get("id") is not None else None
+        except (TypeError, ValueError):
+            uid = None
+        name = str(value.get("name") or "").strip()[:120]
+        username = value.get("username")
+        username = str(username).strip().lstrip("@")[:64] if username else None
+        kind = str(value.get("kind") or "user").strip().lower()
+        if kind not in ("user", "channel", "forward"):
+            kind = "user"
+        forwarded_from = value.get("forwarded_from")
+        forwarded_from = str(forwarded_from).strip()[:120] if forwarded_from else None
+        if uid is None and not name and not username and not forwarded_from:
+            return None
+        return {
+            "id": uid,
+            "name": name,
+            "username": username,
+            "kind": kind,
+            "forwarded_from": forwarded_from,
+        }
 
     def _same_replace_group(self, existing_quality: dict, new_quality: dict) -> bool:
         if existing_quality.get("group_key") or new_quality.get("group_key"):
@@ -2664,6 +2737,66 @@ class Database:
                 return {"media_type": "tv", "tmdb_id": tv.get("tmdb_id")}
         return None
 
+    async def find_media_identity_by_origin(self, origin_chat_id: int, origin_msg_id: int) -> Optional[dict]:
+        """Full media identity for a telegram-origin file (Insights joins).
+
+        Returns {"imdb_id", "tmdb_id", "db_index", "media_type", "title",
+        optional "season"/"episode"} or None. Cached by the caller
+        (Backend.helper.insights.resolve_media_identity).
+        """
+        origin_chat_id = int(origin_chat_id)
+        origin_msg_id = int(origin_msg_id)
+        for i in range(1, self.current_db_index + 1):
+            db = self.dbs.get(f"storage_{i}")
+            if db is None:
+                continue
+            movie = await db["movie"].find_one(
+                {"telegram.origin_chat_id": origin_chat_id, "telegram.origin_msg_id": origin_msg_id},
+                {"imdb_id": 1, "tmdb_id": 1, "title": 1},
+            )
+            if movie:
+                return {
+                    "imdb_id": movie.get("imdb_id"),
+                    "tmdb_id": movie.get("tmdb_id"),
+                    "db_index": i,
+                    "media_type": "movie",
+                    "title": movie.get("title"),
+                }
+            tv = await db["tv"].find_one(
+                {"seasons.episodes.telegram.origin_chat_id": origin_chat_id,
+                 "seasons.episodes.telegram.origin_msg_id": origin_msg_id},
+                {"imdb_id": 1, "tmdb_id": 1, "title": 1, "seasons": 1},
+            )
+            if tv:
+                season_no = None
+                episode_no = None
+                for season in tv.get("seasons") or []:
+                    found = False
+                    for episode in season.get("episodes") or []:
+                        for quality in (episode.get("telegram") or []):
+                            if (
+                                quality.get("origin_chat_id") == origin_chat_id
+                                and quality.get("origin_msg_id") == origin_msg_id
+                            ):
+                                season_no = season.get("season_number")
+                                episode_no = episode.get("episode_number")
+                                found = True
+                                break
+                        if found:
+                            break
+                    if found:
+                        break
+                return {
+                    "imdb_id": tv.get("imdb_id"),
+                    "tmdb_id": tv.get("tmdb_id"),
+                    "db_index": i,
+                    "media_type": "tv",
+                    "title": tv.get("title"),
+                    "season": season_no,
+                    "episode": episode_no,
+                }
+        return None
+
     async def delete_media_by_origin(self, origin_chat_id: int, origin_msg_id: int) -> bool:
         """Remove every quality entry created from a source Telegram post."""
         changed = False
@@ -3356,6 +3489,24 @@ class Database:
         """Persist a finished-stream record to the tracking DB for analytics."""
         try:
             meta = stats.get("meta", {}) or {}
+            try:
+                file_size = int(stats.get("file_size") or meta.get("file_size") or 0)
+            except (TypeError, ValueError):
+                file_size = 0
+            try:
+                watched_offset = int(stats.get("file_offset") or 0)
+            except (TypeError, ValueError):
+                watched_offset = 0
+            # Range-served paths (disk/nginx) carry no chunk loop; fall back to
+            # the request's end offset so completion still works for them.
+            if watched_offset <= 0:
+                try:
+                    watched_offset = int(meta.get("request_end") or 0) + 1
+                except (TypeError, ValueError):
+                    watched_offset = 0
+            completion = None
+            if file_size > 0 and watched_offset > 0:
+                completion = round(min(1.0, watched_offset / file_size), 4)
             record = {
                 "stream_id":   stats.get("stream_id"),
                 "msg_id":      stats.get("msg_id"),
@@ -3365,8 +3516,17 @@ class Database:
                 "filename":    meta.get("filename"),
                 "source_type": meta.get("source_type", "telegram"),
                 "user_name":   meta.get("user_name"),
+                "token_user_id": meta.get("token_user_id"),
                 "client_host": meta.get("client_host"),
+                "client_ip":   meta.get("client_ip"),
+                "app":         meta.get("app"),
+                "device":      meta.get("device"),
                 "user_agent":  meta.get("user_agent"),
+                "media":       meta.get("media"),
+                "playback_id": meta.get("playback_id"),
+                "file_size":   file_size or None,
+                "watched_offset": watched_offset or None,
+                "completion":  completion,
                 "request_path": meta.get("request_path"),
                 "request_range": meta.get("request_range"),
                 "client_index": stats.get("client_index"),
@@ -3393,6 +3553,24 @@ class Database:
                 "logged_at":   datetime.utcnow(),
                 "token":       meta.get("token"),
             }
+            # Per-view geo (city-level, admin-only, 90-day raw retention).
+            # lookup_ip is cached 6h and returns Local for private IPs.
+            client_ip = record.get("client_ip")
+            if client_ip:
+                try:
+                    from Backend.helper.analytics import lookup_ip
+
+                    geo = await lookup_ip(str(client_ip))
+                    if geo and (geo.get("country") or geo.get("city") or geo.get("isp")):
+                        record["geo"] = {
+                            "country": geo.get("country"),
+                            "country_code": geo.get("country_code"),
+                            "city": geo.get("city"),
+                            "isp": geo.get("isp"),
+                            "proxy": bool(geo.get("proxy")),
+                        }
+                except Exception:
+                    pass
             await self.dbs["tracking"]["stream_analytics"].insert_one(record)
             token = meta.get("token")
             if token:
@@ -3693,6 +3871,127 @@ class Database:
                         if group:
                             groups.append(group)
         return groups[:limit]
+
+    # ------------------------------
+    # Viewer Insights data layer
+    # ------------------------------
+    async def fetch_insight_records(self, days: int = 30, limit: int = 8000, *, since=None, until=None) -> list:
+        """Raw stream records for the Insights aggregations (newest first).
+
+        Window defaults to the last ``days``; pass ``since``/``until``
+        datetimes for an exact range (the daily digest uses yesterday only).
+        """
+        try:
+            days = max(1, min(int(days or 30), 90))
+        except (TypeError, ValueError):
+            days = 30
+        try:
+            limit = max(200, min(int(limit or 8000), 20000))
+        except (TypeError, ValueError):
+            limit = 8000
+        query: dict = {}
+        if since is not None or until is not None:
+            window: dict = {}
+            if since is not None:
+                window["$gte"] = since
+            if until is not None:
+                window["$lt"] = until
+            query["logged_at"] = window
+        else:
+            query["logged_at"] = {"$gte": datetime.utcnow() - timedelta(days=days)}
+        projection = {
+            "title": 1, "filename": 1, "source_type": 1,
+            "user_name": 1, "token": 1, "token_user_id": 1, "client_ip": 1,
+            "device": 1, "app": 1, "media": 1, "playback_id": 1, "geo": 1,
+            "completion": 1, "watched_offset": 1, "file_size": 1, "total_bytes": 1,
+            "duration_sec": 1, "chat_id": 1, "msg_id": 1, "logged_at": 1,
+            "status": 1, "cached": 1, "served_via": 1,
+        }
+        cursor = (
+            self.dbs["tracking"]["stream_analytics"]
+            .find(query, projection)
+            .sort("logged_at", DESCENDING)
+            .limit(limit)
+        )
+        return await cursor.to_list(None)
+
+    async def get_token_user_map(self) -> dict:
+        """token -> {user_id, name, full_name, username, is_owner, shared, test}.
+
+        The Insights identity layer: user-mode when token_user_id resolves,
+        shared-mode (IP-identified viewers) for the shared/ownerless tokens.
+        """
+        out: dict = {}
+        try:
+            tracking = self.dbs["tracking"]
+            tokens = await tracking["api_tokens"].find(
+                {}, {"token": 1, "name": 1, "user_id": 1}
+            ).to_list(None)
+            user_ids = [t.get("user_id") for t in tokens if t.get("user_id")]
+            users: dict = {}
+            if user_ids:
+                cursor = tracking["users"].find(
+                    {"_id": {"$in": user_ids}},
+                    {"first_name": 1, "last_name": 1, "username": 1},
+                )
+                async for user in cursor:
+                    users[user.get("_id")] = user
+            default_token = str(getattr(Telegram, "DEFAULT_ADDON_TOKEN", "") or "")
+            owner_id = int(getattr(Telegram, "OWNER_ID", 0) or 0)
+            for token_doc in tokens:
+                token_value = str(token_doc.get("token") or "")
+                if not token_value:
+                    continue
+                user_id = token_doc.get("user_id")
+                user = users.get(user_id) or {}
+                full_name = " ".join(
+                    part for part in (user.get("first_name"), user.get("last_name")) if part
+                ).strip()
+                name = str(token_doc.get("name") or "").strip() or full_name or "Unknown"
+                out[token_value] = {
+                    "user_id": int(user_id) if user_id else None,
+                    "name": name,
+                    "full_name": full_name or name,
+                    "username": user.get("username"),
+                    "is_owner": bool(user_id and owner_id and int(user_id) == owner_id),
+                    "shared": (user_id is None) or (bool(default_token) and token_value == default_token),
+                    "test": name.strip().lower() in ("autotest-temp",),
+                }
+        except Exception as e:
+            LOGGER.warning(f"Insights token map failed: {e}")
+        return out
+
+    async def get_watch_requests_for_user(self, user_id: int, days: int = 90) -> dict:
+        """Watch-button clicks by a Telegram user (requested-vs-watched join)."""
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            return {"count": 0, "titles": [], "recent": []}
+        since = datetime.utcnow() - timedelta(days=max(1, min(int(days or 90), 365)))
+        try:
+            cursor = (
+                self.dbs["tracking"]["watch_link_requests"]
+                .find(
+                    {"requester_user_id": user_id, "clicked_at": {"$gte": since}},
+                    {"media_title": 1, "media_type": 1, "imdb_id": 1, "clicked_at": 1, "last_platform": 1},
+                )
+                .sort("clicked_at", DESCENDING)
+                .limit(500)
+            )
+            rows = await cursor.to_list(None)
+        except Exception as e:
+            LOGGER.warning(f"Insights watch-request join failed: {e}")
+            return {"count": 0, "titles": [], "recent": []}
+        titles = sorted({str(r.get("media_title") or "") for r in rows if r.get("media_title")})
+        recent = [
+            {
+                "title": r.get("media_title"),
+                "when": r["clicked_at"].strftime("%Y-%m-%d %H:%M") if isinstance(r.get("clicked_at"), datetime) else None,
+                "platform": r.get("last_platform") or "stremio",
+            }
+            for r in rows[:50]
+        ]
+        return {"count": len(rows), "titles": titles, "recent": recent}
 
     async def get_wrapped_stats(self, token: str) -> Optional[dict]:
         """Family Wrapped numbers for one token: live current-month aggregates

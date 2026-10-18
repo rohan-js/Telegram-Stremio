@@ -34,6 +34,10 @@ class QualityDetail(BaseModel):
     torrent_file_msg_id: Optional[int] = None
     local_rel_path: Optional[str] = None
     local_size: Optional[int] = None
+    # Who put this file in the Telegram channel (Insets: admin Insights).
+    # {"id": int|None, "name": str, "username": str|None,
+    #  "kind": "user"|"channel"|"forward", "forwarded_from": str|None}
+    uploader: Optional[dict] = None
     hidden_from_stremio: bool = False
     recommended: bool = False
     quality_note: Optional[str] = None

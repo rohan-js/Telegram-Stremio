@@ -229,6 +229,16 @@ async def _scan_channel(client: Client, chat_id: int):
 
             title_clean = finalize_media_name(title, is_split=bool(metadata_info.get("group_key")))
 
+            # ── Uploader identity (Insights "Uploaded by") ───────
+            try:
+                from Backend.helper.uploader import uploader_from_message
+
+                uploader = uploader_from_message(message)
+                if uploader:
+                    metadata_info["uploader"] = uploader
+            except Exception:
+                pass
+
             # ── Insert into DB ───────────────────────────────────
             try:
                 updated_id = await db.insert_media(

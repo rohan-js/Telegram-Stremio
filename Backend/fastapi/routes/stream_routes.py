@@ -13,6 +13,7 @@ from collections import deque
 from Backend import db
 from Backend.helper.encrypt import decode_string
 from Backend.helper.analytics import client_ip_from, record_stream_start
+from Backend.helper.insights import enrich_stream_meta, resolve_media_identity
 from Backend.helper.exceptions import InvalidHash
 from Backend.helper.custom_dl import (
     ByteStreamer,
@@ -820,6 +821,66 @@ async def downloaded_torrent_stream_handler(
 
     file_name = Path(str(decoded.get("name") or file_path.name)).name or file_path.name
     mime_type = guess_mime_type(file_path)
+
+    # Insights: log nginx/streamed file plays — previously a blind spot for
+    # downloaded_torrent / local_vps titles. GET only (HEAD probes skipped);
+    # completion for these records comes from the requested range end.
+    if getattr(request, "method", "GET") != "HEAD":
+        _dl_nginx = bool(getattr(Telegram, "NGINX_DOWNLOAD_ACCEL_REDIRECT_ENABLED", True))
+        _dl_headers = getattr(request, "headers", {}) or {}
+        _dl_client = getattr(request, "client", None)
+        _dl_meta = {
+            "request_path": str(getattr(getattr(request, "url", None), "path", "") or ""),
+            "request_range": range_header or None,
+            "request_start": start,
+            "request_end": end,
+            "request_length": req_length,
+            "client_host": getattr(_dl_client, "host", None),
+            "file_size": file_size,
+            "user_agent": _dl_headers.get("user-agent"),
+            "title": file_name,
+            "filename": file_name,
+            "source_type": str(decoded.get("source_type") or "downloaded_torrent"),
+            "token": token,
+            "token_user_id": token_data.get("user_id") if token_data else None,
+            "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
+        }
+        try:
+            enrich_stream_meta(_dl_meta, request=request, token=token, stream_id_hash=id)
+        except Exception:
+            pass
+        try:
+            asyncio.create_task(
+                db.log_stream_stats(
+                    {
+                        "stream_id": secrets.token_hex(8),
+                        "msg_id": None,
+                        "chat_id": None,
+                        "dc_id": None,
+                        "client_index": None,
+                        "file_size": file_size,
+                        "total_bytes": 0 if _dl_nginx else req_length,
+                        "duration": 0.0,
+                        "avg_mbps": 0.0,
+                        "peak_mbps": 0.0,
+                        "status": "finished",
+                        "parallelism": 0,
+                        "chunk_size": 0,
+                        "ttfb_sec": 0.0,
+                        "chunk_timeouts": 0,
+                        "chunk_errors": 0,
+                        "fallback_chunks": 0,
+                        "zero_pad_chunks": 0,
+                        "cached": True,
+                        "served_via": "nginx" if _dl_nginx else "nginx_stream",
+                        "usage_accounted": False,
+                        "meta": _dl_meta,
+                    }
+                )
+            )
+        except Exception:
+            pass
+
     headers = {
         "Content-Type": mime_type,
         "Content-Disposition": _content_disposition(file_name),
@@ -1077,6 +1138,17 @@ async def virtual_media_streamer(
             "probe_results": [],
         },
     }
+    # Insights: viewer identity for this split/virtual stream (first part's origin).
+    _first_part = (parts_payload[0] if parts_payload else {}) or {}
+    enrich_stream_meta(
+        meta,
+        request=request,
+        token=token,
+        stream_id_hash=stream_id_hash,
+        media_identity=await resolve_media_identity(
+            _first_part.get("chat_id"), _first_part.get("msg_id")
+        ),
+    )
 
     from fastapi.responses import Response as PlainResponse
 
@@ -1208,6 +1280,16 @@ async def _zip_media_streamer(request, parts_payload, token, token_data, stream_
         "zip_parts": len(parts),
         "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
     }
+    _first_part = (parts[0] if parts else {}) or {}
+    enrich_stream_meta(
+        meta,
+        request=request,
+        token=token,
+        stream_id_hash=stream_id_hash,
+        media_identity=await resolve_media_identity(
+            _first_part.get("chat_id"), _first_part.get("msg_id")
+        ),
+    )
 
     from fastapi.responses import Response as PlainResponse
 
@@ -1625,6 +1707,14 @@ async def media_streamer(
             ],
         },
     }
+    # Insights: viewer identity + media join for this playback request.
+    enrich_stream_meta(
+        meta,
+        request=request,
+        token=token,
+        stream_id_hash=stream_id_hash,
+        media_identity=await resolve_media_identity(chat_id, msg_id),
+    )
 
     # ------------------------------------------------------------------
     # Disk cache hit path (optional)
@@ -1644,6 +1734,7 @@ async def media_streamer(
                             "chat_id": chat_id,
                             "dc_id": file_id.dc_id,
                             "client_index": index,
+                            "file_size": file_size,
                             "total_bytes": 0 if nginx_accel_enabled() else req_length,
                             "duration": 0.0,
                             "avg_mbps": 0.0,
@@ -1724,6 +1815,7 @@ async def media_streamer(
                                 "chat_id": chat_id,
                                 "dc_id": file_id.dc_id,
                                 "client_index": index,
+                                "file_size": file_size,
                                 "total_bytes": req_length,
                                 "duration": 0.0,
                                 "avg_mbps": 0.0,

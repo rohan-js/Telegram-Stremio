@@ -451,6 +451,24 @@
         </div>
     </div>
 
+    <div class="glass-card rounded-3xl p-5 sm:p-6 lg:p-8 mb-6 sm:mb-8">
+        <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-5 sm:mb-6">
+            <div>
+                <h3 class="section-title text-xl sm:text-2xl">Viewers</h3>
+                <p class="muted mt-1 text-sm sm:text-base">
+                    Who watched this title — plays, completion, devices and locations (last 90 days).
+                </p>
+            </div>
+            <div class="flex items-center gap-2">
+                <a href="/admin/insights" class="btn-ui">Full Insights</a>
+                <button type="button" onclick="loadTitleViewers()" class="btn-ui btn-primary">Refresh</button>
+            </div>
+        </div>
+        <div id="viewers-summary" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4"></div>
+        <div id="viewers-uploaders" class="text-sm mb-3"></div>
+        <div id="viewers-list" class="overflow-x-auto"></div>
+    </div>
+
     <div id="subtitle-modal" class="fixed inset-0 z-50 hidden" aria-modal="true" role="dialog">
         <div class="absolute inset-0 bg-black/60" onclick="closeSubtitleModal()"></div>
         <div class="relative z-10 glass-card rounded-3xl w-[min(92vw,40rem)] mx-auto mt-[8vh] p-5 sm:p-6 lg:p-8 max-h-[80vh] overflow-y-auto">
@@ -1391,12 +1409,55 @@
         }
     }
 
+    //----- Viewers (Insights per-title panel)
+    async function loadTitleViewers() {
+        const summary = document.getElementById('viewers-summary');
+        const uploadersEl = document.getElementById('viewers-uploaders');
+        const listEl = document.getElementById('viewers-list');
+        if (!summary) return;
+        summary.innerHTML = '<p class="muted text-sm">Loading…</p>';
+        uploadersEl.innerHTML = '';
+        listEl.innerHTML = '';
+        try {
+            const p = new URLSearchParams({ tmdb_id: CURRENT_TMDB_ID, db_index: CURRENT_DB_INDEX, days: 90 });
+            const data = await (await fetch(`/api/media/${CURRENT_MEDIA_TYPE}/${CURRENT_TMDB_ID}/viewers?db_index=${CURRENT_DB_INDEX}&days=90`)).json();
+            const t = data.totals || {};
+            const stat = (v, l) => `<div><div class="text-2xl font-black">${v}</div><div class="muted text-xs uppercase tracking-wider">${l}</div></div>`;
+            summary.innerHTML = [
+                stat(data.unique_viewers ?? 0, 'Unique viewers'),
+                stat(data.plays ?? 0, 'Plays'),
+                stat(Math.round((data.total_seconds || 0) / 60) + 'm', 'Watch time'),
+                stat((data.viewers || []).filter(v => v.avg_completion != null).length
+                    ? Math.round(((data.viewers || []).reduce((a, v) => a + (v.avg_completion || 0), 0) / (data.viewers || []).length) * 100) + '%'
+                    : '—', 'Avg completion'),
+            ].join('');
+            const ups = data.uploaders || [];
+            uploadersEl.innerHTML = '<span class="muted">Uploaded by: </span>' + (ups.length
+                ? ups.map(u => `<span class="inline-flex items-center gap-1 text-xs font-semibold border border-hairline rounded-full px-2 py-0.5 mr-1">${escapeHtml(u.name || '—')}${u.username ? ' @' + escapeHtml(u.username) : ''}${u.kind === 'channel' ? ' 📢' : ' 👤'} ×${u.files}</span>`).join('')
+                : '<span class="muted">— (older files predate uploader capture; a channel re-scan fills them)</span>');
+            const rows = (data.viewers || []).map(v => `<tr>
+                <td class="py-2 pr-3"><b>${escapeHtml(v.label)}</b>${v.username ? ` <span class="muted">@${escapeHtml(v.username)}</span>` : ''}</td>
+                <td class="py-2 pr-3">${v.plays}</td>
+                <td class="py-2 pr-3">${v.avg_completion != null ? Math.round(v.avg_completion * 100) + '%' : '—'}</td>
+                <td class="py-2 pr-3">${escapeHtml(Object.keys(v.devices || {}).join(', ') || '—')}</td>
+                <td class="py-2 pr-3">${escapeHtml(v.place || '—')}</td>
+                <td class="py-2 muted">${escapeHtml(v.last_seen || '')}</td>
+            </tr>`).join('');
+            listEl.innerHTML = rows
+                ? `<table class="w-full text-sm"><thead><tr class="muted text-xs uppercase tracking-wider text-left"><th class="pb-2 pr-3">Viewer</th><th class="pb-2 pr-3">Plays</th><th class="pb-2 pr-3">Completion</th><th class="pb-2 pr-3">Devices</th><th class="pb-2 pr-3">Location</th><th class="pb-2">Last seen</th></tr></thead><tbody>${rows}</tbody></table>`
+                : '<p class="muted text-sm">No viewers recorded for this title yet.</p>';
+        } catch (error) {
+            summary.innerHTML = `<p class="muted text-sm">Could not load viewers: ${escapeHtml(error.message || 'error')}</p>`;
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         const select = document.getElementById('custom-catalog-select');
         if (select) select.addEventListener('change', updateCatalogDropdownStatus);
         loadMediaCatalogDropdown();
         loadMediaVisibility();
         loadTitleSubtitles();
+        loadTitleViewers();
         document.querySelectorAll('.season-content').forEach((content, index) => {
             if (index > 0) {
                 content.classList.add('season-collapsed');

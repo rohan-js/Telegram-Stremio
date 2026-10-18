@@ -310,6 +310,22 @@ async def tools_page(request: Request, _: bool = Depends(require_auth)):
     })
 
 
+async def insights_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", DEFAULT_THEME)
+    style_name = request.session.get("style", DEFAULT_STYLE)
+    theme = get_theme(theme_name, style_name)
+    current_user = get_current_user(request)
+    return templates.TemplateResponse("insights.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "styles": get_all_styles(),
+        "current_style": style_name,
+        "current_theme": theme_name,
+        "current_user": current_user,
+    })
+
+
 async def launch_readiness_page(request: Request, _: bool = Depends(require_auth)):
     theme_name = request.session.get("theme", DEFAULT_THEME)
     style_name = request.session.get("style", DEFAULT_STYLE)

@@ -2731,3 +2731,146 @@ async def remove_subtitle_api(payload: dict) -> dict:
     if not await remove_subtitle(chat_id, msg_id):
         raise HTTPException(status_code=404, detail="Subtitle not found.")
     return {"status": "success", "message": "Subtitle removed."}
+
+
+# ======================================================================
+# Viewer Insights ("who watched what, who uploaded it") — admin-only.
+# Identity modes: per-user tokens → Telegram user; shared tokens → the
+# viewer is distinguished by client IP + device (today's setup).
+# ======================================================================
+
+def _insights_uploaders_from_doc(doc: dict) -> list:
+    """Unique uploader descriptors across a media doc's quality subdocs."""
+    qualities = list(doc.get("telegram") or [])
+    for season in doc.get("seasons") or []:
+        for episode in season.get("episodes") or []:
+            qualities.extend(episode.get("telegram") or [])
+    seen: dict = {}
+    for quality in qualities:
+        uploader = quality.get("uploader") if isinstance(quality, dict) else None
+        if not isinstance(uploader, dict):
+            continue
+        key = (uploader.get("id"), uploader.get("username"), uploader.get("name"))
+        row = seen.setdefault(key, {**uploader, "files": 0})
+        row["files"] += 1
+    return sorted(seen.values(), key=lambda u: -int(u.get("files") or 0))
+
+
+async def get_insights_overview_api(days: int = 30) -> dict:
+    from Backend.helper import insights_agg
+
+    records = await db.fetch_insight_records(days=days)
+    token_map = await db.get_token_user_map()
+    sessions = insights_agg.build_sessions(records)
+    data = insights_agg.summarize_overview(sessions, token_map)
+    data["days"] = int(days or 30)
+    data["shared_tokens"] = sum(1 for t in token_map.values() if t.get("shared"))
+    return data
+
+
+async def get_insights_title_api(
+    days: int = 90,
+    imdb_id: str = None,
+    tmdb_id: int = None,
+    db_index: int = None,
+    media_type: str = None,
+    title: str = None,
+) -> dict:
+    from Backend.helper import insights_agg
+
+    records = await db.fetch_insight_records(days=days)
+    token_map = await db.get_token_user_map()
+    sessions = insights_agg.build_sessions(records)
+    data = insights_agg.title_audience(
+        sessions,
+        token_map,
+        imdb_id=imdb_id,
+        tmdb_id=tmdb_id,
+        db_index=db_index,
+        title=title,
+    )
+    # Uploader identity from the media doc when resolvable.
+    doc = None
+    try:
+        if imdb_id:
+            doc = await db.get_media_details(imdb_id)
+        elif tmdb_id is not None and db_index is not None:
+            doc = await db.get_document(media_type or "movie", int(tmdb_id), int(db_index))
+    except Exception:
+        doc = None
+    data["uploaders"] = _insights_uploaders_from_doc(doc) if doc else []
+    return data
+
+
+async def get_insights_viewer_api(days: int = 90, viewer_key: str = None, token: str = None) -> dict:
+    from Backend.helper import insights_agg
+
+    records = await db.fetch_insight_records(days=days)
+    token_map = await db.get_token_user_map()
+    sessions = insights_agg.build_sessions(records)
+    data = insights_agg.viewer_profile(sessions, token_map, viewer_key=viewer_key, token=token)
+    ident = data.get("viewer") or {}
+    if ident.get("mode") == "user" and ident.get("telegram_id"):
+        try:
+            data["watch_requests"] = await db.get_watch_requests_for_user(int(ident["telegram_id"]), days=days)
+        except Exception:
+            data["watch_requests"] = {"count": 0, "titles": [], "recent": []}
+    return data
+
+
+async def get_token_activity_api(token: str, days: int = 90) -> dict:
+    return await get_insights_viewer_api(days=days, token=token)
+
+
+async def get_media_viewers_api(media_type: str, tmdb_id: int, db_index: int = None, days: int = 90) -> dict:
+    doc = None
+    try:
+        doc = await db.get_document(media_type, int(tmdb_id), int(db_index))
+    except Exception:
+        doc = None
+    imdb_id = (doc or {}).get("imdb_id")
+    data = await get_insights_title_api(
+        days=days,
+        imdb_id=imdb_id,
+        tmdb_id=tmdb_id if not imdb_id else None,
+        db_index=db_index,
+        media_type=media_type,
+    )
+    if doc:
+        data["uploaders"] = _insights_uploaders_from_doc(doc)
+    else:
+        data.setdefault("uploaders", [])
+    return data
+
+
+async def get_insights_export_api(scope: str = "plays", days: int = 90):
+    import csv
+    import io
+
+    from Backend.helper import insights_agg
+
+    scope = (scope or "plays").strip().lower()
+    if scope not in ("plays", "titles", "viewers"):
+        scope = "plays"
+    records = await db.fetch_insight_records(days=days)
+    token_map = await db.get_token_user_map()
+    sessions = insights_agg.build_sessions(records)
+    headers, rows = insights_agg.csv_rows(scope, sessions, token_map)
+
+    def _generate():
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(headers)
+        yield buffer.getvalue()
+        for row in rows:
+            buffer.seek(0)
+            buffer.truncate(0)
+            writer.writerow(row)
+            yield buffer.getvalue()
+
+    filename = f"telegram-stremio-insights-{scope}-{int(days or 90)}d.csv"
+    return StreamingResponse(
+        _generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

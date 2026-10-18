@@ -401,14 +401,24 @@ class Telegram:
     except Exception:
         MAX_ACTIVE_STREAMS_GLOBAL = 4
     try:
-        STREAM_LOG_RETENTION_DAYS = int(getenv("STREAM_LOG_RETENTION_DAYS", "30") or 30)
+        # Raw per-view analytics retention (viewer Insights). 90 days per the
+        # 2026-10-18 owner decision; the TTL index is recreated when this
+        # changes (Mongo cannot alter TTL in place).
+        STREAM_LOG_RETENTION_DAYS = int(getenv("STREAM_LOG_RETENTION_DAYS", "90") or 90)
     except Exception:
-        STREAM_LOG_RETENTION_DAYS = 30
+        STREAM_LOG_RETENTION_DAYS = 90
     try:
         BILLING_LOG_RETENTION_DAYS = int(getenv("BILLING_LOG_RETENTION_DAYS", "180") or 180)
     except Exception:
         BILLING_LOG_RETENTION_DAYS = 180
     OWNER_ALERTS_ENABLED = getenv("OWNER_ALERTS_ENABLED", "true").lower() == "true"
+    # Viewer-insights daily digest: one owner-only DM per day with activity,
+    # silent on empty days. Hour is UTC (3 UTC = ~08:30 IST).
+    INSIGHTS_DIGEST_ENABLED = getenv("INSIGHTS_DIGEST_ENABLED", "true").lower() == "true"
+    try:
+        INSIGHTS_DIGEST_HOUR_UTC = int(getenv("INSIGHTS_DIGEST_HOUR_UTC", "3") or 3)
+    except Exception:
+        INSIGHTS_DIGEST_HOUR_UTC = 3
     BACKUP_ENABLED = getenv("BACKUP_ENABLED", "true").lower() == "true"
     BACKUP_DIR = getenv("BACKUP_DIR", "backups/production").strip() or "backups/production"
     try:
