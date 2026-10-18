@@ -32,8 +32,7 @@ jobs:
       - name: Run test suite
         # Import-time constructors need plausible dummies (never dialed/connected
         # in tests): Database() parses DATABASE URIs, pyrogram Clients build at
-        # import from bot.py. Excludes the documented pre-existing failure in
-        # test_stremio_configure (SessionMiddleware missing in its test scope).
+        # import from bot.py.
         env:
           DATABASE: "mongodb://ci-dummy-tracker.local,mongodb://ci-dummy-storage.local"
           API_ID: "12345"
@@ -41,8 +40,7 @@ jobs:
           BOT_TOKEN: "123456789:TEST-token-ci-only"
           HELPER_BOT_TOKEN: "123456789:TEST-helper-ci-only"
         run: |
-          MODULES=$(ls tests/test_*.py | grep -v test_stremio_configure.py \
-            | sed 's|^tests/|tests.|; s|\.py$||' | tr '\n' ' ')
+          MODULES=$(ls tests/test_*.py | sed 's|^tests/|tests.|; s|\.py$||' | tr '\n' ' ')
           echo "Running: $MODULES"
           uv run python -m unittest $MODULES
 

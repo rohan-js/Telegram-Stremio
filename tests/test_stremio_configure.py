@@ -18,6 +18,10 @@ class StremioConfigureTemplateTests(unittest.IsolatedAsyncioTestCase):
             "headers": [],
             "server": ("example.test", 443),
             "client": ("127.0.0.1", 1234),
+            # SessionMiddleware (Backend/fastapi/main.py) injects this into the
+            # ASGI scope in production; configure_addon reads request.session
+            # for the theme/style keys, so the bare scope must carry a dict.
+            "session": {},
         }
         request = Request(scope)
         with (
