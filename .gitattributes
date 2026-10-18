@@ -1,3 +1,6 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Auto detect text files and perform LF normalization. eol=lf is required
+# beyond normalization: `git archive` overlays follow the checkout conversion,
+# so with core.autocrlf=true on Windows an eol-less text file exports as CRLF
+# and lands CRLF on the Linux boxes (2026-10-18: CRLF-ified wgkernel compose).
+* text=auto eol=lf
 *.sh text eol=lf
