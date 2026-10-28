@@ -1,4 +1,5 @@
 from asyncio import gather, create_task
+from urllib.parse import urlparse, unquote
 from pyrogram import Client
 from Backend.logger import LOGGER
 from Backend.config import Telegram
@@ -8,26 +9,62 @@ from os import environ
 class TokenParser:
     @staticmethod
     def parse_from_env():
-        tokens = {
-            c + 1: t
-            for c, (_, t) in enumerate(
-                filter(
-                    lambda n: n[0].startswith("MULTI_TOKEN"),
-                    sorted(environ.items())
-                )
-            )
-        }
-        return tokens
+        """client_id -> {"key": env name, "token": bot token}.
 
-async def start_client(client_id, token):
+        The env key is carried through so each client can carry its own
+        MULTI_TOKEN<n>_PROXY override (egress diversity: some clients route
+        via the Filelink relay while the rest keep the WARP netns path)."""
+        entries = sorted(
+            (key, value) for key, value in environ.items()
+            if key.startswith("MULTI_TOKEN")
+        )
+        return {
+            index + 1: {"key": key, "token": value}
+            for index, (key, value) in enumerate(entries)
+        }
+
+
+def parse_proxy_url(raw: str):
+    """Parse socks5://user:pass@host:port into a pyrogram proxy dict."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    parsed = urlparse(raw)
     try:
+        port = parsed.port
+    except ValueError:
+        LOGGER.warning(f"Ignoring invalid client proxy URL: {raw[:80]}")
+        return None
+    if parsed.scheme not in ("socks5", "socks4", "http") or not parsed.hostname or not port:
+        LOGGER.warning(f"Ignoring invalid client proxy URL: {raw[:80]}")
+        return None
+    proxy = {"scheme": parsed.scheme, "hostname": parsed.hostname, "port": port}
+    if parsed.username:
+        proxy["username"] = unquote(parsed.username)
+    if parsed.password:
+        proxy["password"] = unquote(parsed.password)
+    return proxy
+
+
+def client_proxy_for(env_key: str):
+    """Per-client proxy override from MULTI_TOKEN<n>_PROXY (None = default)."""
+    return parse_proxy_url(environ.get(f"{env_key}_PROXY", ""))
+
+async def start_client(client_id, token_info):
+    try:
+        if isinstance(token_info, dict):
+            token = token_info["token"]
+            proxy = client_proxy_for(token_info.get("key", "")) or Telegram.telegram_proxy()
+        else:
+            token = token_info
+            proxy = Telegram.telegram_proxy()
         LOGGER.info(f"Starting - Bot Client {client_id}")
         client = await Client(
             name=str(client_id),
             api_id=Telegram.API_ID,
             api_hash=Telegram.API_HASH,
             bot_token=token,
-            proxy=Telegram.telegram_proxy(),
+            proxy=proxy,
             sleep_threshold=100,
             no_updates=True,
             in_memory=True
@@ -63,7 +100,7 @@ async def initialize_clients():
         LOGGER.info("No additional Bot Clients found, Using default client")
         return
 
-    tasks = [create_task(start_client(i, token)) for i, token in all_tokens.items()]
+    tasks = [create_task(start_client(i, info)) for i, info in all_tokens.items()]
     results = await gather(*tasks)
     clients = {
         client_id: client
