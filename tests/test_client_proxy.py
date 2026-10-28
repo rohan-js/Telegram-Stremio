@@ -69,6 +69,17 @@ class TokenParserTests(unittest.TestCase):
         self.assertEqual(parsed[1]["key"], "MULTI_TOKEN1")
         self.assertEqual(parsed[2]["key"], "MULTI_TOKEN3")
 
+    def test_proxy_vars_are_not_tokens(self):
+        env = {
+            "MULTI_TOKEN1": "a",
+            "MULTI_TOKEN1_PROXY": "socks5://172.18.0.1:1080",
+            "MULTI_TOKEN2_PROXY": "socks5://172.18.0.1:1080",
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            parsed = TokenParser.parse_from_env()
+        self.assertEqual(len(parsed), 1, "_PROXY vars must never become clients")
+        self.assertEqual(parsed[1]["token"], "a")
+
 
 if __name__ == "__main__":
     unittest.main()

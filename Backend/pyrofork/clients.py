@@ -1,5 +1,6 @@
 from asyncio import gather, create_task
 from urllib.parse import urlparse, unquote
+import re
 from pyrogram import Client
 from Backend.logger import LOGGER
 from Backend.config import Telegram
@@ -11,12 +12,14 @@ class TokenParser:
     def parse_from_env():
         """client_id -> {"key": env name, "token": bot token}.
 
+        Only MULTI_TOKEN<n> keys are tokens — the per-client overrides
+        (MULTI_TOKEN<n>_PROXY) must not be mistaken for credentials.
         The env key is carried through so each client can carry its own
-        MULTI_TOKEN<n>_PROXY override (egress diversity: some clients route
-        via the Filelink relay while the rest keep the WARP netns path)."""
+        proxy (egress diversity: some clients route via the Filelink relay
+        while the rest keep the WARP netns path)."""
         entries = sorted(
             (key, value) for key, value in environ.items()
-            if key.startswith("MULTI_TOKEN")
+            if re.fullmatch(r"MULTI_TOKEN\d+", key)
         )
         return {
             index + 1: {"key": key, "token": value}
