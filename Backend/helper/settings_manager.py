@@ -39,6 +39,9 @@ DEFAULTS: Dict[str, Any] = {
     "better_poster": "",
     "rpdb_enabled": False,
     "rpdb_api_key": "",
+    "stream_formatter": "default",
+    "formatter_name": "",
+    "formatter_description": "",
     "fanart_enabled": False,
     "fanart_api_key": "",
     "fanart_shuffle": False,
@@ -172,6 +175,21 @@ class Settings:
     @property
     def rpdb_api_key(self) -> str:
         return str(self._data.get("rpdb_api_key") or "").strip()
+
+    #----- AIOStreams-compatible stream formatter (upstream v5.2.0):
+    #----- "default" keeps the built-in renderer; otherwise a preset name or
+    #----- "custom" with formatter_name/formatter_description templates.
+    @property
+    def stream_formatter(self) -> str:
+        return str(self._data.get("stream_formatter") or "default")
+
+    @property
+    def formatter_name(self) -> str:
+        return str(self._data.get("formatter_name") or "")
+
+    @property
+    def formatter_description(self) -> str:
+        return str(self._data.get("formatter_description") or "")
 
     @property
     def fanart_enabled(self) -> bool:
@@ -331,6 +349,16 @@ class SettingsManager:
             else:
                 incoming.pop("session_secret", None)
         merged.update(incoming)
+
+        # Stream formatter (upstream v5.2.0): whitelist the preset picker and
+        # cap template size so a pasted megabyte can't enter the DB.
+        if merged.get("stream_formatter") not in (None, "default", "custom"):
+            from Backend.helper.stream_formatter import PRESETS
+            if merged["stream_formatter"] not in PRESETS:
+                raise ValueError("Unknown stream formatter.")
+        for key in ("formatter_name", "formatter_description"):
+            if key in merged:
+                merged[key] = str(merged.get(key) or "")[:20000]
 
         for key in ("auth_channels", "manual_channels", "anime_channels", "global_search_channels"):
             merged[key] = [str(x).strip() for x in (merged.get(key) or []) if str(x).strip()]

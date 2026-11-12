@@ -25,6 +25,7 @@ def _fake_settings(maintenance_mode=False):
         better_poster="",
         rpdb_enabled=False,
         rpdb_api_key="",
+        stream_formatter="default",
         base_url="",
     )
 

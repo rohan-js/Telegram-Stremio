@@ -9,6 +9,7 @@ from urllib.parse import unquote, quote
 from Backend.config import Telegram
 from Backend import db, __version__
 from Backend.helper.database import META_PROJECTION
+from Backend.helper.stream_formatter import format_stream
 from Backend.fastapi.themes import get_theme, get_all_themes, DEFAULT_STYLE, DEFAULT_THEME
 import PTN
 from datetime import datetime, timezone, timedelta
@@ -1221,6 +1222,20 @@ async def _global_streams_for(token: str, imdb_id: str, media_type: str, season_
             "size_bytes": parse_size_to_bytes(r.get("size", "")),
             "_recommended": False,
         }
+        # AIOStreams formatter override for global-search rows too
+        # (upstream: addon_name="🌐 Global", parts + channel fields).
+        if SettingsManager.current().stream_formatter != "default":
+            custom = format_stream(
+                SettingsManager.current(),
+                filename,
+                global_stream["size_bytes"],
+                addon_name="🌐 Global",
+                is_split=is_split,
+                parts=int(r.get("part_count", 0) or 0),
+                channel=r.get("source_chat"),
+            )
+            if custom:
+                global_stream["name"], global_stream["title"] = custom
         if global_group:
             global_stream["behaviorHints"] = {"bingeGroup": global_group}
         streams.append(global_stream)
@@ -1354,6 +1369,17 @@ async def get_streams(
                 "staleRevalidate": 0,
                 "staleError": 0,
             }
+        # AIOStreams formatter metadata (upstream v5.2.0): the formatter's
+        # {metadata.*} fields read title/year/season/episode from here.
+        fmt_meta = {
+            "queryType": media_type,
+            "type": media_type,
+            "isAnime": bool(media_details.get("is_anime")),
+            "title": media_details.get("title"),
+            "year": media_details.get("release_year"),
+            "season": season_num,
+            "episode": episode_num,
+        }
         for quality in media_details.get("telegram", []):
             # Dead-link checker verdicts are honored here: flagged-dead files
             # must not render in the picker (an admin purge removes them later).
@@ -1382,17 +1408,33 @@ async def get_streams(
             stream_name, stream_title = format_stream_details(
                 filename, quality_str, size
             )
-            badges = []
-            if quality.get("recommended"):
-                badges.append("Recommended")
-            if quality.get("parts"):
-                badges.append("Split")
-            if quality.get("flagged_duplicate"):
-                badges.append("Duplicate")
-            if quality.get("quality_note"):
-                badges.append(str(quality.get("quality_note"))[:40])
-            if badges:
-                stream_name = f"{' | '.join(badges)} | {stream_name}"
+            # AIOStreams formatter override (upstream v5.2.0): when a preset or
+            # custom template is active its output replaces the built-in name,
+            # and the fork's badge prefix stays default-only (the formatter
+            # renders its own annotations).
+            if SettingsManager.current().stream_formatter != "default":
+                custom = format_stream(
+                    SettingsManager.current(),
+                    filename,
+                    size_bytes,
+                    addon_name=ADDON_NAME,
+                    is_split=bool(quality.get("group_key") or quality.get("parts")),
+                    meta=fmt_meta,
+                )
+                if custom:
+                    stream_name, stream_title = custom
+            else:
+                badges = []
+                if quality.get("recommended"):
+                    badges.append("Recommended")
+                if quality.get("parts"):
+                    badges.append("Split")
+                if quality.get("flagged_duplicate"):
+                    badges.append("Duplicate")
+                if quality.get("quality_note"):
+                    badges.append(str(quality.get("quality_note"))[:40])
+                if badges:
+                    stream_name = f"{' | '.join(badges)} | {stream_name}"
 
             source_type = quality.get("source_type") or "telegram"
             if source_type == "local_vps":
@@ -1511,10 +1553,13 @@ async def get_streams(
         name_count[s["name"]] = name_count.get(s["name"], 0) + 1
 
     seen: dict = {}
-    for s in streams:
-        if name_count[s["name"]] > 1:
-            seen[s["name"]] = seen.get(s["name"], 0) + 1
-            s["name"] = f"{s['name']} ({seen[s['name']]})"
+    # Duplicate-name suffixing stays default-only: formatter presets already
+    # disambiguate rows (upstream v5.2.0).
+    if SettingsManager.current().stream_formatter == "default":
+        for s in streams:
+            if name_count[s["name"]] > 1:
+                seen[s["name"]] = seen.get(s["name"], 0) + 1
+                s["name"] = f"{s['name']} ({seen[s['name']]})"
 
     # ------------------------------------------------------------------
     # Stream Picker Pre-Buffering ("The YouTube 0ms Click")

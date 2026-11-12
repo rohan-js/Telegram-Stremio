@@ -308,6 +308,7 @@ async def settings_page(request: Request, _: bool = Depends(require_auth)):
     settings["multi_token_count"] = len([k for k in __import__("os").environ if k.startswith("MULTI_TOKEN")])
     settings["secret_statuses"] = SettingsManager.secret_statuses()
 
+    from Backend.helper.stream_formatter import PRESETS
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "theme": theme,
@@ -317,6 +318,7 @@ async def settings_page(request: Request, _: bool = Depends(require_auth)):
         "current_theme": theme_name,
         "current_user": current_user,
         "settings": settings,
+        "formatter_presets": PRESETS,
     })
 
 
