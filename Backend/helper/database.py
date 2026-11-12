@@ -989,7 +989,8 @@ class Database:
             return False
 
     async def get_custom_catalog_items(
-        self, catalog_id: str, media_type: Optional[str] = None, page: int = 1, page_size: int = 24
+        self, catalog_id: str, media_type: Optional[str] = None, page: int = 1, page_size: int = 24,
+        search: Optional[str] = None,
     ) -> dict:
         catalog = await self.get_custom_catalog(catalog_id)
         if not catalog:
@@ -1003,11 +1004,26 @@ class Database:
         if db_media_type:
             raw_items = [item for item in raw_items if item.get("media_type") == db_media_type]
 
-        total_count = len(raw_items)
-        skip = (page - 1) * page_size
-        selected_items = raw_items[skip:skip + page_size]
-
-        hydrated_items = await self.get_documents(selected_items)
+        if search:
+            # Stremio search bar (upstream 51d0775): match across ALL items of
+            # this catalog by title, then paginate the matches — paging the
+            # raw items first would miss matches on later pages.
+            needle = (search or "").strip().lower()
+            hydrated_all = await self.get_documents(raw_items)
+            matched = [
+                doc for doc in hydrated_all
+                if needle in str(doc.get("title") or "").lower()
+                or needle in str(doc.get("title_english") or "").lower()
+                or needle in str(doc.get("original_title") or "").lower()
+            ]
+            total_count = len(matched)
+            skip = (page - 1) * page_size
+            hydrated_items = matched[skip:skip + page_size]
+        else:
+            total_count = len(raw_items)
+            skip = (page - 1) * page_size
+            selected_items = raw_items[skip:skip + page_size]
+            hydrated_items = await self.get_documents(selected_items)
 
         total_pages = (total_count + page_size - 1) // page_size if total_count else 0
         return {

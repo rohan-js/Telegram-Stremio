@@ -30,7 +30,7 @@ class FakeCatalogDB:
             return {"_id": "abc123", "name": "Picks", "visible": True}
         return None
 
-    async def get_custom_catalog_items(self, catalog_id, media_type=None, page=1, page_size=15):
+    async def get_custom_catalog_items(self, catalog_id, media_type=None, page=1, page_size=15, search=None):
         return {
             "catalog": {"_id": catalog_id},
             "items": [

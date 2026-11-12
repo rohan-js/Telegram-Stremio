@@ -405,6 +405,15 @@ async def update_iptv_settings_route(payload: dict, _: bool = Depends(require_au
 async def get_settings(_: bool = Depends(require_auth)):
     return await get_settings_api()
 
+@app.get("/api/admin/backup/library")
+async def admin_backup_library(_: bool = Depends(require_auth)):
+    from fastapi.responses import StreamingResponse
+    from Backend.helper.backup import export_library
+    return StreamingResponse(
+        export_library(), media_type="application/gzip",
+        headers={"Content-Disposition": 'attachment; filename="telestremio-catalog.json.gz"'},
+    )
+
 @app.put("/api/admin/settings")
 async def update_settings(payload: dict, _: bool = Depends(require_auth)):
     return await update_settings_api(payload)

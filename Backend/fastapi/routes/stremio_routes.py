@@ -627,15 +627,15 @@ async def get_manifest(request: Request, token: str, response: Response, token_d
                     "type": "movie",
                     "id": f"custom_{catalog_id}",
                     "name": catalog_name,
-                    "extra": [{"name": "skip"}],
-                    "extraSupported": ["skip"],
+                    "extra": [{"name": "skip"}, {"name": "search", "isRequired": False}],
+                    "extraSupported": ["skip", "search"],
                 })
                 catalogs.append({
                     "type": "series",
                     "id": f"custom_{catalog_id}",
                     "name": catalog_name,
-                    "extra": [{"name": "skip"}],
-                    "extraSupported": ["skip"],
+                    "extra": [{"name": "skip"}, {"name": "search", "isRequired": False}],
+                    "extraSupported": ["skip", "search"],
                 })
         except Exception:
             pass
@@ -970,6 +970,7 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
                 media_type=db_media_type,
                 page=page,
                 page_size=PAGE_SIZE,
+                search=search_query,
             )
             items = [
                 media_doc
