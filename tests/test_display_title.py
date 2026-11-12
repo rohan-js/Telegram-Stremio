@@ -44,10 +44,10 @@ class FakeCatalogDB:
     async def get_catalog_items_sorted(self, *args, **kwargs):
         return {"items": []}
 
-    async def sort_movies(self, sort_params, page, page_size, genre_filter=None):
+    async def sort_movies(self, sort_params, page, page_size, genre_filter=None, **kwargs):
         return {"movies": [_MOVIE]}
 
-    async def sort_tv_shows(self, sort_params, page, page_size, genre_filter=None):
+    async def sort_tv_shows(self, sort_params, page, page_size, genre_filter=None, **kwargs):
         return {"tv_shows": []}
 
 

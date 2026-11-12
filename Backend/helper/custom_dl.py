@@ -12,6 +12,7 @@ from pyrogram.errors import AuthBytesInvalid, RPCError, FloodWait
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from pyrogram.session import Session, Auth
 from Backend.logger import LOGGER
+from Backend.helper.bounded import BoundedDict
 from Backend.helper.exceptions import FIleNotFound
 from Backend.helper.pyro import get_file_ids
 from Backend import db
@@ -58,8 +59,12 @@ async def _cleanup_stale_streams():
                         entry["status"] = "stale"
                         entry["end_ts"] = now
                         RECENT_STREAMS.appendleft(entry)
+                        # load_held marks that this entry still owns the
+                        # work-load increment — release at most once, even if
+                        # the consumer's finally also runs (double-decrement
+                        # window while status is terminal; upstream 04d279c).
                         idx = entry.get("client_index")
-                        if idx is not None and idx in work_loads:
+                        if entry.pop("load_held", False) and idx is not None and idx in work_loads:
                             work_loads[idx] = max(0, work_loads[idx] - 1)
                 except Exception:
                     pass
@@ -556,7 +561,9 @@ class ByteStreamer:
     def __init__(self, client: Client, client_index: int = -1):
         self.client = client
         self.client_index = client_index
-        self._file_id_cache: Dict[Tuple[int, int], FileId] = {}
+        # Bounded FIFO (upstream 13db603): one entry per (chat, msg) touched;
+        # unbounded growth between the 30-min clean sweeps showed up as RAM drift.
+        self._file_id_cache = BoundedDict(2000)
         self._session_lock = asyncio.Lock()
         self._cdn_session_lock = asyncio.Lock()
         self._cdn_sessions: Dict[int, Session] = {}
@@ -1023,6 +1030,7 @@ class ByteStreamer:
             "peak_mbps": 0.0,
             "recent_measurements": deque(maxlen=3),
             "status": "active",
+            "load_held": True,
             "part_count": part_count,
             "prefetch": prefetch,
             "effective_prefetch": int(prefetch),
@@ -1055,8 +1063,20 @@ class ByteStreamer:
         q: asyncio.Queue = asyncio.Queue(maxsize=queue_maxsize)
         stop_event = asyncio.Event()
 
-        media_session = await self._get_media_session(file_id)
-        location = await self._get_location(file_id)
+        try:
+            media_session = await self._get_media_session(file_id)
+            location = await self._get_location(file_id)
+        except Exception:
+            # Setup failed after the work-load was taken: release the stream's
+            # accounting immediately instead of waiting for the stale reaper.
+            if ACTIVE_STREAMS.get(stream_id) is registry_entry:
+                registry_entry["status"] = "error"
+                registry_entry["error_reason"] = "session_setup_failed"
+                registry_entry.pop("load_held", None)
+                ACTIVE_STREAMS.pop(stream_id, None)
+                RECENT_STREAMS.appendleft(registry_entry)
+            work_loads[client_index] = max(0, work_loads.get(client_index, 0) - 1)
+            raise
         target_dc = int(getattr(file_id, "dc_id", 0) or 0)
 
         session_pool = [(client_index, media_session, [location], self)]
@@ -1870,7 +1890,10 @@ class ByteStreamer:
                     asyncio.create_task(delayed_pop())
                 finally:
                     try:
-                        work_loads[client_index] -= 1
+                        # load_held guarantees one release even when the stale
+                        # cleaner reaps the same stream (upstream 04d279c).
+                        if registry_entry.pop("load_held", False):
+                            work_loads[client_index] = max(0, work_loads.get(client_index, 0) - 1)
                     except Exception:
                         pass
 

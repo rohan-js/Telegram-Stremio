@@ -28,7 +28,7 @@ class _Collection:
         requested = set(query["tmdb_id"]["$in"])
         return _Cursor([dict(doc) for doc in self.documents if doc.get("tmdb_id") in requested])
 
-    async def create_index(self, fields):
+    async def create_index(self, fields, **kwargs):
         self.indexes.append(fields)
         return "test_index"
 
@@ -42,6 +42,8 @@ class _Storage:
         }
 
     def __getitem__(self, name):
+        if name not in self.collections:
+            self.collections[name] = _Collection()
         return self.collections[name]
 
 
@@ -76,8 +78,14 @@ class DatabaseBatchTests(unittest.IsolatedAsyncioTestCase):
         await database.ensure_indexes()
 
         self.assertEqual(len(catalogs.indexes), 4)
-        self.assertEqual(len(storage["movie"].indexes), 6)
-        self.assertEqual(len(storage["tv"].indexes), 6)
+        # Per run: 3 legacy (tmdb_id, imdb_id, visibility composite) + 8
+        # large-library indexes (updated_on, rating, telegram.id, parts.msg_id,
+        # title/title_english/original_title/prefix name) = 11; two runs = 22.
+        self.assertEqual(len(storage["movie"].indexes), 22)
+        self.assertEqual(len(storage["tv"].indexes), 22)
+        # Repeat runs create the same index list (idempotent on real Mongo).
+        self.assertEqual(len(set(str(i) for i in storage["movie"].indexes)), 11)
+        self.assertEqual(len(set(str(i) for i in storage["tv"].indexes)), 11)
 
 
 if __name__ == "__main__":

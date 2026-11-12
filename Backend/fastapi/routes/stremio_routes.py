@@ -8,6 +8,7 @@ from typing import Optional
 from urllib.parse import unquote, quote
 from Backend.config import Telegram
 from Backend import db, __version__
+from Backend.helper.database import META_PROJECTION
 from Backend.fastapi.themes import get_theme, get_all_themes, DEFAULT_STYLE, DEFAULT_THEME
 import PTN
 from datetime import datetime, timezone, timedelta
@@ -968,9 +969,11 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
                 if _media_visible_to_token(media_doc, token_data, catalog_id=catalog_id)
             ]
         elif search_query:
-            search_results = await db.search_documents(query=search_query, page=page, page_size=PAGE_SIZE)
-            all_items = search_results.get("results", [])
             db_media_type = "tv" if media_type == "series" else "movie"
+            search_results = await db.search_documents(
+                query=search_query, page=page, page_size=PAGE_SIZE, media_type=db_media_type
+            )
+            all_items = search_results.get("results", [])
             items = _filter_visible_media(
                 [item for item in all_items if item.get("media_type") == db_media_type],
                 token_data,
@@ -991,10 +994,14 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
                 sort_params = [("updated_on", "desc")]
 
             if media_type == "movie":
-                data = await db.sort_movies(sort_params, page, PAGE_SIZE, genre_filter=genre_filter)
+                data = await db.sort_movies(
+                    sort_params, page, PAGE_SIZE, genre_filter=genre_filter, projection=META_PROJECTION
+                )
                 items = _filter_visible_media(data.get("movies", []), token_data)
             else:
-                data = await db.sort_tv_shows(sort_params, page, PAGE_SIZE, genre_filter=genre_filter)
+                data = await db.sort_tv_shows(
+                    sort_params, page, PAGE_SIZE, genre_filter=genre_filter, projection=META_PROJECTION
+                )
                 items = _filter_visible_media(data.get("tv_shows", []), token_data)
     except Exception as e:
         return {

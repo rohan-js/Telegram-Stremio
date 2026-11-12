@@ -114,7 +114,7 @@ class FakeRequestDB:
     async def get_document(self, media_type, tmdb_id, db_index):
         return None
 
-    async def search_documents(self, query, page=1, page_size=8):
+    async def search_documents(self, query, page=1, page_size=8, media_type=None):
         return {"results": []}
 
 

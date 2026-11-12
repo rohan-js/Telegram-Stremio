@@ -37,7 +37,6 @@ _chat_title_cache: Dict[int, str] = {}
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _MULTIPART_RE = re.compile(r"(?:part|cd|disc|disk)[s._-]*\d+(?=\.\w+$)", re.IGNORECASE)
-_ALT_PART_RE = re.compile(r"^(.*?)[\s._-]*(?:part|cd|disc|disk|pt)[\s._-]*0*(\d{1,3})(?=\.\w+$|$)", re.IGNORECASE)
 _VIDEO_EXTS = (".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".webm", ".flv")
 SPLIT_SCAN_WINDOW = 60
 
@@ -120,12 +119,9 @@ def _split_part_info(filename: str) -> Optional[tuple]:
     info = parse_split_info(filename)
     if info:
         return info[0], info[1], strip_part_suffix(filename), False
-    m = _ALT_PART_RE.match(filename)
-    if m and m.group(1).strip(" ._-"):
-        ext_m = re.search(r"(\.\w+)$", filename)
-        display = m.group(1).strip(" ._-") + (ext_m.group(1) if ext_m else ".mkv")
-        base = _NORMALIZE_ALT_RE.sub(".", m.group(1)).strip(".").lower()
-        return base, int(m.group(2)), display, False
+    # No loose "part/cd/disc/pt NN" fallback (upstream 050d49e): it grouped
+    # unrelated numbered files; the strict trailing-numeric and zip-split
+    # recognizers above are the only split forms we trust.
     return None
 
 
@@ -244,7 +240,9 @@ async def _search_channel(
                     if parsed is None:
                         continue
                     parts = await _gather_split_parts(client, chat_id, message.id, base)
-                    if len(parts) < 2:
+                    # Require contiguous 1..N part numbers (upstream 050d49e):
+                    # a gap means a missing chunk — playing it would glitch.
+                    if len(parts) < 2 or sorted(parts) != list(range(1, len(parts) + 1)):
                         continue
                     split_groups[base] = {
                         "parts": parts,

@@ -1218,6 +1218,19 @@ async def admin_takedown_api(payload: dict):
     
 # --- API Routes for Media Management ---
 
+#----- Admin list rows don't render the heavy text/episode arrays
+#----- (upstream 7f86405): drop them before they cross the wire.
+_LIST_PROJECTION = {
+    "description": 0,
+    "cast": 0,
+    "telegram.name": 0,
+    "seasons.episodes.title": 0,
+    "seasons.episodes.overview": 0,
+    "seasons.episodes.episode_backdrop": 0,
+    "seasons.episodes.telegram.name": 0,
+}
+
+
 async def list_media_api(
     media_type: str = Query("movie", regex="^(movie|tv)$"),
     page: int = Query(1, ge=1),
@@ -1226,24 +1239,20 @@ async def list_media_api(
 ):
     try:
         if search:
-            result = await db.search_documents(search, page, page_size)
-            filtered_results = [item for item in result['results'] if item.get('media_type') == media_type]
-            total_filtered = len(filtered_results)
-            start_index = (page - 1) * page_size
-            end_index = start_index + page_size
-            paged_results = filtered_results[start_index:end_index]
-            
+            # Type-scoped search: the total_count is now for THIS media type,
+            # so pagination totals are exact (was: filter-after-page).
+            result = await db.search_documents(search, page, page_size, media_type=media_type)
             return {
-                "total_count": total_filtered,
+                "total_count": result.get("total_count", 0),
                 "current_page": page,
-                "total_pages": (total_filtered + page_size - 1) // page_size,
-                "movies" if media_type == "movie" else "tv_shows": paged_results
+                "total_pages": (result.get("total_count", 0) + page_size - 1) // page_size,
+                "movies" if media_type == "movie" else "tv_shows": result.get("results", [])
             }
         else:
             if media_type == "movie":
-                return await db.sort_movies([], page, page_size)
+                return await db.sort_movies([], page, page_size, projection=_LIST_PROJECTION)
             else:
-                return await db.sort_tv_shows([], page, page_size)
+                return await db.sort_tv_shows([], page, page_size, projection=_LIST_PROJECTION)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2558,10 +2567,12 @@ async def search_catalog_media_api(
         return {"results": [], "total_count": 0}
 
     try:
-        result = await db.search_documents(query, page, page_size)
         normalized_type = _normalize_media_type(media_type)
-        filtered = [item for item in result.get("results", []) if item.get("media_type") == normalized_type]
-        return {"results": filtered, "total_count": len(filtered)}
+        result = await db.search_documents(query, page, page_size, media_type=normalized_type)
+        return {
+            "results": result.get("results", []),
+            "total_count": result.get("total_count", 0),
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

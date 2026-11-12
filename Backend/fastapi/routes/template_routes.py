@@ -1,8 +1,11 @@
 from fastapi import Request, Form, HTTPException, Depends
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
-from Backend.fastapi.security.credentials import verify_credentials, require_auth, is_authenticated, get_current_user
+from Backend.fastapi.security.credentials import verify_credentials, require_auth, is_authenticated, get_current_user, revoke_session
 from Backend.fastapi.themes import get_theme, get_all_themes, get_all_styles, DEFAULT_STYLE, DEFAULT_THEME
+import secrets
+from Backend.helper.analytics import client_ip_from
+from Backend.helper.bounded import BoundedDict
 
 
 #----- Shared template context (request, theme/style metadata) for every page
@@ -64,12 +67,17 @@ async def login_page(request: Request):
         "current_theme": theme_name
     })
 
+#----- Per-IP failed-login limiter (upstream 9ea62e5, owner-tuned 10/15)
+_FAILED_LOGINS = BoundedDict(1000)
+_LOGIN_MAX_FAILS = 10
+_LOGIN_WINDOW = 15 * 60
+
+
 async def login_post(request: Request, username: str = Form(...), password: str = Form(...)):
-    if verify_credentials(username, password):
-        request.session["authenticated"] = True
-        request.session["username"] = username
-        return RedirectResponse(url="/", status_code=302)
-    else:
+    ip = client_ip_from(request)
+    now = time.time()
+    fails = [t for t in _FAILED_LOGINS.get(ip, []) if now - t < _LOGIN_WINDOW]
+    if len(fails) >= _LOGIN_MAX_FAILS:
         theme_name = request.session.get("theme", DEFAULT_THEME)
         style_name = request.session.get("style", DEFAULT_STYLE)
         theme = get_theme(theme_name, style_name)
@@ -80,11 +88,30 @@ async def login_post(request: Request, username: str = Form(...), password: str 
             "styles": get_all_styles(),
             "current_style": style_name,
             "current_theme": theme_name,
-            "error": "Invalid credentials"
-        })
+            "error": "Too many failed attempts. Try again in 15 minutes."
+        }, status_code=429)
+    if verify_credentials(username, password):
+        _FAILED_LOGINS.pop(ip, None)
+        request.session["authenticated"] = True
+        request.session["username"] = username
+        request.session["sid"] = secrets.token_urlsafe(16)
+        return RedirectResponse(url="/", status_code=302)
+    _FAILED_LOGINS[ip] = fails + [now]
+    theme_name = request.session.get("theme", DEFAULT_THEME)
+    style_name = request.session.get("style", DEFAULT_STYLE)
+    theme = get_theme(theme_name, style_name)
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "styles": get_all_styles(),
+        "current_style": style_name,
+        "current_theme": theme_name,
+        "error": "Invalid credentials"
+    })
 
 async def logout(request: Request):
-    request.session.clear()
+    revoke_session(request)
     return RedirectResponse(url="/login", status_code=302)
 
 async def set_theme(request: Request, theme: str = Form(None), style: str = Form(None)):

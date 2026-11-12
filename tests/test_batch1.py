@@ -46,11 +46,11 @@ class FakeLatestDB:
     def __init__(self):
         self.captured_sort = None
 
-    async def sort_movies(self, sort_params, page, page_size, genre_filter=None):
+    async def sort_movies(self, sort_params, page, page_size, genre_filter=None, **kwargs):
         self.captured_sort = sort_params
         return {"movies": [], "total_count": 0}
 
-    async def sort_tv_shows(self, sort_params, page, page_size, genre_filter=None):
+    async def sort_tv_shows(self, sort_params, page, page_size, genre_filter=None, **kwargs):
         self.captured_sort = sort_params
         return {"tv_shows": [], "total_count": 0}
 

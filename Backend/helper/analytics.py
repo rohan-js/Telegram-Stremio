@@ -7,12 +7,13 @@ from urllib.parse import urlparse
 import httpx
 
 from Backend import db
+from Backend.helper.bounded import BoundedDict
 from Backend.helper.custom_dl import ACTIVE_STREAMS
 from Backend.logger import LOGGER
 
-_IP_CACHE = {}
+_IP_CACHE = BoundedDict(2000)
 _IP_TTL = 6 * 3600
-_LAST_FULL = {}
+_LAST_FULL = BoundedDict(2000)
 _FULL_INTERVAL = 60
 #----- A user is "online" only while video bytes are actively flowing
 #----- (or within ONLINE_PLAY_WINDOW seconds of the last delivered chunk).

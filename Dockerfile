@@ -3,6 +3,9 @@ FROM ghcr.io/astral-sh/uv:debian-slim
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV LANG=en_US.UTF-8
+# Cap glibc malloc arenas: on the 956 MiB micro box, per-thread arenas amplify
+# fragmentation under the streaming workload (upstream 13db603).
+ENV MALLOC_ARENA_MAX=2
 ENV PATH="/app/.venv/bin:$PATH"
 
 RUN apt-get update && \

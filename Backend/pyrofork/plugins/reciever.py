@@ -1145,7 +1145,9 @@ async def file_receive_handler(client: Client, message: Message):
                 parse_mode=ParseMode.MARKDOWN,
             )
     else:
-        await message.reply_text("> Channel is not in AUTH_CHANNEL")
+        # Silent skip (upstream 7295126): replying here reaches non-authorized
+        # channels on every message and sits outside the FloodWait guard.
+        pass
 
 
 @Client.on_edited_message(filters.channel & (filters.document | filters.video | filters.text))
