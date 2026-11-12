@@ -640,10 +640,35 @@ class Database:
         })
         return str(result.inserted_id)
 
-    async def get_custom_catalogs(self, visible_only: bool = False) -> List[dict]:
-        query = {"visible": True} if visible_only else {}
-        cursor = self.dbs["tracking"]["custom_catalogs"].find(query).sort("updated_at", DESCENDING)
-        catalogs = await cursor.to_list(None)
+    async def get_custom_catalogs(
+        self,
+        visible_only: bool = False,
+        slim: bool = False,
+        item_fields: Optional[tuple] = None,
+    ) -> List[dict]:
+        """List custom/auto catalogs.
+
+        slim (upstream e6024b8): project each catalog's items down to the
+        visibility triple only — the Nuvio builder and manifest never need the
+        full item rows. item_fields (upstream 04d279c): replace items with a
+        projected subset + item_count so admin list pages stop hauling every
+        item document across the wire."""
+        pipeline = [{"$match": {"visible": True} if visible_only else {}}, {"$sort": {"updated_at": DESCENDING}}]
+        if slim:
+            pipeline.append({"$addFields": {"items": {"$setUnion": [{"$map": {
+                "input": {"$ifNull": ["$items", []]},
+                "in": {"media_type": "$$this.media_type", "visibility": "$$this.visibility", "allowed_tokens": "$$this.allowed_tokens"},
+            }}]}}})
+        if item_fields is not None:
+            pipeline.append({"$addFields": {"item_count": {"$size": {"$ifNull": ["$items", []]}}}})
+            if item_fields:
+                pipeline.append({"$addFields": {"items": {"$map": {
+                    "input": {"$ifNull": ["$items", []]},
+                    "in": {f: f"$$this.{f}" for f in item_fields},
+                }}}})
+            else:
+                pipeline.append({"$project": {"items": 0}})
+        catalogs = await self.dbs["tracking"]["custom_catalogs"].aggregate(pipeline).to_list(None)
         return [convert_objectid_to_str(self._catalog_with_visibility_defaults(catalog)) for catalog in catalogs]
 
     async def get_custom_catalog(self, catalog_id: str) -> Optional[dict]:
@@ -2297,8 +2322,32 @@ class Database:
         imdb_id: str,
         season_number: Optional[int] = None,
         episode_number: Optional[int] = None,
-        projection: Optional[dict] = None
+        projection: Optional[dict] = None,
+        tmdb_id: Optional[int] = None,
+        media_type: Optional[str] = None,
     ) -> Optional[dict]:
+        """Lookup by imdb_id (tt…), or by tmdb_id for tmdb:-sourced catalog ids
+        (upstream 9f0d68a) — the Nuvio Franchises/Discover folders play through
+        tmdb ids, so the library must resolve them without an imdb id."""
+
+        # tmdb-id path: exact int match against the requested collection
+        # (or both when the media type wasn't provided).
+        if tmdb_id is not None and not imdb_id:
+            try:
+                tmdb_id = int(tmdb_id)
+            except (TypeError, ValueError):
+                return None
+            collections = ("tv",) if media_type == "series" else ("movie",) if media_type == "movie" else ("movie", "tv")
+            for db_idx in range(self.current_db_index, 0, -1):
+                db_key = f"storage_{db_idx}"
+                for coll in collections:
+                    doc = await self.dbs[db_key][coll].find_one({"tmdb_id": tmdb_id}, projection)
+                    if doc:
+                        doc = convert_objectid_to_str(doc)
+                        doc["type"] = "tv" if coll == "tv" else "movie"
+                        doc["db_index"] = db_idx
+                        return doc
+            return None
 
         for db_idx in range(self.current_db_index, 0, -1):
             db_key = f"storage_{db_idx}"

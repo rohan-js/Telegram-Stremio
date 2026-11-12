@@ -15,7 +15,7 @@ def fake_request():
 
 
 class FakeEpisodeDB:
-    async def get_media_details(self, imdb_id, season_number=None, episode_number=None):
+    async def get_media_details(self, imdb_id, season_number=None, episode_number=None, **kwargs):
         return {
             "title": "Breakout",
             "telegram": [

@@ -76,7 +76,7 @@ class CustomCatalogStremioTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_streams_hide_flagged_quality_and_prioritize_recommended(self):
         class FakeStreamDB:
-            async def get_media_details(self, imdb_id, season_number=None, episode_number=None):
+            async def get_media_details(self, imdb_id, season_number=None, episode_number=None, **kwargs):
                 return {
                     "telegram": [
                         {

@@ -5,6 +5,7 @@ from Backend import db
 from datetime import datetime, timedelta
 import asyncio
 from Backend.helper.beta_access import accepted_terms, is_beta_invited, terms_keyboard, terms_links_text, terms_record, waitlist_message
+from Backend.helper.addon_links import addon_links_text
 
 from bson.objectid import ObjectId
 
@@ -265,6 +266,7 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
                 success_text += (
                     f"\n\n🎬 <b>Stremio Addon — Install Link:</b>\n"
                     f"<code>{addon_url}</code>\n\n"
+                    f"{addon_links_text(token_str)}\n\n"
                     f"Tap the link above → <b>Install</b> in Stremio to start watching!"
                 )
 

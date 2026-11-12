@@ -5,6 +5,7 @@ from Backend.config import Telegram
 from Backend import db
 from datetime import datetime
 from Backend.helper.beta_access import accepted_terms, is_beta_invited, is_exempt_token, terms_keyboard, terms_links_text, waitlist_message
+from Backend.helper.addon_links import addon_links_text
 
 print("DEBUG: start.py PLUGIN LOADED SUCCESSFULLY!")
 
@@ -17,6 +18,7 @@ async def send_start_message(client: Client, message: Message):
         addon_url = f"{base_url}/stremio/{token_override}/manifest.json" if token_override else f"{base_url}/stremio/manifest.json"
 
         if not Telegram.SUBSCRIPTION:
+            links_token = token_override
             if not token_override:
                 # Generate or fetch API token for free user when no fixed token is configured
                 user_name = (message.from_user.first_name or message.from_user.username or f"User {user_id}") if message.from_user else f"Chat {user_id}"
@@ -24,14 +26,16 @@ async def send_start_message(client: Client, message: Message):
                     token_doc = await db.add_api_token(name=user_name, user_id=user_id)
                     token_str = token_doc.get("token")
                     addon_url = f"{base_url}/stremio/{token_str}/manifest.json"
+                    links_token = token_str
                 except Exception as e:
                     print(f"DEBUG: Error ensuring token for free user: {e}")
-                
+
             await message.reply_text(
                 '🎉 <b>Welcome to the Telegram Stremio Media Server!</b>\n\n'
                 'Here is your personal Stremio Addon link:\n\n'
                 '🎬 <b>Stremio Addon — Install Link:</b>\n'
                 f'<code>{addon_url}</code>\n\n'
+                f'{addon_links_text(links_token)}\n\n'
                 'Tap the link above → <b>Install</b> in Stremio to start watching!',
                 quote=True,
                 parse_mode=enums.ParseMode.HTML
@@ -48,6 +52,7 @@ async def send_start_message(client: Client, message: Message):
                 'Your existing free addon token is active. Here is your addon link:\n\n'
                 '🎬 <b>Stremio Addon — Install Link:</b>\n'
                 f'<code>{addon_url}</code>\n\n'
+                f'{addon_links_text(token_doc["token"])}\n\n'
                 'Tap the link above → <b>Install</b> in Stremio to start watching!',
                 quote=True,
                 parse_mode=enums.ParseMode.HTML
@@ -127,6 +132,7 @@ async def send_start_message(client: Client, message: Message):
             'Your subscription is active. Here is your personal addon link:\n\n'
             '🎬 <b>Stremio Addon — Install Link:</b>\n'
             f'<code>{addon_url}</code>\n\n'
+            f'{addon_links_text(token_str) if token_doc and "token" in token_doc else ""}\n\n'
             'Tap the link above → <b>Install</b> in Stremio to start watching!',
             quote=True,
             parse_mode=enums.ParseMode.HTML

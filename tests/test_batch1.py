@@ -31,7 +31,7 @@ def _fake_settings(maintenance_mode=False):
 
 
 class FakeStreamsDB:
-    async def get_media_details(self, imdb_id, season_number=None, episode_number=None):
+    async def get_media_details(self, imdb_id, season_number=None, episode_number=None, **kwargs):
         return {
             "title": "Rocky III",
             "title_english": "Rocky III",
