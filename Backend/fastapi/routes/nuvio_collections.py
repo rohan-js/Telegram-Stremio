@@ -25,7 +25,7 @@ from Backend import db
 from Backend.fastapi.security.tokens import verify_token
 from Backend.fastapi.routes.stremio_routes import _media_visible_to_token, _token_can_view
 
-router = APIRouter(tags=["Nuvio"])
+router = APIRouter(prefix="/stremio", tags=["Nuvio"])
 
 BASE_URL = Telegram.BASE_URL
 
