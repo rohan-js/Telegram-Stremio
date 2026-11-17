@@ -457,6 +457,79 @@ async def import_config_api(payload: dict) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+#----- Setup checklist for the dashboard card (upstream v5.3.3; fork has no
+#----- TVDB pipeline, so that check is omitted)
+async def setup_status_api() -> dict:
+    from Backend.helper.passwords import verify_password
+    s = SettingsManager.current()
+    checks = [
+        {"key": "tmdb", "label": "TMDB API key", "done": bool(s.tmdb_api),
+         "hint": "Powers automatic poster & metadata matching."},
+        {"key": "channels", "label": "AUTH channel added", "done": len(s.auth_channels) > 0,
+         "hint": "The channel(s) the bot indexes and streams from."},
+        {"key": "base_url", "label": "Base URL set", "done": bool(s.base_url),
+         "hint": "Stremio uses this public address to reach your streams."},
+        {"key": "password", "label": "Admin password changed", "done": not verify_password("admin", s.admin_password),
+         "hint": "Change the default admin / admin login for security."},
+    ]
+    done = sum(1 for c in checks if c["done"])
+    return {"status": "success", "data": {
+        "checks": checks, "done": done, "total": len(checks), "complete": done == len(checks),
+    }}
+
+
+async def get_db_stats_api() -> dict:
+    try:
+        total_movies = total_tv = total_episodes = total_streams = total_db_size = 0
+        for i in range(1, db.current_db_index + 1):
+            storage = db.dbs.get(f"storage_{i}")
+            if storage is None:
+                continue
+            total_movies += await storage["movie"].count_documents({})
+            async for movie in storage["movie"].find({}, {"telegram": 1}):
+                total_streams += len(movie.get("telegram", []))
+            total_tv += await storage["tv"].count_documents({})
+            async for show in storage["tv"].find({}, {"seasons": 1}):
+                for season in show.get("seasons", []):
+                    for episode in season.get("episodes", []):
+                        total_episodes += 1
+                        total_streams += len(episode.get("telegram", []))
+            try:
+                total_db_size += (await storage.command("dbStats")).get("dataSize", 0)
+            except Exception:
+                pass
+        from Backend.helper.pyro import get_readable_file_size
+        return {
+            "status": "success",
+            "data": {
+                "version": __version__,
+                "movies": total_movies,
+                "tv_shows": total_tv,
+                "episodes": total_episodes,
+                "streams": total_streams,
+                "uptime": get_readable_time(int(time() - StartTime)),
+                "db_size": get_readable_file_size(total_db_size),
+                "storage_dbs": db.current_db_index,
+                "auth_channels": len(SettingsManager.current().auth_channels),
+            },
+        }
+    except Exception as e:
+        LOGGER.error(f"[Stats] Error: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+async def tag_media_api(tmdb_id: str | int, db_index: int, media_type: str):
+    from Backend.helper.manual_add import retag_media
+    from Backend.helper.metadata import build_id_link
+    doc = await db.get_document(media_type, int(tmdb_id), db_index)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Media not found.")
+    if not build_id_link(doc.get("imdb_id") or doc.get("tmdb_id"), media_type):
+        raise HTTPException(status_code=400, detail="This title has no IMDb or TMDB id to tag with.")
+    asyncio.create_task(retag_media(_scan_client(), media_type, doc))
+    return {"status": "success", "message": "Tagging files in the background."}
+
+
 async def get_tools_channels_api():
     return {
         "channels": [{"id": channel, "label": str(channel)} for channel in Telegram.AUTH_CHANNEL],

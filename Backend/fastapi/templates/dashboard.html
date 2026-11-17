@@ -1,392 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Telegram Stremio{% endblock %}
-
-{% block content %}
-<div class="min-h-screen pb-12">
-    <header class="mb-8 sm:mb-10">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-                <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">
-                    System Overview
-                </h1>
-                <p class="text-text-secondary text-xs sm:text-sm mt-1">Real-time performance, live stream activity, and token access management</p>
-            </div>
-
-            <button onclick="refreshDashboard()"
-                class="w-full md:w-auto flex items-center justify-center space-x-2 px-6 py-3 rounded-2xl bg-primary/10 border border-primary/20 hover:bg-primary hover:text-background transition-all group active:scale-95">
-                <i id="refresh-icon" class="fa-solid fa-arrows-rotate group-hover:rotate-180 transition-transform duration-700"></i>
-                <span class="font-bold text-sm uppercase tracking-wider">Refresh Data</span>
-            </button>
-        </div>
-    </header>
-
-    <div id="setup-card" class="mb-8"></div>
-
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
-        <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-glow">
-                <i class="fa-solid fa-clock"></i>
-            </div>
-            <div>
-                <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">Uptime</p>
-                <p id="sys-uptime" class="text-lg font-bold text-text">{{ system_stats.uptime or 'N/A' }}</p>
-            </div>
-        </div>
-
-        <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent shadow-[0_0_15px_color-mix(in_srgb,var(--accent)_35%,transparent)]">
-                <i class="fa-solid fa-robot"></i>
-            </div>
-            <div>
-                <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">Active Bots</p>
-                <p id="sys-bots-count" class="text-lg font-bold text-text">{{ system_stats.connected_bots|default(0) }} Nodes</p>
-            </div>
-        </div>
-
-        <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-glow">
-                <i class="fa-solid fa-tower-broadcast"></i>
-            </div>
-            <div>
-                <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">Live Streams</p>
-                <p id="sys-live-streams" class="text-lg font-bold text-text">{{ system_stats.total_active_streams }} Active</p>
-            </div>
-        </div>
-
-        <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                <i class="fa-solid fa-cloud-arrow-up"></i>
-            </div>
-            <div class="min-w-0">
-                <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">HTTP Egress</p>
-                <p id="sys-egress-today" class="text-lg font-bold text-text" data-bytes="{{ system_stats.egress.today.bytes|default(0) }}"></p>
-                <p class="text-[10px] text-text-secondary">
-                    Month: <span id="sys-egress-month" data-bytes="{{ system_stats.egress.month.bytes|default(0) }}"></span>
-                </p>
-            </div>
-        </div>
-
-        <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center text-sky-500">
-                <i class="fa-solid fa-network-wired"></i>
-            </div>
-            <div class="min-w-0 flex-1">
-                <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">VPS TX Outbound</p>
-                <p id="sys-vps-outbound-month" class="text-lg font-bold text-text" data-bytes="{{ system_stats.vps_outbound.month.bytes|default(0) }}"></p>
-                <p class="text-[10px] text-text-secondary">
-                    Today: <span id="sys-vps-outbound-today" data-bytes="{{ system_stats.vps_outbound.today.bytes|default(0) }}"></span>
-                </p>
-                <div class="mt-2 h-1.5 bg-surface rounded-full overflow-hidden">
-                    <div id="sys-vps-outbound-progress" class="h-full bg-sky-400 transition-all duration-700" style="width: {{ [system_stats.vps_outbound.month.percent|default(0), 100]|min }}%"></div>
-                </div>
-                <p class="mt-1 text-[9px] text-text-secondary">
-                    <span id="sys-vps-outbound-percent">{{ "%.1f"|format(system_stats.vps_outbound.month.percent|default(0)) }}%</span> of 10 TB
-                </p>
-            </div>
-        </div>
-
-        <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-surface flex items-center justify-center text-text-secondary">
-                <i class="fa-solid fa-code-branch"></i>
-            </div>
-            <div>
-                <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">Version</p>
-                <p id="sys-version" class="text-lg font-bold text-text">v{{ system_stats.version or '1.0.0' }}</p>
-            </div>
-        </div>
-    </div>
-
-    <div class="grid lg:grid-cols-3 gap-8">
-        <div class="lg:col-span-2 space-y-8">
-            <style>
-                .ua-dot { width:.7rem;height:.7rem;border-radius:9999px;background:var(--text-secondary);flex-shrink:0; }
-                .ua-dot.on { background:#22c55e;box-shadow:0 0 8px #22c55e; }
-                .ua-vpn { font-size:.6rem;font-weight:900;padding:.15rem .45rem;border-radius:9999px;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3);white-space:nowrap; }
-                .ua-clean { font-size:.6rem;font-weight:900;padding:.15rem .45rem;border-radius:9999px;background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3);white-space:nowrap; }
-                .ua-skel { height:132px;border-radius:1rem;border:1px solid var(--hairline);background:linear-gradient(90deg, color-mix(in srgb,var(--text) 6%,transparent) 25%, color-mix(in srgb,var(--text) 14%,transparent) 37%, color-mix(in srgb,var(--text) 6%,transparent) 63%);background-size:400% 100%;animation:ua-shimmer 1.4s ease infinite; }
-                @keyframes ua-shimmer { 0%{background-position:100% 0;} 100%{background-position:-100% 0;} }
-                .ua-now { margin-top:.5rem;font-size:.8rem;font-weight:800;color:#22c55e; }
-                .ua-meta { margin-top:.6rem;display:flex;flex-direction:column;gap:.25rem;font-size:.72rem; }
-                .ua-meta span { color:var(--text-secondary);display:inline-flex;align-items:center;gap:.35rem; }
-                .ua-meta span span { color:var(--text); }
-                .c-green { color:color-mix(in srgb,#22c55e 80%,var(--text)); }
-                .c-red { color:color-mix(in srgb,#ef4444 80%,var(--text)); }
-            </style>
-
-            <script>
-                function uaEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-                function uaFlag(cc) { if (!cc || cc.length !== 2) return ''; return String.fromCodePoint(...[...cc.toUpperCase()].map(c => 127397 + c.charCodeAt(0))); }
-                function uaAgo(iso) {
-                    if (!iso) return '—';
-                    const t = new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
-                    const d = (Date.now() - t) / 1000;
-                    if (d < 60) return 'just now';
-                    if (d < 3600) return Math.floor(d / 60) + 'm ago';
-                    if (d < 86400) return Math.floor(d / 3600) + 'h ago';
-                    return Math.floor(d / 86400) + 'd ago';
-                }
-                let uaPage = 1;
-                const uaPerPage = 12;
-                window.__UA_INITIAL__ = {{ user_activity_initial | tojson }};
-                function renderUaPagination(data) {
-                    const el = document.getElementById('ua-pagination');
-                    if (!el) return;
-                    const pages = data.total_pages || 1, cur = data.page || 1;
-                    if (pages <= 1) { el.innerHTML = ''; return; }
-                    el.innerHTML = `
-                        <button onclick="loadUserActivity(${cur - 1})" ${cur <= 1 ? 'disabled' : ''} class="px-3 py-1.5 rounded-xl glass-panel border border-hairline text-sm font-bold disabled:opacity-40"><i class="fa-solid fa-chevron-left"></i></button>
-                        <span class="text-sm text-text-secondary">Page ${cur} of ${pages} · ${data.total} users</span>
-                        <button onclick="loadUserActivity(${cur + 1})" ${cur >= pages ? 'disabled' : ''} class="px-3 py-1.5 rounded-xl glass-panel border border-hairline text-sm font-bold disabled:opacity-40"><i class="fa-solid fa-chevron-right"></i></button>`;
-                }
-                function renderUserActivity(data) {
-                    const box = document.getElementById('ua-list');
-                    const users = data.users || [];
-                    document.getElementById('ua-online').textContent = (data.online_count || 0) + ' online';
-                    if (!users.length) { box.innerHTML = '<p class="text-text-secondary text-sm"><i class="fa-regular fa-circle-dot"></i> No one is currently watching.</p>'; renderUaPagination(data); return; }
-                    box.innerHTML = users.map(u => {
-                        const loc = [u.country, u.city].filter(Boolean).join(': ') || 'Unknown';
-                        const nowLine = u.online && u.now_playing
-                            ? `<div class="ua-now"><i class="fas fa-play"></i> Now Playing — ${uaEsc(u.now_playing)}</div>`
-                            : `<div class="text-text-secondary text-xs mt-2 truncate"><i class="fas fa-clock-rotate-left"></i> ${uaEsc(u.last_title || 'No history')}</div>`;
-                        const fl = uaFlag(u.country_code);
-                        return `<div class="glass-panel p-4 rounded-2xl border border-hairline">
-                            <div class="flex items-center justify-between gap-2">
-                                <div class="flex items-center gap-2 min-w-0">
-                                    <span class="ua-dot ${u.online ? 'on' : ''}"></span>
-                                    <span class="font-bold truncate">${uaEsc(u.name)}</span>
-                                </div>
-                                <span class="${u.proxy ? 'ua-vpn' : 'ua-clean'}"><i class="fas fa-shield-halved"></i> ${u.proxy ? 'VPN' : 'Clean'}</span>
-                            </div>
-                            ${nowLine}
-                            <div class="ua-meta">
-                                <span><i class="fas fa-signal"></i> <span>${u.online ? 'Online' : uaAgo(u.last_play_active || u.last_active)}</span></span>
-                                <span><i class="fas fa-location-dot"></i> <span>${fl ? fl + ' ' : ''}${uaEsc(loc)}</span></span>
-                                <span><i class="fas fa-network-wired"></i> <span>${uaEsc(u.isp || '—')}</span></span>
-                                <span><i class="fas fa-mobile-screen-button"></i> <span>${uaEsc(u.app)}${u.device ? ' · ' + uaEsc(u.device) : ''}</span></span>
-                                <span><i class="fas fa-globe"></i> <span>${uaEsc(u.ip || '—')}</span></span>
-                                ${u.streams24h ? `<span><i class="fas fa-clapperboard"></i> <span>${u.streams24h} today · ${u.streams ?? 0} total</span></span>` : ''}
-                            </div>
-                        </div>`;
-                    }).join('');
-                    renderUaPagination(data);
-                }
-                function uaSkeleton() { return '<div class="ua-skel"></div>'; }
-                async function loadUserActivity(page, silent) {
-                    if (page) uaPage = page;
-                    const box = document.getElementById('ua-list');
-                    if (!box) return;
-                    if (!silent) box.innerHTML = uaSkeleton();
-                    try {
-                        const res = await fetch(`/api/admin/user-activity?page=${uaPage}&per_page=${uaPerPage}`);
-                        renderUserActivity(await res.json());
-                    } catch (e) {
-                        box.innerHTML = '<p class="text-text-secondary text-sm">Unable to load user activity.</p>';
-                    }
-                }
-                function uaInit() {
-                    if (window.__UA_INITIAL__ && (window.__UA_INITIAL__.users || []).length) renderUserActivity(window.__UA_INITIAL__);
-                    else loadUserActivity();
-                    setInterval(() => loadUserActivity(null, true), 15000);
-                }
-                if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', uaInit); else uaInit();
-            </script>
-
-            <section>
-                <h3 class="flex items-center gap-2 text-lg font-bold mb-4 ml-2">
-                    <i class="fa-solid fa-database text-primary"></i> Storage Nodes
-                </h3>
-
-                <div class="grid md:grid-cols-2 gap-4">
-                    {% for db_stat in system_stats.databases %}
-                    <div class="glass-panel p-6 rounded-[2rem] border-hairline bg-card/10">
-                        <div class="flex justify-between items-start mb-6">
-                            <h4 class="font-bold text-text">{{ db_stat.db_name.replace("storage_", "Node ") }}</h4>
-                            <span class="text-[10px] bg-primary/10 text-primary px-2 py-1 rounded-lg font-bold uppercase">Online</span>
-                        </div>
-
-                        <div class="space-y-4">
-                            <div class="flex justify-between text-sm">
-                                <span class="text-text-secondary">Movies / TV</span>
-                                <span class="font-bold text-text">{{ db_stat.movie_count }} / {{ db_stat.tv_count }}</span>
-                            </div>
-
-                            <div class="space-y-2">
-                                <div class="flex justify-between text-xs font-bold uppercase tracking-widest">
-                                    <span class="text-text-secondary">Disk Usage</span>
-                                    <span class="text-primary">{{ "%.1f"|format(db_stat.storageSize / 1024 / 1024) }} MB</span>
-                                </div>
-                                <div class="w-full h-1.5 bg-surface rounded-full overflow-hidden">
-                                    {% set storage_percent = (db_stat.storageSize / (500 * 1024 * 1024) * 100) | round %}
-                                    <div class="h-full bg-gradient-to-r from-primary to-accent transition-all duration-1000" style="width: {{ storage_percent }}%"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </section>
-
-            <section class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <a href="/media/manage?media_type=movie" class="glass-panel p-6 rounded-[2rem] hover:bg-primary/5 transition-all group border border-hairline">
-                    <div class="flex items-center gap-4">
-                        <div class="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
-                            <i class="fa-solid fa-film text-2xl"></i>
-                        </div>
-                        <div>
-                            <h4 class="font-bold text-text">Manage Movies</h4>
-                            <p class="text-xs text-text-secondary">Organize and edit library</p>
-                        </div>
-                        <i class="fa-solid fa-chevron-right ml-auto text-muted group-hover:text-primary group-hover:translate-x-1 transition-all"></i>
-                    </div>
-                </a>
-
-                <a href="/media/manage?media_type=tv" class="glass-panel p-6 rounded-[2rem] hover:bg-accent/5 transition-all group border border-hairline">
-                    <div class="flex items-center gap-4">
-                        <div class="w-14 h-14 rounded-2xl bg-accent/10 flex items-center justify-center text-accent group-hover:scale-110 transition-transform">
-                            <i class="fa-solid fa-tv text-2xl"></i>
-                        </div>
-                        <div>
-                            <h4 class="font-bold text-text">Manage TV Shows</h4>
-                            <p class="text-xs text-text-secondary">Handle series and episodes</p>
-                        </div>
-                        <i class="fa-solid fa-chevron-right ml-auto text-muted group-hover:text-accent group-hover:translate-x-1 transition-all"></i>
-                    </div>
-                </a>
-            </section>
-
-            <div class="glass-panel rounded-[2.5rem] overflow-hidden">
-                <div class="p-6 border-b border-hairline">
-                    <div class="flex items-center justify-between gap-3 mb-2">
-                        <h3 class="flex items-center gap-2 text-lg font-bold">
-                            <i class="fa-solid fa-users text-primary"></i> User Activity
-                            <span id="ua-online" class="text-[10px] font-bold uppercase tracking-[0.2em] text-primary bg-primary/10 px-3 py-1 rounded-full">0 online</span>
-                        </h3>
-                        <button onclick="loadUserActivity()" class="text-sm font-semibold text-text-secondary hover:text-primary transition">
-                            <i class="fa-solid fa-rotate"></i> Refresh
-                        </button>
-                    </div>
-                    <p class="text-sm text-text-secondary">Who's watching, where from, and on what</p>
-                </div>
-                <div class="p-6">
-                    <div id="ua-list" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                        <div class="ua-skel"></div>
-                    </div>
-                    <div id="ua-pagination" class="flex items-center justify-center gap-3 mt-6"></div>
-                </div>
-            </div>
-        </div>
-
-        <div class="lg:col-span-1">
-            <div class="glass-panel rounded-[2.5rem] overflow-hidden h-full">
-                <div class="p-6 border-b border-hairline">
-                    <div class="flex items-center justify-between gap-3 mb-2">
-                        <h3 class="flex items-center gap-2 text-lg font-bold">
-                            <i class="fa-solid fa-circle-play text-red-500 animate-pulse"></i> Live Network
-                        </h3>
-                        <span id="live-stream-count" class="text-[10px] font-bold uppercase tracking-[0.2em] text-primary bg-primary/10 px-3 py-1 rounded-full">
-                            {{ system_stats.total_active_streams or 0 }} Active
-                        </span>
-                    </div>
-                    <p class="text-sm text-text-secondary">Current sessions only</p>
-                </div>
-
-                <div class="p-6 space-y-6">
-                    <div class="grid grid-cols-2 gap-3">
-                        <div class="glass-panel p-4 rounded-2xl">
-                            <p class="text-[10px] uppercase font-bold tracking-widest text-text-secondary">Live Now</p>
-                            <p id="live-now-count" class="text-2xl font-extrabold mt-1 text-text">{{ system_stats.total_active_streams or 0 }}</p>
-                        </div>
-                        <div class="glass-panel p-4 rounded-2xl">
-                            <p class="text-[10px] uppercase font-bold tracking-widest text-text-secondary">Recent</p>
-                            <p id="recent-stream-count" class="text-2xl font-extrabold mt-1 text-text">0</p>
-                        </div>
-                    </div>
-
-                    <div>
-                        <div class="flex items-center justify-between mb-3">
-                            <h4 class="text-sm font-bold text-text">Active Streams</h4>
-                            <span class="text-[10px] uppercase tracking-widest text-text-secondary">Real-time</span>
-                        </div>
-                        <div id="active-streams-container" class="space-y-4">
-                            {% if system_stats.active_streams %}
-                                {% for stream in system_stats.active_streams %}
-                                <div class="stream-card rounded-[2rem] p-5">
-                                    <div class="flex justify-between items-start gap-3">
-                                        <div class="min-w-0 pr-2">
-                                            <h5 class="font-bold text-sm text-text truncate">{{ stream.title or stream.meta.get('title') or 'Unknown Stream' }}</h5>
-                                            <div class="mt-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-widest text-text-secondary">
-                                                <span>Bot {{ (stream.client_index or 0) + 1 }}</span>
-                                                <span>•</span>
-                                                <span>DC {{ stream.dc_id or '-' }}</span>
-                                                <span>•</span>
-                                                <span class="font-mono">{{ stream.stream_id[:12] if stream.stream_id else 'Unknown' }}{% if stream.stream_id %}…{% endif %}</span>
-                                            </div>
-                                        </div>
-                                        <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap stream-badge-live">
-                                            Live
-                                        </span>
-                                    </div>
-
-                                    <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-hairline">
-                                        <div class="text-center">
-                                            <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Speed</p>
-                                            <p class="text-xs font-bold text-text">{{ "%.3f"|format(stream.avg_mbps or 0) }} MB/s</p>
-                                        </div>
-                                        <div class="text-center">
-                                            <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Total</p>
-                                            <p class="text-xs font-bold text-text">{{ "%.1f"|format((stream.total_bytes or 0) / 1024 / 1024) }} MB</p>
-                                        </div>
-                                        <div class="text-center">
-                                            <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Duration</p>
-                                            <p class="text-xs font-bold text-text live-duration" data-start-ts="{{ stream.start_ts or 0 }}">0s</p>
-                                        </div>
-                                        <div class="text-center">
-                                            <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Status</p>
-                                            <p class="text-xs font-bold text-text">{{ stream.status or 'active' }}</p>
-                                        </div>
-                                    </div>
-
-                                    <div class="mt-4 pt-4 border-t border-hairline space-y-2">
-                                        <div class="flex items-center justify-between text-xs gap-3">
-                                            <span class="text-text-secondary">Started</span>
-                                            <span class="text-text text-right truncate max-w-[65%] live-started" data-start-ts="{{ stream.start_ts or 0 }}">—</span>
-                                        </div>
-                                        <div class="flex items-center justify-between text-xs gap-3">
-                                            <span class="text-text-secondary">Stream ID</span>
-                                            <span class="font-mono text-text text-right truncate max-w-[65%]">{{ stream.stream_id or 'Unknown' }}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                {% endfor %}
-                            {% else %}
-                                <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-hairline">
-                                    <i class="fa-solid fa-satellite-dish text-4xl text-muted mb-3"></i>
-                                    <p class="text-sm text-text-secondary font-medium">No active streams right now</p>
-                                    <p class="text-xs text-text-secondary mt-1">The live network is idle at the moment.</p>
-                                </div>
-                            {% endif %}
-                        </div>
-                    </div>
-
-                    <div>
-                        <div class="flex items-center justify-between mb-3">
-                            <h4 class="text-sm font-bold text-text">Recent Failed Streams</h4>
-                            <span class="text-[10px] uppercase tracking-widest text-text-secondary">Errors</span>
-                        </div>
-                        <div id="recent-failed-streams-container" class="space-y-4">
-                            <div class="glass-panel p-6 rounded-[2rem] text-center border-dashed border-hairline">
-                                <p class="text-xs text-text-secondary">No recent stream errors.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <section class="mt-12">
+{% block title %}Dashboard - Telegram Stremio
+        <section class="mt-12">
         <div class="glass-panel rounded-[2.5rem] overflow-hidden">
             <div class="p-8 border-b border-hairline flex flex-col md:flex-row justify-between items-center gap-4">
                 <div>
@@ -508,9 +123,8 @@
             </div>
         </div>
     </section>
-</div>
 
-<div id="edit-modal" class="fixed inset-0 bg-background/80 backdrop-blur-md hidden flex items-center justify-center z-50 p-4">
+    <div id="edit-modal" class="fixed inset-0 bg-background/80 backdrop-blur-md hidden flex items-center justify-center z-50 p-4">
     <div class="glass-panel rounded-[2rem] p-8 w-full max-w-md border border-hairline shadow-2xl">
         <h3 class="text-xl font-bold mb-2">Edit Limits</h3>
         <p class="text-sm text-text-secondary mb-6">Modify daily and monthly data quotas for this token.</p>
@@ -542,93 +156,16 @@
     </div>
 </div>
 
-
-<style>
-    .shadow-glow {
-        filter: drop-shadow(0 0 8px color-mix(in srgb, var(--primary) 45%, transparent));
+    <script>
+    function formatBytes(bytes) {
+        if (bytes === undefined || bytes === null || isNaN(bytes)) return '—';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        let i = 0;
+        while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+        return `${bytes.toFixed(bytes >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
     }
 
-    .stream-card {
-        background: color-mix(in srgb, var(--card) 55%, transparent);
-        border: 1px solid var(--border);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.16);
-    }
-
-    .stream-badge-live {
-        background: color-mix(in srgb, var(--primary) 18%, transparent);
-        color: var(--primary);
-    }
-
-    .stream-badge-recent {
-        background: color-mix(in srgb, var(--accent) 16%, transparent);
-        color: var(--accent);
-    }
-
-    input[type="text"],
-    input[type="number"],
-    input[type="email"],
-    input[type="password"],
-    input[type="search"],
-    input[type="url"],
-    textarea,
-    select {
-        color: var(--text) !important;
-        border-color: var(--border) !important;
-        caret-color: var(--primary);
-        background: color-mix(in srgb, var(--card) 88%, var(--background) 12%);
-    }
-
-    input[type="text"]::placeholder,
-    input[type="number"]::placeholder,
-    input[type="email"]::placeholder,
-    input[type="password"]::placeholder,
-    input[type="search"]::placeholder,
-    input[type="url"]::placeholder,
-    textarea::placeholder {
-        color: var(--text-secondary);
-        opacity: 0.95;
-    }
-
-    input:focus,
-    textarea:focus,
-    select:focus {
-        outline: none;
-        border-color: var(--primary) !important;
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
-    }
-
-    input:-webkit-autofill,
-    input:-webkit-autofill:hover,
-    input:-webkit-autofill:focus {
-        -webkit-text-fill-color: var(--text) !important;
-        box-shadow: 0 0 0px 1000px color-mix(in srgb, var(--card) 88%, var(--background) 12%) inset !important;
-        transition: background-color 9999s ease-in-out 0s;
-    }
-
-
-</style>
-
-<script>
-    const streamState = {
-        currentEditToken: null,
-        activeStreams: []
-    };
-
-    function toggleCreateForm() {
-        const formContainer = document.getElementById('create-form-container');
-        const btnContainer = document.getElementById('create-btn-container');
-        if (!formContainer || !btnContainer) return;
-
-        if (formContainer.classList.contains('hidden')) {
-            formContainer.classList.remove('hidden');
-            btnContainer.classList.add('hidden');
-        } else {
-            formContainer.classList.add('hidden');
-            btnContainer.classList.remove('hidden');
-        }
-    }
-
-    function openEditModal(token, daily, monthly, active) {
+        function openEditModal(token, daily, monthly, active) {
         const tokenStr = String(token || '');
         streamState.currentEditToken = tokenStr;
         document.getElementById('edit-token-id').value = tokenStr;
@@ -769,12 +306,292 @@
                 document.body.removeChild(temp);
                 if (!ok) throw new Error('copy failed');
             }
-            showToast('Manifest URL copied to clipboard.', 'success', 'Copied');
-        } catch (error) {
-            console.error(error);
-            showToast('Failed to copy manifest URL.', 'error', 'Copy failed');
+
+    (function tokenUsageRefresh() {
+        async function refresh() {
+            try {
+                const res = await fetch('/api/admin/system-stats');
+                if (!res.ok) return;
+                const s = await res.json();
+                const elEgressToday = document.getElementById('sys-egress-today');
+                if (elEgressToday && s.egress) {
+                    elEgressToday.textContent = formatBytes(s.egress.today?.bytes || 0);
+                    const m = document.getElementById('sys-egress-month');
+                    if (m) m.textContent = formatBytes(s.egress.month?.bytes || 0);
+                }
+                const elVps = document.getElementById('sys-vps-outbound-month');
+                if (elVps && s.vps_outbound) {
+                    elVps.textContent = formatBytes(s.vps_outbound.month?.bytes || 0);
+                    const t = document.getElementById('sys-vps-outbound-today');
+                    if (t) t.textContent = formatBytes(s.vps_outbound.today?.bytes || 0);
+                    const bar = document.getElementById('sys-vps-outbound-progress');
+                    if (bar) bar.style.width = Math.min(s.vps_outbound.month?.percent || 0, 100) + '%';
+                    const pc = document.getElementById('sys-vps-outbound-percent');
+                    if (pc) pc.textContent = (s.vps_outbound.month?.percent || 0).toFixed(1) + '%';
+                }
+                if (Array.isArray(s.api_tokens)) {
+                    const rows = document.querySelectorAll('tbody tr');
+                    s.api_tokens.forEach((token, index) => {
+                        if (rows.length > index && !rows[index].querySelector('[colspan]')) {
+                            const row = rows[index];
+                            const daily = row.querySelector('td:nth-child(2) span[data-bytes]');
+                            const monthly = row.querySelectorAll('td:nth-child(2) span[data-bytes]')[1];
+                            if (daily && token.usage?.daily) {
+                                daily.setAttribute('data-bytes', token.usage.daily.bytes || 0);
+                                daily.textContent = formatBytes(token.usage.daily.bytes || 0);
+                            }
+                            if (monthly && token.usage?.monthly) {
+                                monthly.setAttribute('data-bytes', token.usage.monthly.bytes || 0);
+                                monthly.textContent = formatBytes(token.usage.monthly.bytes || 0);
+                            }
+                        }
+                    });
+                }
+            } catch (e) {}
         }
-    }
+        refresh();
+        setInterval(refresh, 15000);
+    })();
+    </script>
+
+{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <header class="flex flex-wrap items-end justify-between gap-4">
+        <div class="min-w-0">
+            <h1 class="text-[28px] sm:text-3xl font-semibold leading-tight">Overview</h1>
+            <p class="text-text-secondary text-sm mt-1">Your Telegram channels as a Stremio addon</p>
+        </div>
+        <button onclick="refreshDashboard()" class="btn-ghost px-4 py-2 text-sm">
+            <i id="refresh-icon" class="fa-solid fa-arrows-rotate"></i> Refresh
+        </button>
+    </header>
+
+    <div id="setup-card" class="empty:hidden"></div>
+
+    <section>
+        <h2 class="label-caps mb-2.5 px-1">Server</h2>
+        <div class="glass-panel p-5">
+            <div class="flex items-center gap-3 pb-4 mb-4 border-b border-border">
+                <span class="w-2 h-2 rounded-full {{ 'bg-ok' if system_stats.server_status == 'running' else 'bg-danger' }} shrink-0"></span>
+                <div class="min-w-0">
+                    <p class="font-medium leading-tight">{{ 'Addon server running' if system_stats.server_status == 'running' else 'Server needs attention' }}</p>
+                    <p class="text-sm text-text-secondary truncate">{{ system_stats.telegram_bot }} · {{ system_stats.total_databases }} database{{ '' if system_stats.total_databases == 1 else 's' }}</p>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-y-4 gap-x-6">
+                <div class="min-w-0"><p id="sys-uptime" class="text-xl font-semibold tabular truncate">{{ system_stats.uptime or 'N/A' }}</p><p class="text-sm text-text-secondary">Uptime</p></div>
+                <div class="min-w-0"><p class="text-xl font-semibold tabular"><span id="sys-bots-count">{{ system_stats.connected_bots|default(0) }}</span></p><p class="text-sm text-text-secondary">Bots</p></div>
+                <div class="min-w-0"><p class="text-xl font-semibold tabular"><span id="sys-live-streams">{{ system_stats.total_active_streams }}</span></p><p class="text-sm text-text-secondary">Live streams</p></div>
+                <div class="min-w-0"><p id="sys-version" class="text-xl font-semibold tabular truncate">v{{ system_stats.version }}</p><p class="text-sm text-text-secondary">Version</p></div>
+
+        <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+            </div>
+            <div class="min-w-0">
+                <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">HTTP Egress</p>
+                <p id="sys-egress-today" class="text-lg font-bold text-text" data-bytes="{{ system_stats.egress.today.bytes|default(0) }}"></p>
+                <p class="text-[10px] text-text-secondary">
+                    Month: <span id="sys-egress-month" data-bytes="{{ system_stats.egress.month.bytes|default(0) }}"></span>
+                </p>
+            </div>
+        </div>
+
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2 class="label-caps mb-2.5 px-1">Library</h2>
+        <div class="glass-panel p-5">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-y-4 gap-x-6">
+                <div><p class="text-xl font-semibold tabular">{{ system_stats.movies }}</p><p class="text-sm text-text-secondary">Movies</p></div>
+                <div><p class="text-xl font-semibold tabular">{{ system_stats.tv_shows }}</p><p class="text-sm text-text-secondary">Series</p></div>
+                <div><p class="text-xl font-semibold tabular">{{ system_stats.total_databases }}</p><p class="text-sm text-text-secondary">Storage nodes</p></div>
+                <div><p class="text-xl font-semibold tabular">{{ "%.1f"|format((system_stats.databases|sum(attribute='storageSize')) / 1048576) }} MB</p><p class="text-sm text-text-secondary">Index size</p></div>
+            </div>
+            {% if system_stats.databases %}
+            <div class="mt-4 pt-4 border-t border-border space-y-3">
+                {% for db_stat in system_stats.databases %}
+                {% set pct = [(db_stat.storageSize / (500 * 1024 * 1024) * 100) | round(1), 100] | min %}
+                <div class="flex items-center gap-4 text-sm">
+                    <span class="w-16 shrink-0 font-medium">{{ db_stat.db_name.replace("storage_", "Node ") }}</span>
+                    <span class="flex-1 h-1.5 rounded-full bg-card-high overflow-hidden"><span class="block h-full rounded-full bg-primary" style="width: {{ [pct, 1]|max }}%"></span></span>
+                    <span class="shrink-0 text-text-secondary tabular">{{ db_stat.movie_count }} / {{ db_stat.tv_count }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <section id="recent-wrap" hidden>
+        <div class="flex items-center justify-between mb-2.5 px-1">
+            <h2 class="label-caps">Recently added</h2>
+            <a href="/media/manage" class="text-sm text-primary hover:underline underline-offset-4">View all</a>
+        </div>
+        <div id="recent-row" class="poster-row"></div>
+    </section>
+
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+        <div class="lg:col-span-3 space-y-8 min-w-0">
+            <section>
+                <h2 class="label-caps mb-2.5 px-1">Shortcuts</h2>
+                <div class="glass-panel overflow-hidden divide-y divide-border">
+                    <a href="/media/manage?media_type=movie" class="list-row"><i class="fa-solid fa-film"></i><span><b>Movies</b><small>Organize and edit the library</small></span><i class="fa-solid fa-chevron-right chev"></i></a>
+                    <a href="/media/manage?media_type=tv" class="list-row"><i class="fa-solid fa-tv"></i><span><b>TV shows</b><small>Seasons, episodes and files</small></span><i class="fa-solid fa-chevron-right chev"></i></a>
+                    <a href="/admin/access" class="list-row"><i class="fa-solid fa-key"></i><span><b>Tokens and access</b><small>Create tokens, set data limits and plans</small></span><i class="fa-solid fa-chevron-right chev"></i></a>
+                </div>
+            </section>
+
+            <section>
+                <div class="flex items-center justify-between gap-3 mb-2.5 px-1">
+                    <h2 class="label-caps">Viewers <span id="ua-online" class="ml-2 normal-case tracking-normal text-primary">0 online</span></h2>
+                    <button onclick="loadUserActivity()" class="text-sm text-text-secondary hover:text-text transition"><i class="fa-solid fa-rotate mr-1"></i>Refresh</button>
+                </div>
+            <script>
+                function uaEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+                function uaFlag(cc) { if (!cc || cc.length !== 2) return ''; return String.fromCodePoint(...[...cc.toUpperCase()].map(c => 127397 + c.charCodeAt(0))); }
+                function uaAgo(iso) {
+                    if (!iso) return '—';
+                    const t = new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
+                    const d = (Date.now() - t) / 1000;
+                    if (d < 60) return 'just now';
+                    if (d < 3600) return Math.floor(d / 60) + 'm ago';
+                    if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+                    return Math.floor(d / 86400) + 'd ago';
+                }
+                let uaPage = 1;
+                const uaPerPage = 5;
+                window.__UA_INITIAL__ = {{ user_activity_initial | tojson }};
+                function renderUaPagination(data) {
+                    const el = document.getElementById('ua-pagination');
+                    if (!el) return;
+                    const pages = data.total_pages || 1, cur = data.page || 1;
+                    if (pages <= 1) { el.innerHTML = ''; return; }
+                    el.innerHTML = `
+                        <button onclick="loadUserActivity(${cur - 1})" ${cur <= 1 ? 'disabled' : ''} class="icon-btn border border-border disabled:opacity-40" aria-label="Previous page"><i class="fa-solid fa-chevron-left text-xs"></i></button>
+                        <span class="text-sm text-text-secondary">Page ${cur} of ${pages} · ${data.total} users</span>
+                        <button onclick="loadUserActivity(${cur + 1})" ${cur >= pages ? 'disabled' : ''} class="icon-btn border border-border disabled:opacity-40" aria-label="Next page"><i class="fa-solid fa-chevron-right text-xs"></i></button>`;
+                }
+                function renderUserActivity(data) {
+                    const box = document.getElementById('ua-list');
+                    const users = data.users || [];
+                    document.getElementById('ua-online').textContent = (data.online_count || 0) + ' online';
+                    if (!users.length) { box.innerHTML = '<div class="glass-panel sm:col-span-2 p-6 text-center text-sm text-text-secondary">No viewers yet. Activity shows up here once someone streams.</div>'; renderUaPagination(data); return; }
+                    box.innerHTML = users.map(u => {
+                        const loc = [u.country, u.city].filter(Boolean).join(': ') || 'Unknown';
+                        const nowLine = u.now_playing
+                            ? `<div class="ua-now"><i class="fa-solid fa-play text-[10px] mr-1"></i>${uaEsc(u.now_playing)}</div>`
+                            : `<div class="text-text-secondary text-[13px] mt-2 truncate">${uaEsc(u.last_title || 'No history')}</div>`;
+                        const fl = uaFlag(u.country_code);
+                        return `<div class="ua-card glass-panel">
+                            <div class="flex items-center justify-between gap-2 min-w-0">
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <span class="ua-dot ${u.online ? 'on' : ''}"></span>
+                                    <span class="font-medium truncate">${uaEsc(u.name)}</span>
+                                </div>
+                                <span class="ua-tag ${u.proxy ? 'vpn' : ''}">${u.proxy ? 'VPN' : 'Direct'}</span>
+                            </div>
+                            ${nowLine}
+                            <div class="ua-meta">
+                                <span><i class="fa-solid fa-signal"></i> <span>${u.online ? 'Online' : uaAgo(u.last_active)}</span></span>
+                                <span><i class="fa-solid fa-location-dot"></i> <span>${fl ? fl + ' ' : ''}${uaEsc(loc)}</span></span>
+                                <span><i class="fa-solid fa-network-wired"></i> <span>${uaEsc(u.isp || '—')}</span></span>
+                                <span><i class="fa-solid fa-mobile-screen-button"></i> <span>${uaEsc(u.app)}${u.device ? ' · ' + uaEsc(u.device) : ''}</span></span>
+                                <span><i class="fa-solid fa-globe"></i> <span>${uaEsc(u.ip || '—')}</span></span>
+                                <span><i class="fa-solid fa-film"></i> <span>${u.streams} streams</span></span>
+                            </div>
+                        </div>`;
+                    }).join('');
+                    renderUaPagination(data);
+                }
+                function uaSkeleton() { return '<div class="ua-skel"></div>'; }
+                async function loadUserActivity(page, silent) {
+                    if (page) uaPage = page;
+                    const box = document.getElementById('ua-list');
+                    if (!box) return;
+                    if (!silent) box.innerHTML = uaSkeleton();
+                    try {
+                        const res = await fetch(`/api/admin/user-activity?page=${uaPage}&per_page=${uaPerPage}`);
+                        renderUserActivity(await res.json());
+                    } catch (e) {
+                        box.innerHTML = '<p class="text-text-secondary text-sm">Unable to load user activity.</p>';
+                    }
+                }
+                function uaInit() {
+                    if (window.__UA_INITIAL__ && (window.__UA_INITIAL__.users || []).length) renderUserActivity(window.__UA_INITIAL__);
+                    else loadUserActivity();
+                    setInterval(() => loadUserActivity(null, true), 15000);
+                }
+                if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', uaInit); else uaInit();
+            </script>
+                <div id="ua-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div class="ua-skel"></div>
+                </div>
+                <div id="ua-pagination" class="flex items-center justify-center flex-wrap gap-3 mt-4"></div>
+            </section>
+        </div>
+
+        <section class="lg:col-span-2 min-w-0">
+            <div class="flex items-center justify-between gap-3 mb-2.5 px-1">
+                <h2 class="label-caps">Live network</h2>
+                <span id="live-stream-count" class="text-sm text-text-secondary">{{ system_stats.total_active_streams or 0 }} active</span>
+            </div>
+            <div class="glass-panel p-5">
+                <div class="grid grid-cols-2 gap-6 pb-4 mb-4 border-b border-border">
+                    <div><p id="live-now-count" class="text-xl font-semibold tabular">{{ system_stats.total_active_streams or 0 }}</p><p class="text-sm text-text-secondary">Live now</p></div>
+                    <div><p id="recent-stream-count" class="text-xl font-semibold tabular">0</p><p class="text-sm text-text-secondary">Recent</p></div>
+                </div>
+                <div id="active-streams-container" class="space-y-3"></div>
+            </div>
+        </section>
+    </div>
+</div>
+
+<style>
+    .poster-row { display: grid; grid-auto-flow: column; grid-auto-columns: 132px; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; padding-bottom: 6px; scrollbar-width: none; }
+    .poster-row::-webkit-scrollbar { display: none; }
+    @media (min-width: 640px) { .poster-row { grid-auto-columns: 148px; } }
+    .poster { scroll-snap-align: start; min-width: 0; color: var(--text); text-decoration: none; }
+    .poster-img { position: relative; aspect-ratio: 2 / 3; border-radius: 14px; overflow: hidden; background: var(--card-high); }
+    .poster-img img { width: 100%; height: 100%; object-fit: cover; transition: transform .35s var(--ease); }
+    .poster:hover .poster-img img { transform: scale(1.04); }
+    .poster-rating { position: absolute; top: 6px; right: 6px; padding: 2px 7px; border-radius: 99px; font-size: .72rem; color: #fff; background: rgba(0,0,0,.72); }
+    .poster-title { margin-top: .5rem; font-size: .88rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .poster-sub { font-size: .78rem; color: var(--text-sec); }
+
+    .list-row { display: flex; align-items: center; gap: 1rem; padding: .95rem 1.1rem; color: var(--text); text-decoration: none; transition: background-color .15s var(--ease); }
+    .list-row:hover { background: var(--surface); }
+    .list-row > i:first-child { width: 1.25rem; text-align: center; color: var(--primary); }
+    .list-row > span { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+    .list-row b { font-weight: 500; }
+    .list-row small { font-size: .82rem; color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .list-row .chev { font-size: .75rem; color: var(--text-sec); transition: transform .2s var(--ease); }
+    .list-row:hover .chev { transform: translateX(3px); }
+
+    .ua-card { min-width: 0; padding: 1rem; }
+    .ua-dot { width: .5rem; height: .5rem; border-radius: 99px; background: var(--border); flex-shrink: 0; }
+    .ua-dot.on { background: var(--ok); }
+    .ua-tag { font-size: .7rem; padding: .1rem .5rem; border-radius: 99px; white-space: nowrap; border: 1px solid var(--border); color: var(--text-sec); }
+    .ua-tag.vpn { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+    .ua-skel { height: 132px; border-radius: var(--radius); border: 1px solid var(--border); background: linear-gradient(90deg, var(--card) 25%, var(--card-high) 37%, var(--card) 63%); background-size: 400% 100%; animation: ua-shimmer 1.4s ease infinite; }
+    @keyframes ua-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+    .ua-now { margin-top: .5rem; font-size: .82rem; color: var(--ok); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ua-meta { margin-top: .75rem; display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: .35rem .75rem; font-size: .78rem; }
+    .ua-meta > span { display: flex; align-items: center; gap: .4rem; min-width: 0; color: var(--text-sec); }
+    .ua-meta > span i { width: .9rem; text-align: center; font-size: .7rem; }
+    .ua-meta > span span { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .stream-card { padding: 1rem; border-radius: var(--radius-sm); background: var(--bg); border: 1px solid var(--border); min-width: 0; }
+    .stream-badge-live { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+    .stream-badge-recent { background: var(--card-high); color: var(--text-sec); }
+</style>
+
+<script>
+    const streamState = { activeStreams: [] };
 
     function escapeHtml(unsafe) {
         if (unsafe === null || unsafe === undefined) return '';
@@ -795,36 +612,31 @@
     }
 
     function formatDuration(seconds) {
-        const value = Math.max(0, Number(seconds || 0));
-        const total = Math.floor(value);
-
+        const total = Math.floor(Math.max(0, Number(seconds || 0)));
         const h = Math.floor(total / 3600);
         const m = Math.floor((total % 3600) / 60);
         const s = total % 60;
-
-        if (h > 0) {
-            return `${h}h ${m}m ${s}s`;
-        }
-        if (m > 0) {
-            return `${m}m ${s}s`;
-        }
+        if (h > 0) return `${h}h ${m}m ${s}s`;
+        if (m > 0) return `${m}m ${s}s`;
         return `${s}s`;
     }
 
     function formatTimestamp(ts) {
-        if (typeof ts === 'string') {
-            const parsed = new Date(ts);
-            if (!Number.isNaN(parsed.getTime())) return parsed.toLocaleString();
-        }
         const value = Number(ts || 0);
         if (!value) return '—';
         const date = new Date(value * 1000);
-        if (Number.isNaN(date.getTime())) return '—';
-        return date.toLocaleString();
+        return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
     }
 
     function getStreamTitle(stream) {
-        return stream?.title || stream?.meta?.title || 'Unknown Stream';
+        return stream?.title || stream?.file_name || stream?.meta?.title || stream?.meta?.file_name || 'Unknown Stream';
+    }
+
+    function getStreamFileName(stream) {
+        const fn = stream?.file_name || stream?.meta?.file_name || '';
+        const title = stream?.title || stream?.meta?.title || '';
+        if (fn && title && fn !== title) return fn;
+        return '';
     }
 
     function getClientLabel(stream) {
@@ -839,158 +651,80 @@
     }
 
     function getStatusBadge(status) {
-        const normalized = String(status || '').toLowerCase();
-
-        if (normalized === 'active') {
-            return { className: 'stream-badge-live', text: 'Live' };
-        }
-        if (normalized === 'cancelled') {
-            return { className: 'bg-yellow-500/15 text-yellow-300', text: 'Cancelled' };
-        }
-        if (normalized === 'completed' || normalized === 'finished') {
-            return { className: 'c-green', text: 'Completed' };
-        }
-        if (normalized === 'failed' || normalized === 'error') {
-            return { className: 'c-red', text: normalized.charAt(0).toUpperCase() + normalized.slice(1) };
-        }
-
-        return {
-            className: 'stream-badge-recent',
-            text: normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Live'
-        };
+        const n = String(status || '').toLowerCase();
+        if (n === 'active') return { className: 'stream-badge-live', text: 'Live' };
+        if (n === 'cancelled') return { className: 'bg-yellow-500/15 text-yellow-300', text: 'Cancelled' };
+        if (n === 'completed' || n === 'finished') return { className: 'bg-green-500/15 text-green-300', text: 'Completed' };
+        if (n === 'failed' || n === 'error') return { className: 'bg-red-500/15 text-red-300', text: n.charAt(0).toUpperCase() + n.slice(1) };
+        return { className: 'stream-badge-recent', text: n ? n.charAt(0).toUpperCase() + n.slice(1) : 'Live' };
     }
 
     function getLiveDuration(stream) {
         const startTs = Number(stream?.start_ts || 0);
         if (!startTs) return '0s';
-        const now = Date.now() / 1000;
-        return formatDuration(now - startTs);
+        return formatDuration(Date.now() / 1000 - startTs);
     }
 
     function renderStreamCard(stream) {
         const status = getStatusBadge(stream?.status);
         const title = escapeHtml(getStreamTitle(stream));
-        const filename = escapeHtml(stream?.filename || stream?.meta?.filename || '');
-        const userName = escapeHtml(stream?.user_name || stream?.meta?.user_name || 'Unknown');
-        const clientHost = escapeHtml(stream?.client_host || stream?.meta?.client_host || 'Unknown');
-        const userAgent = escapeHtml(stream?.user_agent || stream?.meta?.user_agent || '');
-        const range = escapeHtml(stream?.request_range || stream?.meta?.request_range || 'full');
-        const ttfb = stream?.ttfb_sec !== null && stream?.ttfb_sec !== undefined ? Number(stream.ttfb_sec).toFixed(3) + 's' : '—';
-        const timeouts = Number(stream?.chunk_timeouts || 0);
-        const fallbacks = Number(stream?.fallback_chunks || 0);
-        const cdnChunks = Number(stream?.cdn_chunks || 0);
-        const cdnRedirects = Number(stream?.cdn_redirects || 0);
-        const cdnBytes = formatBytes(stream?.cdn_bytes || 0);
-        const cdnErrors = Number(stream?.cdn_errors || 0);
-        const cdnDc = stream?.cdn_dc !== null && stream?.cdn_dc !== undefined ? `CDN DC ${stream.cdn_dc}` : '—';
-        const errorReason = escapeHtml(stream?.error_reason || '');
-        const adaptive = stream?.adaptive_prefetch || stream?.meta?.adaptive_prefetch || {};
-        const prefetch = adaptive?.effective_prefetch ? `${adaptive.effective_prefetch}/${adaptive.effective_parallelism}` : '—';
-        const prefetchReason = escapeHtml(adaptive?.reason || '');
-        const streamId = escapeHtml(stream?.stream_id ? String(stream.stream_id).slice(0, 12) + '…' : 'Unknown');
+        const fileName = escapeHtml(getStreamFileName(stream));
         const label = escapeHtml(getClientLabel(stream));
-        const totalBytes = formatBytes(stream?.total_bytes || 0);
-        const avgSpeed = stream?.avg_mbps !== null && stream?.avg_mbps !== undefined
-            ? Number(stream.avg_mbps).toFixed(3) + ' MB/s'
-            : '—';
-        const started = formatTimestamp(stream?.start_ts);
-        const liveDuration = getLiveDuration(stream);
-
+        const avgSpeed = stream?.avg_mbps != null ? Number(stream.avg_mbps).toFixed(2) + ' MB/s' : '—';
         return `
-            <div class="stream-card rounded-[2rem] p-5">
-                <div class="flex justify-between items-start gap-3">
-                    <div class="min-w-0 pr-2">
-                        <h5 class="font-bold text-sm text-text truncate">${title}</h5>
-                        <div class="mt-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-widest text-text-secondary">
-                            <span>${label}</span>
-                            <span>•</span>
-                            <span>${streamId}</span>
-                        </div>
-                        ${filename ? `<p class="muted text-xs mt-2 break-all">${filename}</p>` : ''}
+            <div class="stream-card">
+                <div class="flex items-start justify-between gap-3 min-w-0">
+                    <div class="min-w-0">
+                        <p class="font-medium text-sm truncate" title="${title}">${title}</p>
+                        ${fileName ? `<p class="text-xs text-text-secondary truncate" title="${fileName}">${fileName}</p>` : ''}
                     </div>
-                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap ${status.className}">
-                        ${escapeHtml(status.text)}
-                    </span>
+                    <span class="text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap shrink-0 ${status.className}">${escapeHtml(status.text)}</span>
                 </div>
-
-                <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-hairline">
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Speed</p>
-                        <p class="text-xs font-bold text-text">${avgSpeed}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Total</p>
-                        <p class="text-xs font-bold text-text">${escapeHtml(totalBytes)}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Duration</p>
-                        <p class="text-xs font-bold text-text live-duration">${escapeHtml(liveDuration)}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Started</p>
-                        <p class="text-xs font-bold text-text truncate live-started">${escapeHtml(started)}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">TTFB</p>
-                        <p class="text-xs font-bold text-text">${ttfb}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Timeouts</p>
-                        <p class="text-xs font-bold text-text">${timeouts}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Fallbacks</p>
-                        <p class="text-xs font-bold text-text">${fallbacks}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Prefetch</p>
-                        <p class="text-xs font-bold text-text" title="${prefetchReason}">${escapeHtml(prefetch)}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">CDN</p>
-                        <p class="text-xs font-bold text-text" title="${escapeHtml(cdnBytes)} via ${escapeHtml(cdnDc)}">${cdnChunks}/${cdnRedirects}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">CDN Errors</p>
-                        <p class="text-xs font-bold text-text">${cdnErrors}</p>
-                    </div>
+                <div class="grid grid-cols-3 gap-2 mt-3 text-xs">
+                    <div class="min-w-0"><p class="text-text-secondary">Speed</p><p class="font-medium tabular truncate">${avgSpeed}</p></div>
+                    <div class="min-w-0"><p class="text-text-secondary">Sent</p><p class="font-medium tabular truncate">${escapeHtml(formatBytes(stream?.total_bytes || 0))}</p></div>
+                    <div class="min-w-0"><p class="text-text-secondary">Time</p><p class="font-medium tabular truncate live-duration">${escapeHtml(getLiveDuration(stream))}</p></div>
                 </div>
-
-                <div class="mt-4 pt-4 border-t border-hairline space-y-2">
-                    <div class="flex items-center justify-between text-xs gap-3">
-                        <span class="text-text-secondary">User</span>
-                        <span class="text-text text-right truncate max-w-[65%]">${userName}</span>
-                    </div>
-                    <div class="flex items-center justify-between text-xs gap-3">
-                        <span class="text-text-secondary">Client</span>
-                        <span class="text-text text-right truncate max-w-[65%]" title="${userAgent}">${clientHost}</span>
-                    </div>
-                    <div class="flex items-center justify-between text-xs gap-3">
-                        <span class="text-text-secondary">Range</span>
-                        <span class="font-mono text-text text-right truncate max-w-[65%]">${range}</span>
-                    </div>
-                    <div class="flex items-center justify-between text-xs gap-3">
-                        <span class="text-text-secondary">Stream ID</span>
-                        <span class="font-mono text-text text-right truncate max-w-[65%]">${streamId}</span>
-                    </div>
-                    <div class="flex items-center justify-between text-xs gap-3">
-                        <span class="text-text-secondary">Status</span>
-                        <span class="text-text text-right truncate max-w-[65%]">${escapeHtml(stream?.status || 'active')}</span>
-                    </div>
-                    ${errorReason ? `<div class="flex items-center justify-between text-xs gap-3"><span class="text-text-secondary">Error</span><span class="c-red text-right break-all max-w-[65%]">${errorReason}</span></div>` : ''}
-                </div>
+                <p class="mt-3 pt-3 border-t border-border text-xs text-text-secondary truncate">${label} · <span class="font-mono">${escapeHtml(String(stream?.stream_id || '').slice(0, 12))}</span> · ${escapeHtml(formatTimestamp(stream?.start_ts))}</p>
             </div>
         `;
     }
 
     function renderEmptyState(icon, title, subtitle) {
         return `
-            <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-hairline">
-                <i class="${icon} text-4xl text-muted mb-3"></i>
-                <p class="text-sm text-text-secondary font-medium">${escapeHtml(title)}</p>
+            <div class="py-8 text-center">
+                <span class="mx-auto mb-3 grid place-items-center w-11 h-11 rounded-full bg-card-high text-text-secondary"><i class="${icon}"></i></span>
+                <p class="text-sm font-medium">${escapeHtml(title)}</p>
                 <p class="text-xs text-text-secondary mt-1">${escapeHtml(subtitle)}</p>
             </div>
         `;
+    }
+
+    async function loadRecent() {
+        const wrap = document.getElementById('recent-wrap');
+        const row = document.getElementById('recent-row');
+        try {
+            const [m, t] = await Promise.all(['movie', 'tv'].map(type =>
+                fetch(`/api/media/list?media_type=${type}&page_size=12`).then(r => r.ok ? r.json() : {}).catch(() => ({}))));
+            const items = [...(m.movies || m.media || []), ...(t.tv_shows || t.media || [])]
+                .filter(x => x && x.title)
+                .sort((a, b) => String(b.updated_on || '').localeCompare(String(a.updated_on || '')))
+                .slice(0, 14);
+            if (!items.length) return;
+            row.innerHTML = items.map(x => {
+                const type = x.media_type === 'tv' ? 'tv' : 'movie';
+                const href = `/media/edit?tmdb_id=${encodeURIComponent(x.tmdb_id)}&db_index=${encodeURIComponent(x.db_index)}&media_type=${type}`;
+                return `<a class="poster" href="${href}">
+                    <div class="poster-img">
+                        ${x.poster ? `<img src="${escapeHtml(x.poster)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ''}
+                        ${x.rating ? `<span class="poster-rating">★ ${Number(x.rating).toFixed(1)}</span>` : ''}
+                    </div>
+                    <p class="poster-title">${escapeHtml(x.title)}</p>
+                    <p class="poster-sub">${escapeHtml(x.release_year || '')}${x.release_year ? ' · ' : ''}${type === 'tv' ? 'Series' : 'Movie'}</p>
+                </a>`;
+            }).join('');
+            wrap.hidden = false;
+        } catch (e) {}
     }
 
     async function loadStreamStats() {
@@ -998,7 +732,6 @@
         const liveCount = document.getElementById('live-stream-count');
         const liveNowCount = document.getElementById('live-now-count');
         const recentCount = document.getElementById('recent-stream-count');
-        const failedContainer = document.getElementById('recent-failed-streams-container');
 
         try {
             const response = await fetch('/stream/stats', { cache: 'no-store' });
@@ -1007,61 +740,37 @@
             const data = await response.json();
             const activeStreams = Array.isArray(data.active_streams) ? data.active_streams : [];
             const recentStreams = Array.isArray(data.recent_streams) ? data.recent_streams : [];
-            const failedStreams = Array.isArray(data.recent_failed_streams) ? data.recent_failed_streams : [];
 
             streamState.activeStreams = activeStreams;
 
-            if (liveCount) liveCount.textContent = activeStreams.length + ' Active';
+            if (liveCount) liveCount.textContent = activeStreams.length + ' active';
             if (liveNowCount) liveNowCount.textContent = String(activeStreams.length);
             if (recentCount) recentCount.textContent = String(recentStreams.length);
 
             if (activeContainer) {
                 activeContainer.innerHTML = activeStreams.length
                     ? activeStreams.map(stream => renderStreamCard(stream)).join('')
-                    : renderEmptyState(
-                        'fa-solid fa-satellite-dish',
-                        'No active streams right now',
-                        'The live network is idle at the moment.'
-                    );
-            }
-            if (failedContainer) {
-                failedContainer.innerHTML = failedStreams.length
-                    ? failedStreams.slice(0, 5).map(stream => renderStreamCard(stream)).join('')
-                    : '<div class="glass-panel p-6 rounded-[2rem] text-center border-dashed border-hairline"><p class="text-xs text-text-secondary">No recent stream errors.</p></div>';
+                    : renderEmptyState('fa-solid fa-satellite-dish', 'No active streams right now', 'The live network is idle at the moment.');
             }
         } catch (error) {
             console.error(error);
             if (activeContainer) {
-                activeContainer.innerHTML = renderEmptyState(
-                    'fa-solid fa-triangle-exclamation',
-                    'Unable to load live network',
-                    'Please try refreshing the page.'
-                );
-            }
-            if (failedContainer) {
-                failedContainer.innerHTML = renderEmptyState(
-                    'fa-solid fa-triangle-exclamation',
-                    'Unable to load stream failures',
-                    'Please try refreshing the page.'
-                );
+                activeContainer.innerHTML = renderEmptyState('fa-solid fa-triangle-exclamation', 'Unable to load live network', 'Please try refreshing the page.');
             }
         }
     }
 
     function refreshLiveDurations() {
-        const cards = document.querySelectorAll('#active-streams-container .stream-card');
-        cards.forEach((card, index) => {
+        document.querySelectorAll('#active-streams-container .stream-card').forEach((card, index) => {
             const durationEl = card.querySelector('.live-duration');
             const stream = streamState.activeStreams[index];
-            if (durationEl && stream) {
-                durationEl.textContent = getLiveDuration(stream);
-            }
+            if (durationEl && stream) durationEl.textContent = getLiveDuration(stream);
         });
     }
 
     async function refreshDashboard() {
         const icon = document.getElementById('refresh-icon');
-        if (icon) icon.classList.add('animate-spin');
+        if (icon) icon.classList.add('fa-spin');
 
         try {
             const response = await fetch('/api/system/stats', { cache: 'no-store' });
@@ -1072,94 +781,13 @@
                 if (elUptime) elUptime.innerText = stats.uptime || 'N/A';
 
                 const elBotCount = document.getElementById('sys-bots-count');
-                if (elBotCount) elBotCount.innerText = (stats.connected_bots ?? 0) + ' Nodes';
+                if (elBotCount) elBotCount.innerText = stats.connected_bots ?? 0;
 
                 const elLive = document.getElementById('sys-live-streams');
-                if (elLive) elLive.innerText = (stats.total_active_streams ?? 0) + ' Active';
+                if (elLive) elLive.innerText = stats.total_active_streams ?? 0;
 
                 const elVersion = document.getElementById('sys-version');
                 if (elVersion) elVersion.innerText = 'v' + (stats.version || '1.0.0');
-
-                const egress = stats.egress || {};
-                const elEgressToday = document.getElementById('sys-egress-today');
-                if (elEgressToday) {
-                    const todayBytes = egress.today?.bytes || 0;
-                    elEgressToday.setAttribute('data-bytes', todayBytes);
-                    elEgressToday.textContent = formatBytes(todayBytes);
-                }
-
-                const elEgressMonth = document.getElementById('sys-egress-month');
-                if (elEgressMonth) {
-                    const monthBytes = egress.month?.bytes || 0;
-                    elEgressMonth.setAttribute('data-bytes', monthBytes);
-                    elEgressMonth.textContent = formatBytes(monthBytes);
-                }
-
-                const vpsOutbound = stats.vps_outbound || {};
-                const elVpsOutboundMonth = document.getElementById('sys-vps-outbound-month');
-                if (elVpsOutboundMonth) {
-                    const monthBytes = vpsOutbound.month?.bytes || 0;
-                    elVpsOutboundMonth.setAttribute('data-bytes', monthBytes);
-                    elVpsOutboundMonth.textContent = formatBytes(monthBytes);
-                }
-
-                const elVpsOutboundToday = document.getElementById('sys-vps-outbound-today');
-                if (elVpsOutboundToday) {
-                    const todayBytes = vpsOutbound.today?.bytes || 0;
-                    elVpsOutboundToday.setAttribute('data-bytes', todayBytes);
-                    elVpsOutboundToday.textContent = formatBytes(todayBytes);
-                }
-
-                const outboundPercent = Number(vpsOutbound.month?.percent || 0);
-                const elVpsOutboundProgress = document.getElementById('sys-vps-outbound-progress');
-                if (elVpsOutboundProgress) {
-                    elVpsOutboundProgress.style.width = Math.max(0, Math.min(100, outboundPercent)).toFixed(1) + '%';
-                }
-
-                const elVpsOutboundPercent = document.getElementById('sys-vps-outbound-percent');
-                if (elVpsOutboundPercent) {
-                    elVpsOutboundPercent.textContent = outboundPercent.toFixed(1) + '%';
-                }
-
-                if (stats.databases && Array.isArray(stats.databases)) {
-                    stats.databases.forEach((db, index) => {
-                        const elMovies = document.getElementById(`db-movies-${index}`);
-                        if (elMovies) elMovies.innerText = db.movie_count.toLocaleString();
-
-                        const elTv = document.getElementById(`db-tv-${index}`);
-                        if (elTv) elTv.innerText = db.tv_count.toLocaleString();
-
-                        const elStorage = document.getElementById(`db-storage-${index}`);
-                        if (elStorage) {
-                            const mb = db.storageSize / (1024 * 1024);
-                            elStorage.innerText = mb.toFixed(1) + ' MB';
-                        }
-                    });
-                }
-
-                if (stats.api_tokens && Array.isArray(stats.api_tokens)) {
-                    const rows = document.querySelectorAll('tbody tr');
-                    stats.api_tokens.forEach((token, index) => {
-                        if (rows.length > index && !rows[index].querySelector('[colspan]')) {
-                            const row = rows[index];
-
-                            const dailyUsageSpan = row.querySelector('td:nth-child(2) span[data-bytes]');
-                            const monthlyUsageSpan = row.querySelectorAll('td:nth-child(2) span[data-bytes]')[1];
-
-                            if (dailyUsageSpan && token.usage && token.usage.daily) {
-                                const dailyBytes = token.usage.daily.bytes || 0;
-                                dailyUsageSpan.setAttribute('data-bytes', dailyBytes);
-                                dailyUsageSpan.textContent = formatBytes(dailyBytes);
-                            }
-
-                            if (monthlyUsageSpan && token.usage && token.usage.monthly) {
-                                const monthlyBytes = token.usage.monthly.bytes || 0;
-                                monthlyUsageSpan.setAttribute('data-bytes', monthlyBytes);
-                                monthlyUsageSpan.textContent = formatBytes(monthlyBytes);
-                            }
-                        }
-                    });
-                }
             }
 
             await loadStreamStats();
@@ -1167,50 +795,52 @@
             console.error('Failed to refresh dashboard:', error);
             showToast('Dashboard refresh failed.', 'error', 'Refresh failed');
         } finally {
-            setTimeout(() => {
-                if (icon) icon.classList.remove('animate-spin');
-            }, 450);
+            setTimeout(() => { if (icon) icon.classList.remove('fa-spin'); }, 450);
         }
     }
 
-    function formatInitialBytes() {
-        document.querySelectorAll('[data-bytes]').forEach(el => {
-            const raw = el.getAttribute('data-bytes');
-            el.textContent = formatBytes(raw);
-        });
-    }
+    document.addEventListener('DOMContentLoaded', () => {
+        loadStreamStats();
+        loadSetupStatus();
+        loadRecent();
+        setInterval(loadStreamStats, 30000);
+        setInterval(refreshLiveDurations, 1000);
+    });
 
     async function loadSetupStatus() {
         const wrap = document.getElementById('setup-card');
         if (!wrap) return;
         try {
-            const res = await fetch('/api/admin/launch-readiness');
+            const res = await fetch('/api/admin/setup-status');
             if (!res.ok) return;
             const data = await res.json();
-            const warnings = (data.warnings || []).filter(Boolean);
-            if (data.status !== 'needs_attention' || !warnings.length) { wrap.innerHTML = ''; return; }
+            const d = data.data || {};
+            const checks = d.checks || [];
+            if (!checks.length || d.complete) { wrap.innerHTML = ''; return; }
 
-            const rows = warnings.map(w => `
-                <a href="/admin/launch-readiness" class="flex items-start gap-3 p-3 rounded-2xl transition hover:bg-primary/5">
-                    <span class="mt-0.5 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-amber-500/20 text-amber-400">
-                        <i class="fa-solid fa-arrow-right text-xs"></i>
+            const rows = checks.map(c => `
+                <a href="/admin/settings" class="flex items-start gap-3 p-3 rounded-[14px] transition-colors hover:bg-surface ${c.done ? 'opacity-55' : ''}">
+                    <span class="mt-0.5 w-5 h-5 rounded-full grid place-items-center shrink-0 ${c.done ? 'bg-ok/15 text-ok' : 'border border-border text-text-secondary'}">
+                        <i class="fa-solid ${c.done ? 'fa-check' : 'fa-arrow-right'} text-[10px]"></i>
                     </span>
-                    <span>
-                        <span class="font-bold text-sm text-text">${escapeHtmlSetup(w)}</span>
-                        <span class="block text-xs text-text-secondary mt-0.5">Open launch readiness to review</span>
+                    <span class="min-w-0">
+                        <span class="block text-sm font-medium ${c.done ? 'line-through text-text-secondary' : ''}">${escapeHtmlSetup(c.label)}</span>
+                        <span class="block text-[13px] text-text-secondary mt-0.5">${escapeHtmlSetup(c.hint)}</span>
                     </span>
                 </a>`).join('');
 
+            const pct = Math.round((d.done / d.total) * 100);
             wrap.innerHTML = `
-                <div class="glass-panel rounded-[2rem] p-6 border border-amber-500/20">
-                    <div class="flex items-center justify-between gap-3 mb-4">
-                        <div>
-                            <h2 class="text-lg font-extrabold text-text flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation text-amber-400"></i> Attention needed</h2>
-                            <p class="text-xs text-text-secondary mt-1">${warnings.length} item(s) require your attention.</p>
+                <div class="glass-panel p-5">
+                    <div class="flex items-center justify-between gap-4">
+                        <div class="min-w-0">
+                            <h2 class="font-medium">Finish setting up</h2>
+                            <p class="text-sm text-text-secondary mt-0.5">${d.done} of ${d.total} steps done</p>
                         </div>
-                        <a href="/admin/launch-readiness" class="text-xs font-bold px-3 py-2 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-background transition-all">Review</a>
+                        <span class="text-xl font-semibold text-primary tabular">${pct}%</span>
                     </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${rows}</div>
+                    <div class="h-1.5 rounded-full bg-card-high overflow-hidden my-4"><div class="h-full rounded-full bg-primary transition-[width] duration-700" style="width:${pct}%"></div></div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 -mx-1">${rows}</div>
                 </div>`;
         } catch (e) { /* ignore */ }
     }
@@ -1218,13 +848,5 @@
     function escapeHtmlSetup(v) {
         return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
     }
-
-    document.addEventListener('DOMContentLoaded', () => {
-        formatInitialBytes();
-        loadStreamStats();
-        loadSetupStatus();
-        setInterval(loadStreamStats, 30000);
-        setInterval(refreshLiveDurations, 1000);
-    });
 </script>
 {% endblock %}

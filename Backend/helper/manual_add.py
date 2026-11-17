@@ -124,3 +124,26 @@ async def stamp_caption_by_ref(client, chat_id, msg_id, metadata_info: dict) -> 
     except Exception as e:
         LOGGER.warning(f"[Caption] Could not stamp id on message {msg_id}: {e}")
         return False
+
+
+#----- Re-tag every file of a title with its IMDb deeplink (upstream v5.3.3):
+#----- wrong or raw captions are replaced so other Stremio addons can match.
+async def retag_media(client, media_type: str, doc: dict) -> int:
+    from Backend.helper.encrypt import decode_string
+    info = {"imdb_id": doc.get("imdb_id"), "tmdb_id": doc.get("tmdb_id"), "media_type": media_type}
+    qualities = (doc.get("telegram") or []) if media_type == "movie" else [
+        q for s in doc.get("seasons") or [] for e in s.get("episodes") or [] for q in e.get("telegram") or []
+    ]
+    refs = []
+    for q in qualities:
+        if q.get("parts"):
+            refs += [(p["chat_id"], p["msg_id"]) for p in q["parts"]]
+        else:
+            try:
+                d = await decode_string(q["id"])
+                refs.append((d["chat_id"], d["msg_id"]))
+            except Exception:
+                continue
+    for chat_id, msg_id in refs:
+        await stamp_caption_by_ref(client, chat_id, msg_id, info)
+    return len(refs)

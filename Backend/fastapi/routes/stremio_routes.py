@@ -17,7 +17,7 @@ from Backend.helper.metadata import (
     _tmdb_tv_details,
 )
 from Backend.helper.stream_formatter import format_stream
-from Backend.fastapi.themes import get_theme, get_all_themes, DEFAULT_STYLE, DEFAULT_THEME
+from Backend.fastapi.themes import get_theme, theme_key
 import PTN
 from datetime import datetime, timezone, timedelta
 from Backend.fastapi.security.tokens import verify_token
@@ -826,14 +826,14 @@ async def configure_addon(request: Request, token: str):
     return templates.TemplateResponse(request=request, name="stremio_configure.html", context={
         "manifest_url": manifest_url,
         "install_page_url": install_page_url,
+        "web_install_url": install_page_url,
         "user_name": user_name,
         "expiry_str": expiry_str,
         "status_kind": status_kind,
+        "status_color": "var(--ok)" if status_kind == "success" else ("var(--danger)" if status_kind == "danger" else "var(--text-sec)"),
         "status_text": status_text,
         "token": token,
-        "theme": get_theme(request.session.get("theme", DEFAULT_THEME), request.session.get("style", DEFAULT_STYLE)),
-        "themes": get_all_themes(),
-        "current_theme": request.session.get("theme", DEFAULT_THEME),
+        "theme": get_theme(theme_key(request)),
     })
 
 

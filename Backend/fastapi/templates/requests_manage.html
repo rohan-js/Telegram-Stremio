@@ -1,78 +1,221 @@
 {% extends "base.html" %}
-{% block title %}Content Requests - TG Stremio{% endblock %}
-{% block content %}
+{% block title %}Content Requests - Telegram Stremio{% endblock %}
 
+{% block content %}
 <style>
-.pill { display:inline-flex; align-items:center; gap:.35rem; padding:.3rem .7rem; border-radius:9999px; font-size:.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
-.pill-ok { background: color-mix(in srgb, #22c55e 14%, transparent); color: #22c55e; }
-.pill-warn { background: color-mix(in srgb, #f59e0b 14%, transparent); color: #f59e0b; }
-.pill-danger { background: color-mix(in srgb, #ef4444 14%, transparent); color: #ef4444; }
-.c-red { color: color-mix(in srgb, #ef4444 80%, var(--text)); }
+  .rq-tabs { display: inline-flex; padding: 4px; gap: 2px; border-radius: 9999px; background: var(--card); border: 1px solid var(--border); }
+  .rq-tab { padding: .45rem 1rem; border-radius: 9999px; cursor: pointer; font-size: .88rem; color: var(--text-sec); background: transparent; border: 0; transition: background-color .2s var(--ease), color .2s var(--ease); }
+  .rq-tab span { margin-left: .3rem; font-size: .78rem; opacity: .75; }
+  .rq-tab.active { background: var(--card-high); color: var(--primary); }
+  .rq-filters { display: flex; gap: .4rem; flex-wrap: wrap; }
+  .rq-chip { padding: .35rem .85rem; border-radius: 9999px; border: 1px solid var(--border); cursor: pointer; font-size: .82rem; color: var(--text-sec); background: transparent; transition: all .15s var(--ease); }
+  .rq-chip:hover { color: var(--text); }
+  .rq-chip.active { background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary); border-color: color-mix(in srgb, var(--primary) 50%, var(--border)); }
+  .rq-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1.25rem 1rem; }
+  .rq-card { min-width: 0; display: flex; flex-direction: column; }
+  .rq-poster { position: relative; aspect-ratio: 2/3; border-radius: 14px; overflow: hidden; background: var(--card-high); }
+  .rq-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .rq-poster .noimg { position: absolute; inset: 0; display: grid; place-items: center; font-size: 1.5rem; color: var(--text-sec); }
+  .rq-count, .rq-badge { position: absolute; top: 6px; padding: 2px 8px; border-radius: 9999px; font-size: .72rem; line-height: 1.4; background: rgba(0,0,0,.72); color: #fff; }
+  .rq-count { left: 6px; }
+  .rq-badge { right: 6px; text-transform: capitalize; }
+  .b-pending { background: var(--warn); color: #1a1405; }
+  .b-uploaded { background: var(--ok); color: #0b1a07; }
+  .b-denied { background: rgba(0,0,0,.72); }
+  .b-banned { background: var(--danger); color: #fff; }
+  .rq-body { padding: .6rem .1rem .5rem; display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+  .rq-title { font-weight: 500; font-size: .92rem; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .rq-id { font-size: .75rem; color: var(--text-sec); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rq-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem; margin-top: auto; }
+  .rq-btn { border: 1px solid var(--border); border-radius: 9999px; padding: .4rem .3rem; font-size: .78rem; cursor: pointer; background: transparent; color: var(--text); display: flex; align-items: center; justify-content: center; gap: .3rem; white-space: nowrap; transition: background-color .15s var(--ease), transform .12s var(--ease); }
+  .rq-btn:hover { background: var(--card-high); }
+  .rq-btn:active { transform: scale(.96); }
+  .rq-btn.wide { grid-column: 1 / -1; }
+  .btn-up i { color: var(--ok); }
+  .btn-deny i { color: var(--text-sec); }
+  .btn-ban i, .btn-del i { color: var(--danger); }
+  .btn-reopen i { color: var(--warn); }
+  .rq-empty { text-align: center; padding: 3.5rem 1rem; color: var(--text-sec); }
+  .rq-pager { display: flex; align-items: center; justify-content: center; gap: .75rem; margin-top: 2rem; }
+  .rq-pager button { min-width: 2.4rem; height: 2.4rem; padding: 0 .9rem; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 9999px; cursor: pointer; }
+  .rq-pager button:hover:not(:disabled) { background: var(--card-high); }
+  .rq-pager button:disabled { opacity: .35; cursor: not-allowed; }
+  .rq-pager .pageinfo { color: var(--text-sec); font-size: .85rem; }
 </style>
 
-<section class="space-y-6">
-  <div class="glass-panel rounded-3xl p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+<div class="rq-shell">
+  <header class="page-head">
     <div>
-      <p class="text-xs uppercase tracking-[0.24em] text-text-secondary font-bold">Admin</p>
-      <h1 class="text-3xl font-black mt-1">Content Requests</h1>
-      <p class="text-text-secondary mt-2">Review requested movies and shows from the public request page.</p>
+      <h1 class="page-title">Requests</h1>
+      <p class="page-sub">Titles your users asked for on the public request page</p>
     </div>
-    <div class="flex gap-3">
-      <a href="/request" target="_blank" class="px-4 py-2 rounded-full bg-surface border border-hairline font-bold">Public Page</a>
-      <button onclick="loadRequests()" class="bg-primary text-background px-5 py-2 rounded-full font-bold shadow-[0_8px_22px_color-mix(in_srgb,var(--primary)_30%,transparent)]">Refresh</button>
+    <div class="page-actions">
+      <button onclick="loadRequests()" class="btn-ghost px-4 py-2 text-sm"><i class="fa-solid fa-rotate"></i> Refresh</button>
+      <a href="/request" target="_blank" rel="noopener" class="btn-primary px-4 py-2 text-sm"><i class="fa-solid fa-arrow-up-right-from-square"></i> Public page</a>
     </div>
+  </header>
+
+  <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
+    <div class="rq-tabs shrink-0 self-start">
+      <button class="rq-tab active" data-type="movie" onclick="setType(this,'movie')">Movies<span id="cnt-movie">0</span></button>
+      <button class="rq-tab" data-type="tv" onclick="setType(this,'tv')">TV shows<span id="cnt-tv">0</span></button>
+    </div>
+  <div class="rq-filters">
+    <button class="rq-chip active" data-status="" onclick="setStatusFilter(this,'')">All</button>
+    <button class="rq-chip" data-status="pending" onclick="setStatusFilter(this,'pending')">Pending</button>
+    <button class="rq-chip" data-status="uploaded" onclick="setStatusFilter(this,'uploaded')">Uploaded</button>
+    <button class="rq-chip" data-status="denied" onclick="setStatusFilter(this,'denied')">Denied</button>
+    <button class="rq-chip" data-status="banned" onclick="setStatusFilter(this,'banned')">Banned</button>
   </div>
-  <div class="glass-panel rounded-3xl p-6">
-    <div id="requests-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
   </div>
-</section>
+
+  <div id="rq-grid" class="rq-grid"></div>
+  <div id="rq-pager" class="rq-pager"></div>
+</div>
+
 <script>
-let requests = [];
-function requestCard(r) {
-  const poster = r.poster || 'https://via.placeholder.com/160x240/111827/94a3b8?text=No+Poster';
-  const id = escapeHtml(r._id);
-  return `<div class="rounded-3xl border border-hairline bg-card/50 p-4">
-    <div class="flex gap-4">
-      <img src="${escapeHtml(poster)}" class="w-20 h-28 object-cover rounded-xl">
-      <div class="min-w-0 flex-1">
-        <h3 class="font-black truncate">${escapeHtml(r.title || 'Untitled')}</h3>
-        <p class="text-sm text-text-secondary">${escapeHtml(r.media_type || '')}${r.year ? ' · ' + escapeHtml(r.year) : ''}</p>
-        <p class="text-xs text-text-secondary mt-2">${r.request_count || 0} request(s)</p>
-        <span class="inline-block mt-2 text-xs px-2 py-1 rounded-full bg-surface">${escapeHtml(r.status || 'pending')}</span>
-      </div>
+let allRequests = [];
+let curType = 'movie';
+let curStatus = '';
+let curPage = 1;
+const PER_PAGE = 18;
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+
+function setType(btn, type) {
+  curType = type;
+  curPage = 1;
+  document.querySelectorAll('.rq-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+function setStatusFilter(btn, status) {
+  curStatus = status;
+  curPage = 1;
+  document.querySelectorAll('.rq-chip').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+function goPage(delta) {
+  curPage += delta;
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function idLine(r) {
+  if (r.tmdb_id && r.imdb_id) return `TMDB ${esc(r.tmdb_id)} · ${esc(r.imdb_id)}`;
+  if (r.tmdb_id) return `TMDB ${esc(r.tmdb_id)}`;
+  if (r.imdb_id) return esc(r.imdb_id);
+  return '';
+}
+
+function cardHtml(r) {
+  const poster = r.poster
+    ? `<img src="${esc(r.poster)}" loading="lazy" alt="">`
+    : `<div class="noimg"><i class="fa-solid fa-film"></i></div>`;
+  const yr = r.year ? ` (${esc(r.year)})` : '';
+  let actions = '';
+  if (r.status !== 'uploaded')
+    actions += `<button class="rq-btn btn-up" onclick="setStatus('${r._id}','uploaded')"><i class="fa-solid fa-check"></i> Uploaded</button>`;
+  if (r.status !== 'denied')
+    actions += `<button class="rq-btn btn-deny" onclick="setStatus('${r._id}','denied')"><i class="fa-solid fa-xmark"></i> Deny</button>`;
+  if (r.status !== 'banned')
+    actions += `<button class="rq-btn btn-ban" onclick="setStatus('${r._id}','banned')"><i class="fa-solid fa-ban"></i> Ban</button>`;
+  if (r.status !== 'pending')
+    actions += `<button class="rq-btn btn-reopen" onclick="setStatus('${r._id}','pending')"><i class="fa-solid fa-rotate-left"></i> Reopen</button>`;
+  actions += `<button class="rq-btn btn-del wide" onclick="removeRequest('${r._id}')"><i class="fa-solid fa-trash"></i> Delete</button>`;
+
+  return `<div class="rq-card">
+    <div class="rq-poster">
+      ${poster}
+      <span class="rq-count"><i class="fa-solid fa-user-group"></i> ${esc(r.request_count || 0)}</span>
+      <span class="rq-badge b-${esc(r.status)}">${esc(r.status)}</span>
     </div>
-    <div class="grid grid-cols-2 gap-2 mt-4">
-      <button onclick="setStatus('${id}','uploaded')" class="px-3 py-2 rounded-xl pill pill-ok font-bold">Uploaded</button>
-      <button onclick="setStatus('${id}','pending')" class="px-3 py-2 rounded-xl bg-surface font-bold">Pending</button>
-      <button onclick="setStatus('${id}','denied')" class="px-3 py-2 rounded-xl pill pill-warn font-bold">Deny</button>
-      <button onclick="setStatus('${id}','banned')" class="px-3 py-2 rounded-xl pill pill-danger font-bold">Ban</button>
-      <button onclick="deleteReq('${id}')" class="col-span-2 px-3 py-2 rounded-xl border c-red font-bold">Delete</button>
+    <div class="rq-body">
+      <div class="rq-title">${esc(r.title)}${yr}</div>
+      <div class="rq-id">${idLine(r)}</div>
     </div>
+    <div class="rq-actions">${actions}</div>
   </div>`;
 }
+
+function render() {
+  const movies = allRequests.filter(r => r.media_type === 'movie');
+  const tv = allRequests.filter(r => r.media_type === 'tv');
+  document.getElementById('cnt-movie').textContent = movies.length;
+  document.getElementById('cnt-tv').textContent = tv.length;
+
+  let items = curType === 'tv' ? tv : movies;
+  if (curStatus) items = items.filter(r => r.status === curStatus);
+
+  const totalPages = Math.max(1, Math.ceil(items.length / PER_PAGE));
+  if (curPage > totalPages) curPage = totalPages;
+  if (curPage < 1) curPage = 1;
+  const pageItems = items.slice((curPage - 1) * PER_PAGE, curPage * PER_PAGE);
+
+  const grid = document.getElementById('rq-grid');
+  grid.innerHTML = pageItems.length
+    ? pageItems.map(cardHtml).join('')
+    : `<div class="rq-empty" style="grid-column:1/-1"><span class="mx-auto mb-3 grid place-items-center w-12 h-12 rounded-full bg-card-high"><i class="fa-solid fa-inbox"></i></span><p>No ${curStatus || ''} ${curType === 'tv' ? 'TV' : 'movie'} requests.</p></div>`;
+
+  const pager = document.getElementById('rq-pager');
+  if (items.length > PER_PAGE) {
+    pager.innerHTML =
+      `<button onclick="goPage(-1)" ${curPage <= 1 ? 'disabled' : ''}><i class="fa-solid fa-chevron-left"></i> Prev</button>
+       <span class="pageinfo">Page ${curPage} of ${totalPages} · ${items.length} total</span>
+       <button onclick="goPage(1)" ${curPage >= totalPages ? 'disabled' : ''}>Next <i class="fa-solid fa-chevron-right"></i></button>`;
+  } else {
+    pager.innerHTML = '';
+  }
+}
+
 async function loadRequests() {
-  const box = document.getElementById('requests-grid');
-  box.innerHTML = '<p class="text-text-secondary">Loading...</p>';
-  const res = await fetch('/api/admin/requests');
-  const data = await res.json().catch(() => ({}));
-  requests = data.data || [];
-  box.innerHTML = requests.length ? requests.map(requestCard).join('') : '<p class="text-text-secondary">No requests yet.</p>';
+  const grid = document.getElementById('rq-grid');
+  grid.innerHTML = `<p class="muted text-sm" style="grid-column:1/-1">Loading…</p>`;
+  try {
+    const res = await fetch('/api/admin/requests');
+    const data = await res.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Failed');
+    allRequests = data.data || [];
+    render();
+  } catch (e) {
+    grid.innerHTML = `<p style="color:var(--danger);grid-column:1/-1">Failed to load requests.</p>`;
+  }
 }
+
 async function setStatus(id, status) {
-  const res = await fetch('/api/admin/requests/' + id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status})});
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) return showToast(data.detail || 'Update failed', 'error', 'Request');
-  showToast('Request updated.', 'success', 'Request');
-  loadRequests();
+  try {
+    const res = await fetch('/api/admin/requests/' + id, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Update failed');
+    const item = allRequests.find(r => r._id === id);
+    if (item) item.status = status;
+    render();
+    showToast('Marked ' + status + '.', 'success', 'Updated');
+  } catch (e) {
+    showToast(e.message || 'Update failed', 'error', 'Error');
+  }
 }
-async function deleteReq(id) {
-  if (!confirm('Delete this request?')) return;
-  const res = await fetch('/api/admin/requests/' + id, {method:'DELETE'});
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) return showToast(data.detail || 'Delete failed', 'error', 'Request');
-  showToast('Request deleted.', 'success', 'Request');
-  loadRequests();
+
+async function removeRequest(id) {
+  try {
+    const res = await fetch('/api/admin/requests/' + id, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Delete failed');
+    allRequests = allRequests.filter(r => r._id !== id);
+    render();
+    showToast('Request deleted.', 'success', 'Deleted');
+  } catch (e) {
+    showToast(e.message || 'Delete failed', 'error', 'Error');
+  }
 }
+
 document.addEventListener('DOMContentLoaded', loadRequests);
 </script>
 {% endblock %}

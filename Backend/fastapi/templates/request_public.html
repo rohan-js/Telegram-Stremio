@@ -1,77 +1,162 @@
 {% extends "base.html" %}
-{% block title %}Request a Title - TG Stremio{% endblock %}
+{% block title %}Request a Title{% endblock %}
+
 {% block content %}
-<section class="space-y-6">
-  <div class="glass-panel rounded-3xl p-6">
-    <p class="text-xs uppercase tracking-[0.24em] text-text-secondary font-bold">Requests</p>
-    <h1 class="text-3xl font-black mt-1">Request a Movie or Show</h1>
-    <p class="text-text-secondary mt-2">Search by title, IMDb ID, or TMDb ID. Requests are reviewed by the admin.</p>
+<style>
+  .rp-shell { max-width: 1040px; margin: 0 auto; }
+  .rp-brand { display: flex; align-items: center; gap: .6rem; font-weight: 600; margin-bottom: 2.5rem; }
+  .rp-hero { padding: .5rem 0 1rem; }
+  .rp-hero h1 { font-size: clamp(1.75rem, 4.5vw, 2.5rem); font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; }
+  .rp-hero p { color: var(--text-sec); margin-top: .6rem; font-size: .98rem; max-width: 34rem; }
+  .rp-search { position: relative; display: flex; max-width: 640px; margin-top: 1.5rem; }
+  .rp-search input { flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 9999px; padding: .9rem 4rem .9rem 1.25rem; font-size: 1rem; outline: none; transition: border-color .18s var(--ease), box-shadow .18s var(--ease); }
+  .rp-search input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+  .rp-search button { position: absolute; right: 5px; top: 5px; bottom: 5px; aspect-ratio: 1; background: var(--primary); color: var(--on-primary); border: 0; border-radius: 9999px; cursor: pointer; transition: transform .12s var(--ease); }
+  .rp-search button:active { transform: scale(.94); }
+  .rp-hint { color: var(--text-sec); font-size: .82rem; margin-top: .7rem; }
+  .rp-hint b { color: var(--text); font-weight: 500; }
+  .rp-section-title { font-size: .72rem; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; color: var(--text-sec); margin: 2.5rem .25rem .75rem; display: flex; align-items: center; gap: .5rem; }
+  .rp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1.25rem 1rem; }
+  .rp-card { min-width: 0; display: flex; flex-direction: column; }
+  .rp-poster { position: relative; aspect-ratio: 2/3; border-radius: 14px; overflow: hidden; background: var(--card-high); }
+  .rp-poster img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .4s var(--ease); }
+  .rp-card:hover .rp-poster img { transform: scale(1.04); }
+  .rp-poster .noimg { position: absolute; inset: 0; display: grid; place-items: center; font-size: 1.5rem; color: var(--text-sec); }
+  .rp-type, .rp-count { position: absolute; top: 6px; padding: 2px 8px; border-radius: 9999px; font-size: .72rem; line-height: 1.4; background: rgba(0,0,0,.72); color: #fff; }
+  .rp-type { left: 6px; }
+  .rp-count { right: 6px; }
+  .rp-body { padding: .6rem .1rem 0; display: flex; flex-direction: column; gap: .6rem; flex: 1; }
+  .rp-title { font-weight: 500; font-size: .92rem; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .rp-btn { margin-top: auto; border: 1px solid var(--border); border-radius: 9999px; padding: .45rem; font-size: .84rem; cursor: pointer; background: transparent; color: var(--text); transition: background-color .15s var(--ease), color .15s var(--ease), border-color .15s var(--ease), transform .12s var(--ease); }
+  .rp-btn:hover { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+  .rp-btn:active { transform: scale(.96); }
+  .rp-btn:disabled { opacity: .5; cursor: default; }
+  .rp-empty { color: var(--text-sec); padding: 2rem .25rem; }
+  .rp-spinner { color: var(--text-sec); padding: 2rem .25rem; }
+</style>
+
+<div class="rp-shell">
+  <div class="rp-brand"><span class="brand-mark"><i class="fa-solid fa-play"></i></span>TG Stremio</div>
+  <div class="rp-hero">
+    <h1>Request a movie or show</h1>
+    <p>Can't find something? Search below and send a request — we'll try to add it.</p>
+    <form class="rp-search" onsubmit="doSearch(event)">
+      <input id="rp-q" type="search" enterkeyhint="search" placeholder="Search by name, IMDb ID (tt…) or TMDB ID" autocomplete="off">
+      <button type="submit" aria-label="Search"><i class="fa-solid fa-magnifying-glass"></i></button>
+    </form>
+    <p class="rp-hint">Examples: <b>Inception</b> · <b>tt1375666</b> · <b>27205</b></p>
   </div>
 
-  {% if not requests_enabled %}
-  <div class="glass-panel rounded-3xl p-6">
-    <h2 class="text-xl font-black">Requests are currently closed</h2>
-    <p class="text-text-secondary mt-2">The request page is installed but disabled from Settings.</p>
+  <div id="rp-results-wrap" style="display:none">
+    <div class="rp-section-title">Search results</div>
+    <div id="rp-results" class="rp-grid"></div>
   </div>
-  {% else %}
-  <div class="glass-panel rounded-3xl p-6 space-y-4">
-    <div class="flex flex-col md:flex-row gap-3">
-      <input id="request-query" class="flex-1 rounded-2xl bg-card border border-hairline p-3" placeholder="Example: Rocky III 1982 or tt0084602" onkeydown="if(event.key==='Enter') searchRequests()">
-      <button onclick="searchRequests()" class="bg-primary text-background shadow-[0_8px_22px_color-mix(in_srgb,var(--primary)_30%,transparent)] px-5 py-3 rounded-2xl font-bold">Search</button>
-    </div>
-    <div id="request-results" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+
+  <div id="rp-popular-wrap">
+    <div class="rp-section-title">Most requested</div>
+    <div id="rp-popular" class="rp-grid"></div>
   </div>
-  <div class="glass-panel rounded-3xl p-6">
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl font-black">Most Requested</h2>
-      <button onclick="loadPopular()" class="px-4 py-2 rounded-full bg-surface border border-hairline">Refresh</button>
-    </div>
-    <div id="popular-requests" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
-  </div>
-  {% endif %}
-</section>
+</div>
 
 <script>
-function card(item, idx) {
-  const poster = item.poster || 'https://via.placeholder.com/160x240/111827/94a3b8?text=No+Poster';
-  return `<div class="rounded-3xl border border-hairline bg-card/50 p-4 flex gap-4">
-    <img src="${escapeHtml(poster)}" class="w-20 h-28 object-cover rounded-xl">
-    <div class="min-w-0 flex-1">
-      <h3 class="font-black truncate">${escapeHtml(item.title || 'Untitled')}</h3>
-      <p class="text-sm text-text-secondary">${escapeHtml(item.media_type || '')}${item.year ? ' · ' + escapeHtml(item.year) : ''}</p>
-      <p class="text-xs text-text-secondary line-clamp-3 mt-2">${escapeHtml(item.overview || '')}</p>
-      <button class="mt-3 px-4 py-2 rounded-full bg-primary text-background shadow-[0_8px_22px_color-mix(in_srgb,var(--primary)_30%,transparent)] font-bold" onclick="submitRequest(${idx})">Request</button>
+let searchResults = [];
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+
+function posterHtml(r, extra) {
+  const img = r.poster ? `<img src="${esc(r.poster)}" loading="lazy" alt="">`
+                       : `<div class="noimg"><i class="fa-solid fa-film"></i></div>`;
+  const type = r.media_type === 'tv' ? 'TV' : 'Movie';
+  return `<div class="rp-poster">${img}<span class="rp-type">${type}</span>${extra || ''}</div>`;
+}
+
+function resultCard(r, idx) {
+  const yr = r.year ? ` (${esc(r.year)})` : '';
+  return `<div class="rp-card">
+    ${posterHtml(r)}
+    <div class="rp-body">
+      <div class="rp-title">${esc(r.title)}${yr}</div>
+      <button class="rp-btn" onclick="sendRequest(${idx})"><i class="fa-solid fa-paper-plane"></i> Request</button>
     </div>
   </div>`;
 }
-let currentResults = [];
-async function searchRequests() {
-  const q = document.getElementById('request-query').value.trim();
-  if (!q) return showToast('Type a title first.', 'error', 'Search');
-  const box = document.getElementById('request-results');
-  box.innerHTML = '<p class="text-text-secondary">Searching...</p>';
-  const res = await fetch('/api/request/search?q=' + encodeURIComponent(q));
-  const data = await res.json().catch(() => ({}));
-  currentResults = data.results || [];
-  box.innerHTML = currentResults.length ? currentResults.map(card).join('') : '<p class="text-text-secondary">No results found.</p>';
+
+function popularCard(r) {
+  const yr = r.year ? ` (${esc(r.year)})` : '';
+  const count = `<span class="rp-count"><i class="fa-solid fa-user-group"></i> ${esc(r.request_count || 0)}</span>`;
+  return `<div class="rp-card">
+    ${posterHtml(r, count)}
+    <div class="rp-body"><div class="rp-title">${esc(r.title)}${yr}</div></div>
+  </div>`;
 }
-async function submitRequest(idx) {
-  const item = currentResults[idx];
-  if (!item) return;
-  const res = await fetch('/api/request/submit', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item)});
-  const data = await res.json().catch(() => ({}));
-  const messages = {created:'Request submitted.', added:'Vote added.', already_available:'Already available.', disabled:'Requests are disabled.', beta_only:'Requests are limited to invited users.', rate_limited:'Too many requests. Try later.', banned:'This title cannot be requested.'};
-  showToast(messages[data.reason] || (data.ok ? 'Request saved.' : 'Request failed.'), data.ok ? 'success' : 'error', 'Request');
-  loadPopular();
+
+async function doSearch(e) {
+  if (e) e.preventDefault();
+  const q = document.getElementById('rp-q').value.trim();
+  if (q.length < 2) { showToast('Type at least 2 characters.', 'info'); return; }
+  const wrap = document.getElementById('rp-results-wrap');
+  const box = document.getElementById('rp-results');
+  wrap.style.display = '';
+  box.innerHTML = `<div class="rp-spinner" style="grid-column:1/-1"><i class="fa-solid fa-spinner fa-spin"></i> Searching…</div>`;
+  try {
+    const res = await fetch('/api/request/search?q=' + encodeURIComponent(q));
+    const data = await res.json();
+    searchResults = data.data || [];
+    box.innerHTML = searchResults.length
+      ? searchResults.map((r, i) => resultCard(r, i)).join('')
+      : `<div class="rp-empty" style="grid-column:1/-1">No matches found. Try a different name or an IMDb/TMDB ID.</div>`;
+  } catch (err) {
+    box.innerHTML = `<div class="rp-empty" style="grid-column:1/-1;color:var(--danger)">Search failed. Please try again.</div>`;
+  }
 }
+
+async function sendRequest(idx) {
+  const r = searchResults[idx];
+  if (!r) return;
+  try {
+    const res = await fetch('/api/request/submit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        media_type: r.media_type, tmdb_id: r.tmdb_id, imdb_id: r.imdb_id || null,
+        title: r.title, year: r.year, poster: r.poster,
+      }),
+    });
+    const data = await res.json();
+    const map = {
+      created:            ['Request submitted! We\'ll try to add it soon.', 'success', 'Requested'],
+      added:              ['Added your vote — this was already requested.', 'success', 'Requested'],
+      reopened:           ['Request re-opened. Thanks!', 'success', 'Requested'],
+      already_available:  ['Good news — this is already in the library!', 'info', 'Available'],
+      banned:             ['This title has been banned and can\'t be requested.', 'error', 'Not allowed'],
+      invalid:            ['Could not identify this title.', 'error', 'Error'],
+    };
+    const m = map[data.reason] || (data.ok ? ['Request submitted!', 'success', 'Requested']
+                                            : ['Something went wrong.', 'error', 'Error']);
+    showToast(m[0], m[1], m[2]);
+    if (data.ok) loadPopular();
+  } catch (err) {
+    showToast('Request failed. Please try again.', 'error', 'Error');
+  }
+}
+
 async function loadPopular() {
-  const box = document.getElementById('popular-requests');
-  if (!box) return;
-  const res = await fetch('/api/request/popular');
-  const data = await res.json().catch(() => ({}));
-  const items = data.requests || [];
-  box.innerHTML = items.length ? items.map((item) => `<div class="rounded-2xl border border-hairline p-4"><b>${escapeHtml(item.title)}</b><p class="text-sm text-text-secondary">${escapeHtml(item.media_type)}${item.year ? ' · ' + item.year : ''}</p><p class="text-xs text-text-secondary mt-2">${item.request_count || 0} request(s)</p></div>`).join('') : '<p class="text-text-secondary">No pending requests yet.</p>';
+  const box = document.getElementById('rp-popular');
+  const wrap = document.getElementById('rp-popular-wrap');
+  try {
+    const res = await fetch('/api/request/popular');
+    const data = await res.json();
+    const items = data.data || [];
+    if (!items.length) { wrap.style.display = 'none'; return; }
+    wrap.style.display = '';
+    box.innerHTML = items.map(popularCard).join('');
+  } catch (err) {
+    wrap.style.display = 'none';
+  }
 }
+
 document.addEventListener('DOMContentLoaded', loadPopular);
 </script>
 {% endblock %}

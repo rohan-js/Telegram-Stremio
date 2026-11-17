@@ -4,34 +4,12 @@
 
 {% block content %}
 <style>
-  .catalog-page {
-    --soft-bg: color-mix(in srgb, var(--bg) 78%, transparent);
-    --card-bg: color-mix(in srgb, var(--card) 58%, transparent);
-    --card-bg-strong: color-mix(in srgb, var(--card) 82%, transparent);
-    --line: color-mix(in srgb, var(--border) 90%, transparent);
-    --primary-soft: color-mix(in srgb, var(--primary) 15%, transparent);
-    --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-  }
 
-  .glass-card {
-    position: relative;
-    overflow: hidden;
-    background: var(--card-bg);
-    border: 1px solid var(--line);
-    backdrop-filter: blur(22px);
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
-  }
+  .catalog-page { --line: var(--border); --soft-bg: var(--bg); --card-bg: var(--card); }
 
-  .glass-card::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background:
-      radial-gradient(circle at 12% 0%, var(--primary-soft), transparent 36%),
-      radial-gradient(circle at 95% 10%, var(--accent-soft), transparent 34%);
-    opacity: .9;
-  }
+  .glass-card { position: relative; background: var(--card); border: 1px solid var(--border); }
+
+  .glass-card::before { content: none; }
 
   .glass-card > * { position: relative; z-index: 1; }
 
@@ -41,301 +19,216 @@
     place-items: stretch;
   }
 
-  .hero-orb {
-    width: 4.25rem;
-    height: 4.25rem;
-    border-radius: 9999px;
-    background: linear-gradient(135deg, var(--primary), var(--accent));
-    box-shadow: 0 0 45px color-mix(in srgb, var(--primary) 45%, transparent);
-    display: grid;
-    place-items: center;
-    color: var(--bg);
-  }
+  .hero-orb { width: 2.5rem; height: 2.5rem; border-radius: 9999px; display: grid; place-items: center; background: var(--card-high); color: var(--primary); }
 
-  .section-title {
-    color: var(--text);
-    font-weight: 900;
-    letter-spacing: -0.035em;
-  }
+  .section-title { color: var(--text); font-weight: 600; letter-spacing: -0.015em; }
 
   .muted { color: var(--text-sec); }
 
-  .field-label {
-    display: block;
-    font-size: 0.875rem;
-    font-weight: 800;
-    margin-bottom: 0.55rem;
-    color: var(--text);
-  }
+  .field-label { display: block; font-size: .72rem; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; margin-bottom: .45rem; color: var(--text-sec); }
 
-  .field-input,
-  .field-select {
-    width: 100%;
-    border-radius: 1rem;
-    border: 1px solid var(--line);
-    background: color-mix(in srgb, var(--bg) 84%, var(--card) 16%);
-    color: var(--text);
-    padding: 0.9rem 1rem;
-    outline: none;
-    transition: all .2s ease;
-    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent);
-  }
+  .field-input, .field-select { width: 100%; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: .75rem 1rem; outline: none; transition: border-color .18s var(--ease), box-shadow .18s var(--ease); }
 
   .field-input::placeholder { color: color-mix(in srgb, var(--text-sec) 82%, transparent); }
 
-  .field-input:focus,
-  .field-select:focus {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
-  }
+  .field-input:focus, .field-select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
 
-  .btn-ui {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: .55rem;
-    border-radius: 1rem;
-    padding: .85rem 1.15rem;
-    font-weight: 900;
-    transition: all .2s ease;
-    border: 1px solid transparent;
-    white-space: nowrap;
-  }
+  .btn-ui { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; border-radius: 9999px; padding: .6rem 1.1rem; font-size: .9rem; font-weight: 500; transition: background-color .18s var(--ease), border-color .18s var(--ease), transform .12s var(--ease), filter .18s var(--ease); border: 1px solid transparent; white-space: nowrap; }
 
-  .btn-ui:hover { transform: translateY(-1px); }
-  .btn-ui:active { transform: translateY(0) scale(.99); }
+  .btn-ui:hover { }
 
-  .btn-primary {
-    background: linear-gradient(135deg, var(--primary), var(--accent));
-    color: var(--bg);
-    box-shadow: 0 14px 28px color-mix(in srgb, var(--primary) 24%, transparent);
-  }
+  .btn-ui:active { transform: scale(.97); }
 
-  .btn-ghost {
-    background: color-mix(in srgb, var(--bg) 70%, transparent);
-    color: var(--text);
-    border-color: var(--line);
-  }
+  .btn-primary { background: var(--primary); color: var(--on-primary); }
 
-  .btn-danger {
-    background: color-mix(in srgb, rgb(239 68 68) 16%, var(--card));
-    color: rgb(248 113 113);
-    border-color: color-mix(in srgb, rgb(239 68 68) 32%, var(--border));
-  }
+  .btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
 
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: .45rem;
-    padding: .42rem .85rem;
-    border-radius: 9999px;
-    font-size: .78rem;
-    font-weight: 900;
-    border: 1px solid var(--line);
-    background: color-mix(in srgb, var(--bg) 66%, transparent);
-    color: var(--text);
-  }
+  .btn-danger { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
 
-  .stat-card,
-  .catalog-card,
-  .media-card,
-  .empty-state {
-    background: color-mix(in srgb, var(--bg) 72%, var(--card) 28%);
-    border: 1px solid var(--line);
-    border-radius: 1.45rem;
-    transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease, background .2s ease;
-  }
+  .pill { display: inline-flex; align-items: center; gap: .4rem; padding: .2rem .65rem; border-radius: 9999px; font-size: .75rem; font-weight: 500; border: 1px solid var(--border); color: var(--text-sec); white-space: nowrap; }
 
-  .catalog-card:hover,
-  .media-card:hover {
-    transform: translateY(-2px);
-    border-color: color-mix(in srgb, var(--primary) 42%, var(--border));
-    box-shadow: 0 16px 34px rgba(0,0,0,.16);
-  }
+  .stat-card, .catalog-card, .media-card, .empty-state { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); min-width: 0; transition: border-color .2s var(--ease), background-color .2s var(--ease); }
 
-  .catalog-card.active {
-    border-color: var(--primary);
-    background:
-      linear-gradient(135deg, color-mix(in srgb, var(--primary) 13%, transparent), transparent),
-      color-mix(in srgb, var(--bg) 70%, var(--card) 30%);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 14%, transparent);
-  }
+  .catalog-card:hover, .media-card:hover { border-color: color-mix(in srgb, var(--primary) 40%, var(--border)); }
 
-  .poster {
-    width: 4.25rem;
-    height: 6.35rem;
-    object-fit: cover;
-    border-radius: 1rem;
-    border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
-    background: color-mix(in srgb, var(--bg) 80%, transparent);
-    flex-shrink: 0;
-  }
+  .catalog-card.active { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 7%, var(--bg)); }
 
-  .switch {
-    width: 3.1rem;
-    height: 1.7rem;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--border) 80%, transparent);
+  .poster { width: 3.5rem; height: 5.25rem; object-fit: cover; border-radius: 10px; background: var(--card-high); flex-shrink: 0; }
+
+  .switch { width: 2.9rem; height: 1.65rem; border-radius: 999px; background: var(--card-high); position: relative; cursor: pointer; transition: background-color .2s var(--ease); border: 1px solid var(--border); flex-shrink: 0; }
+
+  /* Toggle row (visibility exclusive / search) */
+
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; border-radius: var(--radius-sm); padding: .75rem .85rem; background: var(--bg); border: 1px solid var(--border); cursor: pointer; }
+
+  .switch::after { content: ""; width: 1.15rem; height: 1.15rem; border-radius: 999px; background: var(--text-sec); position: absolute; left: .2rem; top: .2rem; transition: transform .25s var(--spring), background-color .2s var(--ease); }
+
+  .switch-input:checked + .switch { background: var(--primary); border-color: var(--primary); }
+
+  .switch-input:checked + .switch::after { transform: translateX(1.22rem); background: var(--on-primary); }
+
+  .mini-tab { border-radius: 999px; padding: .4rem .85rem; border: 1px solid var(--border); color: var(--text-sec); background: transparent; font-weight: 500; font-size: .82rem; }
+
+  .mini-tab.active { color: var(--primary); border-color: color-mix(in srgb, var(--primary) 50%, var(--border)); background: color-mix(in srgb, var(--primary) 10%, transparent); }
+
+  .skeleton { min-height: 5.5rem; border-radius: var(--radius-sm); background: linear-gradient(90deg, var(--bg) 25%, var(--card-high) 37%, var(--bg) 63%); background-size: 400% 100%; animation: shimmer 1.4s infinite ease; border: 1px solid var(--border); }
+
+  @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+  /* ── Collapsible catalog list ── */
+  .catalog-list-wrapper {
     position: relative;
-    cursor: pointer;
-    transition: .2s ease;
-    border: 1px solid var(--line);
+    transition: max-height 0.35s ease;
   }
-
-  .switch::after {
+  .catalog-list-wrapper.collapsed {
+    max-height: 286px;
+    overflow: hidden;
+  }
+  .catalog-list-wrapper.collapsed::after {
     content: "";
-    width: 1.25rem;
-    height: 1.25rem;
-    border-radius: 999px;
-    background: var(--text);
     position: absolute;
-    left: .18rem;
-    top: .17rem;
-    transition: .2s ease;
-    box-shadow: 0 4px 12px rgba(0,0,0,.24);
+    bottom: 0; left: 0; right: 0;
+    height: 76px;
+    background: linear-gradient(to bottom, transparent, var(--card));
+    pointer-events: none;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   }
 
-  .switch-input:checked + .switch {
-    background: linear-gradient(135deg, var(--primary), var(--accent));
-  }
-
-  .switch-input:checked + .switch::after {
-    left: 1.55rem;
-    background: var(--bg);
-  }
-
-  .mini-tab {
-    border-radius: 999px;
-    padding: .48rem .9rem;
-    border: 1px solid var(--line);
-    color: var(--text-sec);
-    background: color-mix(in srgb, var(--bg) 56%, transparent);
-    font-weight: 900;
+  #catalog-expand-btn {
     font-size: .8rem;
+    letter-spacing: .03em;
+    margin-top: .55rem;
   }
 
-  .mini-tab.active {
-    color: var(--bg);
-    border-color: transparent;
-    background: linear-gradient(135deg, var(--primary), var(--accent));
+  /* ── Auto-catalog group toggle ── */
+  .group-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+  }
+  .group-card-header:focus { outline: none; }
+
+  .group-chevron {
+    display: inline-flex;
+    color: var(--text-sec);
+    flex-shrink: 0;
+    transition: transform 0.22s ease;
+  }
+  .auto-group-card.expanded .group-chevron {
+    transform: rotate(90deg);
   }
 
-  .skeleton {
-    min-height: 5.5rem;
-    border-radius: 1.45rem;
-    background: linear-gradient(90deg,
-      color-mix(in srgb, var(--bg) 72%, var(--card) 28%),
-      color-mix(in srgb, var(--primary) 9%, var(--card)),
-      color-mix(in srgb, var(--bg) 72%, var(--card) 28%));
-    background-size: 220% 100%;
-    animation: shimmer 1.2s infinite linear;
-    border: 1px solid var(--line);
+  /* CSS grid trick for smooth height transition without knowing exact height */
+  .group-items {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.28s ease, opacity 0.22s ease;
+    opacity: 0;
+  }
+  .group-items > .group-items-inner { overflow: hidden; }
+  .auto-group-card.expanded .group-items {
+    grid-template-rows: 1fr;
+    opacity: 1;
   }
 
-  @keyframes shimmer {
-    to { background-position: -220% 0; }
+  .token-picker { max-height: 12rem; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .4rem; display: flex; flex-direction: column; gap: .25rem; background: var(--bg); }
+  .token-row {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .5rem .65rem;
+    border-radius: .75rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background .15s ease;
   }
+  .token-row:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+  .token-row input { width: 1.05rem; height: 1.05rem; accent-color: var(--primary); cursor: pointer; flex-shrink: 0; }
 
-  @media (max-width: 640px) {
-    .hero-card { min-height: 13rem; }
-    .btn-ui { width: 100%; }
-  }
+  .vis-chip { display: inline-flex; align-items: center; gap: .35rem; padding: .15rem .6rem; border-radius: 9999px; font-size: .72rem; font-weight: 500; border: 1px solid transparent; }
+  .vis-public { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+  .vis-tokens { color: var(--info); background: color-mix(in srgb, var(--info) 14%, transparent); border-color: color-mix(in srgb, var(--info) 30%, transparent); }
+  .vis-owner  { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
+
+  .auto-chip { display: inline-flex; align-items: center; gap: .45rem; padding: .45rem .85rem; border-radius: 9999px; font-weight: 500; font-size: .84rem; border: 1px solid var(--border); color: var(--text-sec); background: transparent; cursor: pointer; transition: all .15s var(--ease); }
+  .auto-chip .dot { width: .6rem; height: .6rem; border-radius: 9999px; background: var(--border); transition: all .15s ease; }
+  .auto-chip:hover { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
+
+  .auto-chip.on { color: var(--primary); border-color: color-mix(in srgb, var(--primary) 55%, var(--border)); background: color-mix(in srgb, var(--primary) 10%, transparent); }
+  .auto-chip.on .dot { background: var(--primary); }
+
+  .order-row { display: flex; align-items: center; gap: .85rem; border-radius: var(--radius-sm); padding: .65rem .85rem; background: var(--bg); border: 1px solid var(--border); min-width: 0; }
+
+  .drag-idx { width: 1.75rem; height: 1.75rem; flex-shrink: 0; display: grid; place-items: center; border-radius: 9999px; font-weight: 500; font-size: .78rem; color: var(--text-sec); background: var(--card-high); }
+
+  .order-arrow { width: 2rem; height: 1.6rem; border-radius: 9999px; font-size: .7rem; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; transition: all .15s var(--ease); }
+  .order-arrow:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+  .order-arrow:disabled { opacity: .35; cursor: not-allowed; }
+  .fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+  .fold > summary::-webkit-details-marker { display: none; }
+  .fold > summary::after { content: "\f078"; font-family: "Font Awesome 6 Free"; font-weight: 900; font-size: .8rem; color: var(--text-sec); transition: transform .2s var(--ease); }
+  .fold[open] > summary::after { transform: rotate(180deg); }
+  .fold[open] > summary { margin-bottom: 1rem; }
+  #selected-title { scroll-margin-top: 6rem; }
+
+
 </style>
 
-<div class="catalog-page max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-6">
-  <div class="glass-card hero-card rounded-3xl p-5 sm:p-7 lg:p-8">
-    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-      <div class="flex flex-col sm:flex-row sm:items-center gap-5">
-        <div class="hero-orb text-3xl">🎞️</div>
-        <div>
-          <div class="flex flex-wrap items-center gap-2 mb-3">
-            <span class="pill">Custom Stremio sections</span>
-            <span class="pill">No Stremio search/filter</span>
-          </div>
-          <h1 class="section-title text-3xl sm:text-4xl lg:text-5xl">Custom Catalogs</h1>
-          <p class="muted mt-3 max-w-2xl text-sm sm:text-base leading-7">
-            Build dynamic curated rows like Bollywood, Anime, Kids, 4K, Watch Later, or hidden private lists from your existing Telegram media.
-          </p>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-3 gap-3 min-w-full sm:min-w-[26rem] lg:min-w-[30rem]">
-        <div class="stat-card p-4 text-center">
-          <p id="stat-total" class="section-title text-2xl">0</p>
-          <p class="muted text-xs font-bold mt-1">Catalogs</p>
-        </div>
-        <div class="stat-card p-4 text-center">
-          <p id="stat-visible" class="section-title text-2xl">0</p>
-          <p class="muted text-xs font-bold mt-1">Visible</p>
-        </div>
-        <div class="stat-card p-4 text-center">
-          <p id="stat-items" class="section-title text-2xl">0</p>
-          <p class="muted text-xs font-bold mt-1">Titles</p>
-        </div>
-      </div>
+<div class="catalog-page space-y-8">
+  <header class="page-head" style="margin-bottom:0">
+    <div>
+      <h1 class="page-title">Catalogs</h1>
+      <p class="page-sub">Custom and automatic sections shown in Stremio</p>
     </div>
+  </header>
+
+  <div class="glass-card rounded-3xl p-5 grid grid-cols-3 gap-6">
+    <div><p id="stat-total" class="text-xl font-semibold tabular">0</p><p class="muted text-sm">Catalogs</p></div>
+    <div><p id="stat-visible" class="text-xl font-semibold tabular">0</p><p class="muted text-sm">Visible</p></div>
+    <div><p id="stat-items" class="text-xl font-semibold tabular">0</p><p class="muted text-sm">Titles</p></div>
   </div>
 
-
-
-  <div class="glass-card rounded-3xl p-5 sm:p-6">
-    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-      <div>
-        <div class="flex flex-wrap gap-2 mb-3">
-          <span class="pill">✨ Auto catalogs</span>
-          <span id="auto-sync-status" class="pill">Checking status...</span>
-        </div>
-        <h2 class="section-title text-2xl sm:text-3xl">Auto-create by selected language & OTT</h2>
-        <p class="muted text-sm sm:text-base mt-2 leading-7 max-w-3xl">
-          On app startup this scans your movie and series library, fetches TMDb original language + watch providers, then creates only the auto catalogs you select below. Genre auto catalogs are removed.
-        </p>
-      </div>
-      <div class="flex flex-col sm:flex-row gap-3">
-        <button id="auto-sync-btn" onclick="runAutoSync(false)" class="btn-ui btn-primary lg:w-auto">⚡ Quick Sync</button>
-        <button id="auto-rebuild-btn" onclick="runAutoSync(true)" class="btn-ui btn-ghost lg:w-auto">♻️ Full Rebuild</button>
-      </div>
+  <details class="fold glass-card rounded-3xl p-5">
+    <summary>
+      <span class="flex flex-wrap items-center gap-2 min-w-0">
+        <h2 class="section-title text-lg">Auto catalogs</h2>
+        <span id="auto-sync-status" class="pill">Checking status...</span>
+      </span>
+    </summary>
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <p class="muted text-sm">Toggles save instantly. Sync rebuilds them across your library.</p>
+      <button id="auto-sync-btn" onclick="runAutoSync()" class="btn-ui btn-primary sm:w-auto"><i class="fa-solid fa-bolt"></i> Sync</button>
     </div>
-
-    <div class="mt-5 pt-5 border-t" style="border-color: color-mix(in srgb, var(--border) 80%, transparent);">
-      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-        <div>
-          <h3 class="section-title text-xl">Choose Auto Catalogs</h3>
-          <p class="muted text-sm mt-1">Disable anything you do not want to auto-create. Save, then run Full Rebuild once to apply removed catalogs.</p>
-        </div>
-        <button id="save-auto-settings-btn" onclick="saveAutoCatalogSettings()" class="btn-ui btn-ghost md:w-auto">💾 Save Selection</button>
-      </div>
-      <div id="auto-settings-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        <div class="skeleton"></div>
-        <div class="skeleton"></div>
-        <div class="skeleton"></div>
-      </div>
+    <div id="auto-settings-list" class="mt-5 pt-5 border-t border-border grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div class="skeleton"></div>
+      <div class="skeleton"></div>
+      <div class="skeleton"></div>
     </div>
-  </div>
+  </details>
 
-  <div class="glass-card rounded-3xl p-5 sm:p-6 mt-6">
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-      <div>
-        <h2 class="section-title text-2xl">Catalog visibility &amp; order</h2>
-        <p class="muted text-sm mt-1">
-          Applies to every viewer: hidden catalogs drop from the Stremio manifest, Nuvio collections and the configure page;
-          the list order is the default order for all tokens (per-token order still overrides it).
-        </p>
-      </div>
-      <button id="save-catalog-order-btn" onclick="saveCatalogOrder()" class="btn-ui btn-primary md:w-auto">💾 Save visibility &amp; order</button>
+  <details class="fold glass-card rounded-3xl p-5">
+    <summary><h2 class="section-title text-lg">Order and hide</h2></summary>
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+      <p class="muted text-sm">Arrange how catalogs appear in Stremio, or hide one from everyone.</p>
+      <button id="save-order-btn" onclick="saveCatalogOrder()" class="btn-ui btn-primary sm:w-auto hidden"><i class="fa-solid fa-floppy-disk"></i> Save order</button>
     </div>
-    <div id="catalog-order-list" class="grid grid-cols-1 gap-2"></div>
-  </div>
+    <div id="catalog-order-list" class="space-y-2">
+      <div class="skeleton"></div>
+      <div class="skeleton"></div>
+    </div>
+  </details>
 
   <div class="grid grid-cols-1 xl:grid-cols-[0.88fr_1.12fr] gap-6">
     <div class="space-y-6">
-      <div class="glass-card rounded-3xl p-5 sm:p-6">
-        <div class="flex items-start justify-between gap-3 mb-5">
-          <div>
-            <h2 class="section-title text-2xl">Create Catalog</h2>
-            <p class="muted text-sm mt-1">Visible catalogs appear in Stremio manifest. Hidden catalogs stay only in web panel.</p>
-          </div>
-          <span class="pill">New</span>
-        </div>
+      <details class="fold glass-card rounded-3xl p-5">
+        <summary><h2 class="section-title text-lg">Create catalog</h2></summary>
 
         <form onsubmit="createCatalog(event)" class="space-y-4">
           <div>
@@ -343,104 +236,104 @@
             <input id="catalog-name" class="field-input" placeholder="Example: Bollywood Hits" required>
           </div>
 
-          <label class="catalog-card p-4 flex items-center justify-between gap-4 cursor-pointer select-none">
-            <div>
-              <p class="font-black">Show in Stremio</p>
-              <p class="muted text-xs mt-1">Turn off to keep this catalog private in web panel.</p>
-            </div>
-            <input id="catalog-visible" type="checkbox" checked class="switch-input hidden">
-            <span class="switch"></span>
-          </label>
-
           <div>
-            <label class="field-label">Visibility Mode</label>
-            <select id="catalog-visibility" class="field-select">
-              <option value="public">Public - all valid tokens</option>
-              <option value="tokens">Token restricted</option>
-              <option value="owner">Owner only / hidden</option>
+            <label class="field-label">Who can see it</label>
+            <select id="catalog-visibility" class="field-select" onchange="onVisibilityModeChange('catalog')">
+              <option value="public">Everyone</option>
+              <option value="tokens">Specific users</option>
+              <option value="owner">Owner only (hidden)</option>
             </select>
-          </div>
-          <div>
-            <label class="field-label">Allowed Tokens</label>
-            <textarea id="catalog-allowed-tokens" rows="2" class="field-input" placeholder="One token per line, only for token-restricted catalogs"></textarea>
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label class="catalog-card p-4 flex items-center justify-between gap-4">
-              <span><b>Exclusive</b><span class="muted block text-xs">Hide titles from default catalogs.</span></span>
-              <input id="catalog-exclusive" type="checkbox">
-            </label>
-            <label class="catalog-card p-4 flex items-center justify-between gap-4">
-              <span><b>Searchable</b><span class="muted block text-xs">Allow exclusive titles in search.</span></span>
-              <input id="catalog-searchable" type="checkbox">
-            </label>
+            <p class="muted text-xs mt-2" id="catalog-visibility-hint">Shown to everyone who installed the addon.</p>
           </div>
 
-          <button class="btn-ui btn-primary w-full" type="submit">➕ Create Catalog</button>
+          <div id="catalog-token-picker-wrap" class="hidden">
+            <label class="field-label">Allowed users</label>
+            <div id="catalog-token-picker" class="token-picker"></div>
+          </div>
+
+          <button class="btn-ui btn-primary w-full" type="submit"><i class="fa-solid fa-plus"></i> Create catalog</button>
         </form>
-      </div>
+      </details>
 
-      <div class="glass-card rounded-3xl p-5 sm:p-6">
+      <div class="glass-card rounded-3xl p-5">
         <div class="flex items-center justify-between gap-3 mb-5">
           <div>
-            <h2 class="section-title text-2xl">Your Catalogs</h2>
+            <h2 class="section-title text-lg">Your catalogs</h2>
             <p class="muted text-sm mt-1">Select one to manage titles.</p>
           </div>
-          <button onclick="loadCatalogs()" class="btn-ui btn-ghost px-3 py-2 text-sm">↻</button>
+          <button onclick="loadCatalogs()" class="btn-ui btn-ghost w-10 h-10 !p-0" aria-label="Reload catalogs"><i class="fa-solid fa-rotate"></i></button>
         </div>
-        <div id="catalog-list" class="space-y-3">
-          <div class="skeleton"></div>
-          <div class="skeleton"></div>
+        <div id="catalog-list-wrapper" class="catalog-list-wrapper collapsed">
+          <div id="catalog-list" class="space-y-3">
+            <div class="skeleton"></div>
+            <div class="skeleton"></div>
+          </div>
         </div>
+        <button id="catalog-expand-btn" onclick="toggleCatalogExpand()" class="btn-ui btn-ghost w-full hidden">Show all catalogs</button>
       </div>
     </div>
 
-    <div class="glass-card rounded-3xl p-5 sm:p-6">
+    <div class="glass-card rounded-3xl p-5">
       <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-5">
         <div>
           <div class="flex flex-wrap gap-2 mb-3">
             <span id="selected-visibility-pill" class="pill hidden"></span>
             <span id="selected-count-pill" class="pill hidden"></span>
           </div>
-          <h2 id="selected-title" class="section-title text-2xl">Select a catalog</h2>
+          <h2 id="selected-title" class="section-title text-lg">Select a catalog</h2>
           <p id="selected-subtitle" class="muted text-sm mt-1">Choose a catalog from the left side to add or remove titles.</p>
         </div>
         <button id="delete-catalog-btn" onclick="deleteSelectedCatalog()" class="btn-ui btn-danger hidden md:w-auto">Delete Catalog</button>
       </div>
 
       <div id="catalog-empty-guide" class="empty-state p-6 sm:p-8 text-center">
-        <div class="text-4xl mb-3">📚</div>
-        <h3 class="section-title text-xl">No catalog selected</h3>
+        <div class="mx-auto mb-3 grid place-items-center w-12 h-12 rounded-full bg-card-high text-text-secondary"><i class="fa-solid fa-layer-group"></i></div>
+        <h3 class="section-title text-lg">No catalog selected</h3>
         <p class="muted mt-2 text-sm leading-6">Create a catalog or select an existing one. Then search from your existing media library and add titles instantly.</p>
       </div>
 
       <div id="catalog-workspace" class="hidden space-y-6">
         <div class="catalog-card p-4 sm:p-5">
-          <div class="grid grid-cols-1 md:grid-cols-[1fr_1.2fr_auto] gap-3 items-end">
-            <div>
-              <label class="field-label">Visibility</label>
-              <select id="selected-visibility" class="field-select">
-                <option value="public">Public</option>
-                <option value="tokens">Token restricted</option>
-                <option value="owner">Owner only</option>
+          <div class="flex flex-col md:flex-row md:items-end gap-3">
+            <div class="flex-1">
+              <label class="field-label">Catalog visibility</label>
+              <select id="ws-visibility" class="field-select" onchange="onVisibilityModeChange('ws')">
+                <option value="public">Everyone</option>
+                <option value="tokens">Specific users</option>
+                <option value="owner">Owner only (hidden)</option>
               </select>
             </div>
-            <div>
-              <label class="field-label">Allowed Tokens</label>
-              <textarea id="selected-allowed-tokens" rows="2" class="field-input" placeholder="One token per line"></textarea>
+            <button onclick="applyCatalogVisibility()" class="btn-ui btn-primary md:w-auto">Apply to all titles</button>
+          </div>
+          <div id="ws-token-picker-wrap" class="hidden mt-3">
+            <label class="field-label">Allowed users</label>
+            <div id="ws-token-picker" class="token-picker"></div>
+          </div>
+
+          <div id="ws-exclusive-wrap" class="hidden mt-3 space-y-2">
+            <label class="toggle-row">
+              <span class="min-w-0">
+                <span class="font-semibold text-sm block"><i class="fa-solid fa-lock"></i> Only visible in this catalog</span>
+                <span class="muted text-xs block">Removed from Default, Auto and other catalogs.</span>
+              </span>
+              <input type="checkbox" id="ws-exclusive" class="switch-input hidden" onchange="onExclusiveChange()">
+              <span class="switch"></span>
+            </label>
+            <div id="ws-search-wrap" class="hidden">
+              <label class="toggle-row">
+                <span class="min-w-0">
+                  <span class="font-semibold text-sm block"><i class="fa-solid fa-magnifying-glass"></i> Allow search</span>
+                  <span class="muted text-xs block">Let allowed users find these titles via search.</span>
+                </span>
+                <input type="checkbox" id="ws-searchable" class="switch-input hidden">
+                <span class="switch"></span>
+              </label>
             </div>
-            <button onclick="saveSelectedVisibility()" class="btn-ui btn-ghost md:w-auto">Save Visibility</button>
           </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-            <label class="catalog-card p-4 flex items-center justify-between gap-4">
-              <span><b>Exclusive</b><span class="muted block text-xs">Hide these titles from default catalogs.</span></span>
-              <input id="selected-exclusive" type="checkbox">
-            </label>
-            <label class="catalog-card p-4 flex items-center justify-between gap-4">
-              <span><b>Searchable</b><span class="muted block text-xs">Show exclusive titles in search results.</span></span>
-              <input id="selected-searchable" type="checkbox">
-            </label>
-          </div>
+
+          <p class="muted text-xs mt-3">Applies to every title in this catalog. Fine-tune a single title from its <b>Edit</b> page.</p>
         </div>
+
         <div class="catalog-card p-4 sm:p-5">
           <div class="flex flex-col sm:flex-row sm:items-end gap-3">
             <div class="flex-1">
@@ -454,7 +347,7 @@
                 <option value="tv">Series</option>
               </select>
             </div>
-            <button onclick="searchMedia()" class="btn-ui btn-primary sm:w-auto">🔎 Search</button>
+            <button onclick="searchMedia()" class="btn-ui btn-primary sm:w-auto"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
           </div>
         </div>
 
@@ -484,9 +377,110 @@
 <script>
 let catalogs = [];
 let selectedCatalogId = null;
+let catalogListExpanded = false;
+let subscriptionOn = false;
+let availableTokens = [];
+
+const VIS_META = {
+  public: { icon: '<i class="fa-solid fa-globe"></i>', chip: 'vis-public' },
+  tokens: { icon: '<i class="fa-solid fa-bullseye"></i>', chip: 'vis-tokens' },
+  owner:  { icon: '<i class="fa-solid fa-lock"></i>', chip: 'vis-owner' },
+};
+
+function publicLabel() { return subscriptionOn ? 'Active subscribers' : 'Everyone'; }
+
+function visibilityLabel(mode) {
+  if (mode === 'tokens') return 'Specific users';
+  if (mode === 'owner') return 'Owner only';
+  return publicLabel();
+}
+
+function visibilityHint(mode) {
+  if (mode === 'tokens') return 'Shown only to the users you select below.';
+  if (mode === 'owner') return 'Hidden from all users. Visible only to you and in this panel.';
+  return subscriptionOn ? 'Shown to all active subscribers.' : 'Shown to everyone who installed the addon.';
+}
+
+function applyPublicLabels() {
+  document.querySelectorAll('#catalog-visibility option[value="public"], #ws-visibility option[value="public"]')
+    .forEach(o => o.textContent = publicLabel());
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/admin/settings');
+    const data = await res.json().catch(() => ({}));
+    subscriptionOn = !!(data.settings && data.settings.subscription);
+  } catch (e) {}
+  applyPublicLabels();
+  onVisibilityModeChange('catalog');
+}
+
+async function loadTokens() {
+  try {
+    const res = await fetch('/api/admin/access/tokens');
+    const data = await res.json().catch(() => ({}));
+    availableTokens = (data.tokens || []).filter(t => t.token);
+  } catch (e) { availableTokens = []; }
+}
+
+function renderTokenPicker(containerId, selected) {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  const sel = new Set(selected || []);
+  if (!availableTokens.length) {
+    box.innerHTML = '<p class="muted text-xs p-2">No users/tokens found. Create access tokens on the Access page first.</p>';
+    return;
+  }
+  box.innerHTML = availableTokens.map(t => `
+    <label class="token-row">
+      <input type="checkbox" value="${escapeHtml(t.token)}" ${sel.has(t.token) ? 'checked' : ''}>
+      <span class="min-w-0">
+        <span class="font-semibold text-sm block truncate">${escapeHtml(t.user_name || 'User')}</span>
+        <span class="muted text-xs block truncate">${escapeHtml((t.token || '').slice(0, 12))}…${t.user_id ? ' · ' + escapeHtml(t.user_id) : ''}</span>
+      </span>
+    </label>`).join('');
+}
+
+function getPickedTokens(containerId) {
+  return Array.from(document.querySelectorAll(`#${containerId} input:checked`)).map(i => i.value);
+}
+
+function onVisibilityModeChange(scope) {
+  const isWs = scope === 'ws';
+  const mode = document.getElementById(isWs ? 'ws-visibility' : 'catalog-visibility').value;
+  const wrap = document.getElementById(isWs ? 'ws-token-picker-wrap' : 'catalog-token-picker-wrap');
+  if (wrap) wrap.classList.toggle('hidden', mode !== 'tokens');
+  if (mode === 'tokens') {
+    const preset = isWs ? (getSelectedCatalog()?.allowed_tokens || []) : [];
+    renderTokenPicker(isWs ? 'ws-token-picker' : 'catalog-token-picker', preset);
+  }
+  if (!isWs) {
+    const hint = document.getElementById('catalog-visibility-hint');
+    if (hint) hint.textContent = visibilityHint(mode);
+  } else {
+    //----- Exclusive lock is only offered for restricted, non-auto catalogs
+    const isAuto = !!(getSelectedCatalog()?.auto);
+    const canExclusive = !isAuto && mode !== 'public';
+    const exclWrap = document.getElementById('ws-exclusive-wrap');
+    if (exclWrap) exclWrap.classList.toggle('hidden', !canExclusive);
+    if (!canExclusive) {
+      const ex = document.getElementById('ws-exclusive');
+      if (ex) ex.checked = false;
+    }
+    onExclusiveChange();
+  }
+}
+
+function onExclusiveChange() {
+  const on = !!document.getElementById('ws-exclusive')?.checked;
+  const wrapVisible = !document.getElementById('ws-exclusive-wrap')?.classList.contains('hidden');
+  const searchWrap = document.getElementById('ws-search-wrap');
+  if (searchWrap) searchWrap.classList.toggle('hidden', !(on && wrapVisible));
+}
 
 function posterOrFallback(item) {
-  return item.poster || 'https://via.placeholder.com/120x180/111827/94a3b8?text=No+Poster';
+  return item.poster || '/static/placeholder.svg';
 }
 
 function escapeHtml(value) {
@@ -501,8 +495,8 @@ function getSelectedCatalog() {
 
 function updateStats() {
   const total = catalogs.length;
-  const visible = catalogs.filter(c => (c.visibility || (c.visible ? 'public' : 'owner')) !== 'owner').length;
-  const items = catalogs.reduce((sum, c) => sum + ((c.items || []).length), 0);
+  const visible = catalogs.filter(c => (c.visibility || 'public') !== 'owner').length;
+  const items = catalogs.reduce((sum, c) => sum + (c.item_count || 0), 0);
   document.getElementById('stat-total').textContent = total;
   document.getElementById('stat-visible').textContent = visible;
   document.getElementById('stat-items').textContent = items;
@@ -512,11 +506,11 @@ function mediaCard(item, actionHtml) {
   const mediaType = item.media_type === 'tv' ? 'Series' : 'Movie';
   const genres = Array.isArray(item.genres) ? item.genres.slice(0, 2).join(' · ') : '';
   return `<div class="media-card p-3 flex gap-3">
-    <img src="${escapeHtml(posterOrFallback(item))}" class="poster" onerror="this.src='https://via.placeholder.com/120x180/111827/94a3b8?text=No+Poster'" alt="Poster">
+    <img src="${escapeHtml(posterOrFallback(item))}" class="poster" onerror="this.src='/static/placeholder.svg'" alt="Poster">
     <div class="min-w-0 flex-1">
       <div class="flex items-start justify-between gap-2">
         <div class="min-w-0">
-          <h4 class="font-black truncate" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</h4>
+          <h4 class="font-semibold truncate" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</h4>
           <p class="muted text-xs mt-1">${mediaType} · ${escapeHtml(item.release_year || 'Unknown')} · TMDb ${escapeHtml(item.tmdb_id || '')}</p>
         </div>
         <span class="pill text-[0.68rem] py-1 px-2">${escapeHtml(mediaType)}</span>
@@ -529,7 +523,7 @@ function mediaCard(item, actionHtml) {
 
 function emptyState(icon, title, message) {
   return `<div class="empty-state p-6 text-center col-span-full">
-    <div class="text-3xl mb-2">${icon}</div>
+    <div class="mx-auto mb-3 grid place-items-center w-11 h-11 rounded-full bg-card-high text-text-secondary">${icon}</div>
     <h4 class="section-title text-lg">${escapeHtml(title)}</h4>
     <p class="muted text-sm mt-1">${escapeHtml(message)}</p>
   </div>`;
@@ -548,37 +542,55 @@ async function loadCatalogs() {
     renderCatalogs();
     updateSelectedHeader();
   } catch (error) {
-    box.innerHTML = emptyState('⚠️', 'Unable to load catalogs', error.message || 'Please refresh and try again.');
+    box.innerHTML = emptyState('<i class="fa-solid fa-triangle-exclamation"></i>', 'Unable to load catalogs', error.message || 'Please refresh and try again.');
     showToast(error.message || 'Unable to load catalogs', 'error', 'Error');
   }
 }
 
 function renderCatalogs() {
   const box = document.getElementById('catalog-list');
+  const expandBtn = document.getElementById('catalog-expand-btn');
+  const wrapper = document.getElementById('catalog-list-wrapper');
+
   if (!catalogs.length) {
-    box.innerHTML = emptyState('✨', 'No custom catalog yet', 'Create your first curated Stremio section above.');
+    box.innerHTML = emptyState('<i class="fa-solid fa-wand-magic-sparkles"></i>', 'No custom catalog yet', 'Create your first curated Stremio section above.');
+    if (expandBtn) expandBtn.classList.add('hidden');
+    if (wrapper) wrapper.classList.remove('collapsed');
     return;
   }
+
   box.innerHTML = catalogs.map(c => {
     const isActive = c._id === selectedCatalogId;
-    const count = (c.items || []).length;
+    const count = c.item_count || 0;
+    const mode = c.visibility || 'public';
+    const meta = VIS_META[mode] || VIS_META.public;
     return `<div class="catalog-card p-4 ${isActive ? 'active' : ''}">
-      <div class="flex items-start justify-between gap-3">
-        <button class="text-left min-w-0 flex-1" onclick="selectCatalog('${c._id}')">
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="text-xl">${c.auto ? '✨' : ((c.visibility || (c.visible ? 'public' : 'owner')) === 'tokens' ? '🎟️' : (c.visible ? '🌐' : '🔒'))}</span>
-            <h3 class="font-black truncate">${escapeHtml(c.name)}</h3>
-            ${c.auto ? '<span class="pill text-[0.62rem] px-2 py-0.5">Auto</span>' : ''}
-          </div>
-          <p class="muted text-xs mt-2">${count} title${count === 1 ? '' : 's'} · ${visibilityLabel(c)}</p>
-        </button>
-        <label class="flex items-center gap-2 shrink-0" title="Toggle Stremio visibility">
-          <input type="checkbox" ${c.visible ? 'checked' : ''} onchange="toggleVisibility('${c._id}', this.checked)" class="switch-input hidden">
-          <span class="switch"></span>
-        </label>
-      </div>
+      <button class="text-left w-full min-w-0" onclick="selectCatalog('${c._id}')">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-primary w-5 text-center shrink-0">${c.auto ? '<i class="fa-solid fa-wand-magic-sparkles"></i>' : meta.icon}</span>
+          <h3 class="font-semibold truncate">${escapeHtml(c.name)}</h3>
+          ${c.auto ? '<span class="pill text-[0.62rem] px-2 py-0.5">Auto</span>' : ''}
+        </div>
+        <div class="flex items-center gap-2 mt-2 flex-wrap">
+          <span class="vis-chip ${meta.chip}">${meta.icon} ${escapeHtml(visibilityLabel(mode))}</span>
+          ${c.exclusive ? `<span class="vis-chip vis-owner"><i class="fa-solid fa-lock"></i> Exclusive${c.searchable ? ' · <i class="fa-solid fa-magnifying-glass"></i>' : ''}</span>` : ''}
+          <span class="muted text-xs">${count} title${count === 1 ? '' : 's'}</span>
+        </div>
+      </button>
     </div>`;
   }).join('');
+
+  // Manage expand button: only needed when list might overflow (~3+ cards)
+  if (catalogs.length > 3) {
+    if (expandBtn) {
+      expandBtn.classList.remove('hidden');
+      expandBtn.textContent = catalogListExpanded ? 'Collapse list' : 'Show all catalogs';
+    }
+    if (wrapper) wrapper.classList.toggle('collapsed', !catalogListExpanded);
+  } else {
+    if (expandBtn) expandBtn.classList.add('hidden');
+    if (wrapper) wrapper.classList.remove('collapsed');
+  }
 }
 
 function updateSelectedHeader() {
@@ -605,80 +617,70 @@ function updateSelectedHeader() {
   deleteBtn.classList.remove('hidden');
   visibilityPill.classList.remove('hidden');
   countPill.classList.remove('hidden');
-  visibilityPill.textContent = visibilityLabel(catalog);
-  countPill.textContent = `${(catalog.items || []).length} title${(catalog.items || []).length === 1 ? '' : 's'}`;
-  document.getElementById('selected-title').textContent = catalog.name || 'Selected Catalog';
-  document.getElementById('selected-subtitle').textContent = (catalog.visibility || (catalog.visible ? 'public' : 'owner')) !== 'owner'
-    ? 'This catalog appears on the Stremio catalog screen.'
-    : 'This catalog is private in the web panel and hidden from Stremio.';
-  document.getElementById('selected-visibility').value = catalog.visibility || (catalog.visible ? 'public' : 'owner');
-  document.getElementById('selected-allowed-tokens').value = (catalog.allowed_tokens || []).join('\n');
-  document.getElementById('selected-exclusive').checked = !!catalog.exclusive;
-  document.getElementById('selected-searchable').checked = !!catalog.searchable;
-}
 
-function visibilityLabel(c) {
-  const mode = c.visibility || (c.visible ? 'public' : 'owner');
-  if (mode === 'tokens') return '🎟️ Token restricted';
-  if (mode === 'owner') return '🔒 Owner only';
-  return '🌐 Public';
+  const mode = catalog.visibility || 'public';
+  const meta = VIS_META[mode] || VIS_META.public;
+  visibilityPill.className = `pill vis-chip ${meta.chip}`;
+  visibilityPill.innerHTML = `${meta.icon} ${escapeHtml(visibilityLabel(mode))}`;
+  countPill.textContent = `${catalog.item_count || 0} title${catalog.item_count === 1 ? '' : 's'}`;
+  document.getElementById('selected-title').textContent = catalog.name || 'Selected Catalog';
+  document.getElementById('selected-subtitle').textContent = 'Manage titles and choose who can see this catalog in Stremio.';
+
+  const sel = document.getElementById('ws-visibility');
+  if (sel) sel.value = mode;
+
+  const exToggle = document.getElementById('ws-exclusive');
+  const searchToggle = document.getElementById('ws-searchable');
+  if (exToggle) exToggle.checked = !!catalog.exclusive;
+  if (searchToggle) searchToggle.checked = !!catalog.searchable;
+
+  onVisibilityModeChange('ws');
 }
 
 async function createCatalog(event) {
   event.preventDefault();
   const name = document.getElementById('catalog-name').value.trim();
-  const visible = document.getElementById('catalog-visible').checked;
   const visibility = document.getElementById('catalog-visibility').value;
-  const allowed_tokens = document.getElementById('catalog-allowed-tokens').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
-  const exclusive = document.getElementById('catalog-exclusive').checked;
-  const searchable = document.getElementById('catalog-searchable').checked;
+  const allowed_tokens = visibility === 'tokens' ? getPickedTokens('catalog-token-picker') : [];
   if (!name) return showToast('Catalog name is required', 'error', 'Error');
+  if (visibility === 'tokens' && !allowed_tokens.length)
+    return showToast('Select at least one user for a restricted catalog.', 'error', 'Error');
   const res = await fetch('/api/custom-catalogs', {
-    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, visible, visibility, allowed_tokens, exclusive, searchable})
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, visibility, allowed_tokens})
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return showToast(data.detail || 'Failed to create catalog', 'error', 'Error');
   document.getElementById('catalog-name').value = '';
+  document.getElementById('catalog-visibility').value = 'public';
+  onVisibilityModeChange('catalog');
   showToast('Catalog created', 'success', 'Success');
   await loadCatalogs();
 }
 
-async function toggleVisibility(id, visible) {
-  const catalog = catalogs.find(c => c._id === id);
-  const res = await fetch(`/api/custom-catalogs/${id}`, {
-    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: catalog?.name, visible, visibility: visible ? 'public' : 'owner'})
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) showToast(data.detail || 'Failed to update visibility', 'error', 'Error');
-  await loadCatalogs();
-}
-
-async function saveSelectedVisibility() {
+async function applyCatalogVisibility() {
   const catalog = getSelectedCatalog();
   if (!catalog) return;
-  const payload = {
-    name: catalog.name,
-    visibility: document.getElementById('selected-visibility').value,
-    allowed_tokens: document.getElementById('selected-allowed-tokens').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean),
-    exclusive: document.getElementById('selected-exclusive').checked,
-    searchable: document.getElementById('selected-searchable').checked,
-  };
+  const visibility = document.getElementById('ws-visibility').value;
+  const allowed_tokens = visibility === 'tokens' ? getPickedTokens('ws-token-picker') : [];
+  if (visibility === 'tokens' && !allowed_tokens.length)
+    return showToast('Select at least one user.', 'error', 'Error');
+  const canExclusive = !catalog.auto && visibility !== 'public';
+  const exclusive = canExclusive && !!document.getElementById('ws-exclusive')?.checked;
+  const searchable = exclusive && !!document.getElementById('ws-searchable')?.checked;
   const res = await fetch(`/api/custom-catalogs/${catalog._id}`, {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload)
+    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: catalog.name, visibility, allowed_tokens, exclusive, searchable})
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return showToast(data.detail || 'Failed to update visibility', 'error', 'Error');
-  showToast('Visibility updated', 'success', 'Success');
+  showToast(exclusive ? 'Exclusive lock applied — titles now show only here' : 'Visibility applied to all titles in this catalog', 'success', 'Success');
   await loadCatalogs();
-  updateSelectedHeader();
 }
 
 async function selectCatalog(id) {
   selectedCatalogId = id;
   renderCatalogs();
   updateSelectedHeader();
+  if (innerWidth < 1280) document.getElementById('selected-title').scrollIntoView({ behavior: 'smooth' });
   await loadCatalogItems();
 }
 
@@ -698,9 +700,9 @@ async function searchMedia() {
     const results = data.results || [];
     box.innerHTML = results.length
       ? results.map(item => mediaCard(item, `<button class="btn-ui btn-primary px-3 py-2 text-sm" onclick="addItem(${item.tmdb_id}, ${item.db_index}, '${item.media_type}')">Add</button>`)).join('')
-      : emptyState('🔍', 'No title found', 'Try a shorter title or change movie/series type.');
+      : emptyState('<i class="fa-solid fa-magnifying-glass"></i>', 'No title found', 'Try a shorter title or change movie/series type.');
   } catch (error) {
-    box.innerHTML = emptyState('⚠️', 'Search failed', error.message || 'Please try again.');
+    box.innerHTML = emptyState('<i class="fa-solid fa-triangle-exclamation"></i>', 'Search failed', error.message || 'Please try again.');
   }
 }
 
@@ -731,9 +733,9 @@ async function loadCatalogItems() {
     const items = data.items || [];
     box.innerHTML = items.length
       ? items.map(item => mediaCard(item, `<button class="btn-ui btn-danger px-3 py-2 text-sm" onclick="removeItem(${item.tmdb_id}, ${item.db_index}, '${item.media_type}')">Remove</button>`)).join('')
-      : emptyState('➕', 'No titles added yet', 'Use search above to add media to this catalog.');
+      : emptyState('<i class="fa-solid fa-plus"></i>', 'No titles added yet', 'Use search above to add media to this catalog.');
   } catch (error) {
-    box.innerHTML = emptyState('⚠️', 'Unable to load titles', error.message || 'Please try again.');
+    box.innerHTML = emptyState('<i class="fa-solid fa-triangle-exclamation"></i>', 'Unable to load titles', error.message || 'Please try again.');
   }
 }
 
@@ -774,27 +776,21 @@ async function loadAutoCatalogSettings() {
       box.innerHTML = `<div class="empty-state p-4 muted">No auto catalog options found.</div>`;
       return;
     }
-
     const groups = {};
-    defs.forEach(def => {
-      if (!groups[def.group]) groups[def.group] = [];
-      groups[def.group].push(def);
-    });
-
+    defs.forEach(def => { (groups[def.group] = groups[def.group] || []).push(def); });
     box.innerHTML = Object.entries(groups).map(([group, items]) => `
-      <div class="catalog-card p-4 space-y-3">
-        <div class="flex items-center justify-between gap-2">
+      <div class="catalog-card p-4">
+        <div class="flex items-center gap-2 mb-3">
           <h4 class="section-title text-base">${escapeHtml(group)}</h4>
           <span class="pill text-[0.65rem] px-2 py-0.5">${items.length}</span>
         </div>
-        <div class="space-y-2">
+        <div class="flex flex-wrap gap-2">
           ${items.map(item => `
-            <label class="flex items-center justify-between gap-3 rounded-2xl p-3 cursor-pointer" style="background: color-mix(in srgb, var(--bg) 64%, transparent); border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);">
-              <span class="font-bold text-sm">${escapeHtml(item.name)}</span>
-              <input type="checkbox" class="auto-setting-checkbox switch-input hidden" value="${escapeHtml(item.key)}" ${item.enabled ? 'checked' : ''}>
-              <span class="switch"></span>
-            </label>
-          `).join('')}
+            <button type="button" class="auto-chip ${item.enabled ? 'on' : ''}"
+                    data-key="${escapeHtml(item.key)}" aria-pressed="${item.enabled}"
+                    onclick="toggleAutoCatalog(this)">
+              <span class="dot"></span>${escapeHtml(item.name)}
+            </button>`).join('')}
         </div>
       </div>
     `).join('');
@@ -803,25 +799,101 @@ async function loadAutoCatalogSettings() {
   }
 }
 
-async function saveAutoCatalogSettings() {
-  const btn = document.getElementById('save-auto-settings-btn');
-  const old = btn ? btn.textContent : '';
-  const enabledKeys = Array.from(document.querySelectorAll('.auto-setting-checkbox:checked')).map(el => el.value);
+let autoSaveTimer = null;
+async function toggleAutoCatalog(btn) {
+  const on = !btn.classList.contains('on');
+  btn.classList.toggle('on', on);
+  btn.setAttribute('aria-pressed', on);
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(persistAutoCatalogs, 400);
+}
+
+async function persistAutoCatalogs() {
+  const enabledKeys = Array.from(document.querySelectorAll('.auto-chip.on')).map(el => el.dataset.key);
   try {
-    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
     const res = await fetch('/api/custom-catalogs/auto-sync/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled_keys: enabledKeys })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || 'Failed to save settings');
-    showToast('Auto catalog selection saved. Run Full Rebuild once to remove disabled catalog items.', 'success', 'Saved');
-    await loadAutoCatalogSettings();
+    showToast('Saved. Press Sync to rebuild catalogs.', 'success', 'Auto catalogs');
   } catch (error) {
     showToast(error.message || 'Failed to save settings', 'error', 'Error');
+    loadAutoCatalogSettings();
+  }
+}
+
+let catalogOrder = [];
+async function loadCatalogOrder() {
+  const box = document.getElementById('catalog-order-list');
+  if (!box) return;
+  try {
+    const res = await fetch('/api/custom-catalogs-order');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Failed to load order');
+    catalogOrder = data.entries || [];
+    renderCatalogOrder();
+  } catch (error) {
+    box.innerHTML = `<div class="empty-state p-4 text-red-400">${escapeHtml(error.message || 'Failed to load order')}</div>`;
+  }
+}
+
+const ORDER_GROUP_CLASS = { 'Default Movies': 'vis-tokens', 'Default TV': 'vis-tokens', 'Auto': 'vis-public', 'Custom': 'vis-owner' };
+
+function renderCatalogOrder() {
+  const box = document.getElementById('catalog-order-list');
+  if (!catalogOrder.length) { box.innerHTML = emptyState('<i class="fa-solid fa-layer-group"></i>', 'No catalogs', 'Create catalogs to reorder them.'); return; }
+  box.innerHTML = catalogOrder.map((e, i) => {
+    const typeLabel = e.type === 'series' ? 'Series' : 'Movie';
+    return `<div class="order-row" style="${e.hidden ? 'opacity:.55' : ''}">
+      <span class="drag-idx">${i + 1}</span>
+      <span class="min-w-0 flex-1">
+        <span class="font-semibold truncate block">${escapeHtml(e.name)}</span>
+        <span class="flex items-center gap-2 mt-1">
+          <span class="vis-chip ${ORDER_GROUP_CLASS[e.group] || 'vis-tokens'}">${escapeHtml(e.group)}</span>
+          <span class="muted text-xs">${typeLabel}</span>
+        </span>
+      </span>
+      <label class="flex items-center gap-2 text-xs muted cursor-pointer"><input type="checkbox" ${e.hidden ? 'checked' : ''} onchange="toggleCatalogHidden(${i}, this.checked)"> Hide</label>
+      <span class="flex flex-col gap-1">
+        <button class="order-arrow" ${i === 0 ? 'disabled' : ''} onclick="moveCatalogOrder(${i}, -1)" aria-label="Move up"><i class="fa-solid fa-chevron-up"></i></button>
+        <button class="order-arrow" ${i === catalogOrder.length - 1 ? 'disabled' : ''} onclick="moveCatalogOrder(${i}, 1)" aria-label="Move down"><i class="fa-solid fa-chevron-down"></i></button>
+      </span>
+    </div>`;
+  }).join('');
+}
+
+function toggleCatalogHidden(i, v) {
+  catalogOrder[i].hidden = v;
+  renderCatalogOrder();
+  document.getElementById('save-order-btn').classList.remove('hidden');
+}
+
+function moveCatalogOrder(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= catalogOrder.length) return;
+  [catalogOrder[i], catalogOrder[j]] = [catalogOrder[j], catalogOrder[i]];
+  renderCatalogOrder();
+  document.getElementById('save-order-btn').classList.remove('hidden');
+}
+
+async function saveCatalogOrder() {
+  const btn = document.getElementById('save-order-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/custom-catalogs-order', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: catalogOrder.map(e => e.key), hidden: catalogOrder.filter(e => e.hidden).map(e => e.key) })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Failed to save order');
+    showToast('Catalog order saved.', 'success', 'Order');
+    btn.classList.add('hidden');
+  } catch (error) {
+    showToast(error.message || 'Failed to save order', 'error', 'Error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = old; }
+    btn.disabled = false;
   }
 }
 
@@ -830,31 +902,27 @@ let autoSyncPollTimer = null;
 async function loadAutoSyncStatus() {
   const pill = document.getElementById('auto-sync-status');
   const syncBtn = document.getElementById('auto-sync-btn');
-  const rebuildBtn = document.getElementById('auto-rebuild-btn');
   if (!pill) return;
   try {
     const res = await fetch('/api/custom-catalogs/auto-sync/status');
     const data = await res.json().catch(() => ({}));
     const status = data.status || {};
-    const mode = status.mode === 'full_rebuild' ? 'Full rebuild' : 'Quick sync';
 
     if (status.running) {
-      pill.textContent = `${mode} running: ${status.scanned || 0} scanned · ${status.classified || 0} checked`;
+      pill.textContent = `Sync running: ${status.scanned || 0} scanned · ${status.classified || 0} checked`;
       if (syncBtn) syncBtn.disabled = true;
-      if (rebuildBtn) rebuildBtn.disabled = true;
       if (!autoSyncPollTimer) {
         autoSyncPollTimer = setInterval(loadAutoSyncStatus, 3000);
       }
     } else {
       if (status.finished_at) {
         pill.textContent = status.error
-          ? `${mode} failed`
-          : `${mode}: ${status.classified || 0} checked · ${status.skipped || 0} skipped`;
+          ? 'Sync failed'
+          : `Synced: ${status.classified || 0} checked · ${status.skipped || 0} reused`;
       } else {
-        pill.textContent = 'Quick sync runs on boot';
+        pill.textContent = 'Sync runs on boot';
       }
       if (syncBtn) syncBtn.disabled = false;
-      if (rebuildBtn) rebuildBtn.disabled = false;
       if (autoSyncPollTimer) {
         clearInterval(autoSyncPollTimer);
         autoSyncPollTimer = null;
@@ -866,99 +934,45 @@ async function loadAutoSyncStatus() {
   }
 }
 
-async function runAutoSync(fullRebuild = false) {
-  const btn = document.getElementById(fullRebuild ? 'auto-rebuild-btn' : 'auto-sync-btn');
-  const otherBtn = document.getElementById(fullRebuild ? 'auto-sync-btn' : 'auto-rebuild-btn');
+async function runAutoSync() {
+  const btn = document.getElementById('auto-sync-btn');
   const old = btn.textContent;
   btn.disabled = true;
-  if (otherBtn) otherBtn.disabled = true;
-  btn.textContent = fullRebuild ? '⏳ Rebuilding...' : '⏳ Syncing...';
+  btn.textContent = '⏳ Syncing...';
   try {
-    const url = `/api/custom-catalogs/auto-sync?full_rebuild=${fullRebuild ? 'true' : 'false'}`;
-    const res = await fetch(url, { method: 'POST' });
+    const res = await fetch('/api/custom-catalogs/auto-sync', { method: 'POST' });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || 'Auto sync failed');
+    if (!res.ok) throw new Error(data.detail || 'Sync failed');
     const result = data.result || {};
-    const title = fullRebuild ? 'Full rebuild started' : 'Quick sync started';
-    showToast(result.message || data.message || 'Auto sync started in background.', 'info', title);
+    showToast(result.message || data.message || 'Sync started in background.', 'info', 'Sync started');
     await loadAutoSyncStatus();
   } catch (error) {
-    showToast(error.message || 'Auto sync failed', 'error', 'Error');
+    showToast(error.message || 'Sync failed', 'error', 'Error');
   } finally {
     btn.textContent = old;
     await loadAutoSyncStatus();
   }
 }
 
-/* ── Catalog visibility & order (upstream v5.3.4) ─────────────────────── */
-let catalogOrderEntries = [];
-
-async function loadCatalogOrder() {
-  const box = document.getElementById('catalog-order-list');
-  try {
-    const res = await fetch('/api/custom-catalogs-order');
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    catalogOrderEntries = data.entries || [];
-    renderCatalogOrder();
-  } catch (error) {
-    box.innerHTML = `<div class="pill">⚠ ${error.message || 'Failed to load catalog visibility'}</div>`;
-  }
+function toggleAutoGroup(card) {
+  card.classList.toggle('expanded');
 }
 
-function renderCatalogOrder() {
-  const box = document.getElementById('catalog-order-list');
-  if (!catalogOrderEntries.length) {
-    box.innerHTML = '<div class="pill">No catalogs yet.</div>';
-    return;
-  }
-  box.innerHTML = catalogOrderEntries.map((e, i) => `
-    <div class="glass-card rounded-2xl px-4 py-3 flex flex-wrap items-center gap-3">
-      <span class="pill">${e.group || 'Custom'}</span>
-      <span class="font-semibold text-sm flex-1 min-w-[10rem]">${e.name}</span>
-      <span class="pill">${e.type}</span>
-      <label class="flex items-center gap-1.5 text-sm muted" title="Hide this catalog for every viewer">
-        <input type="checkbox" class="co-hide" data-key="${e.key}" ${e.hidden ? 'checked' : ''}> Hide
-      </label>
-      <button class="btn-ui btn-ghost px-2 py-1 text-xs" onclick="moveCatalogOrder(${i}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
-      <button class="btn-ui btn-ghost px-2 py-1 text-xs" onclick="moveCatalogOrder(${i}, 1)" ${i === catalogOrderEntries.length - 1 ? 'disabled' : ''}>↓</button>
-    </div>
-  `).join('');
+function toggleCatalogExpand() {
+  catalogListExpanded = !catalogListExpanded;
+  const wrapper = document.getElementById('catalog-list-wrapper');
+  const btn = document.getElementById('catalog-expand-btn');
+  wrapper.classList.toggle('collapsed', !catalogListExpanded);
+  if (btn) btn.textContent = catalogListExpanded ? 'Collapse list' : 'Show all catalogs';
 }
 
-function moveCatalogOrder(index, delta) {
-  const target = index + delta;
-  if (target < 0 || target >= catalogOrderEntries.length) return;
-  const [row] = catalogOrderEntries.splice(index, 1);
-  catalogOrderEntries.splice(target, 0, row);
-  renderCatalogOrder();
-}
-
-async function saveCatalogOrder() {
-  const btn = document.getElementById('save-catalog-order-btn');
-  const old = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⏳ Saving...';
-  try {
-    const order = catalogOrderEntries.map(e => e.key);
-    const hidden = Array.from(document.querySelectorAll('#catalog-order-list .co-hide:checked')).map(el => el.dataset.key);
-    const res = await fetch('/api/custom-catalogs-order', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order, hidden }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    showToast('Catalog visibility saved.', 'success', 'Saved');
-    loadCatalogs();
-  } catch (error) {
-    showToast(error.message || 'Save failed', 'error', 'Error');
-  } finally {
-    btn.textContent = old;
-    btn.disabled = false;
-  }
-}
-
-document.addEventListener('DOMContentLoaded', () => { loadCatalogs(); loadAutoSyncStatus(); loadAutoCatalogSettings(); loadCatalogOrder(); });
+document.addEventListener('DOMContentLoaded', async () => {
+  if (innerWidth >= 1024) document.querySelectorAll('.fold').forEach(d => d.open = true);
+  await Promise.all([loadSettings(), loadTokens()]);
+  loadCatalogs();
+  loadAutoSyncStatus();
+  loadAutoCatalogSettings();
+  loadCatalogOrder();
+});
 </script>
 {% endblock %}

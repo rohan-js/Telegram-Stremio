@@ -1,10 +1,11 @@
 from fastapi import FastAPI, Request, Form, Depends, Query
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from typing import Optional
 from Backend import __version__
+from Backend.fastapi.themes import get_theme, theme_key
 from Backend.config import Telegram
 from Backend.fastapi.security.credentials import require_auth
 from Backend.fastapi.routes.stream_routes import router as stream_router, decay_client_failures
@@ -14,7 +15,7 @@ from Backend.fastapi.routes.nuvio_routes import router as nuvio_router
 from Backend.fastapi.routes.nuvio_collections import router as nuvio_collections_router
 from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
-    media_management_page, edit_media_page, public_status_page, stremio_guide_page,
+    media_management_page, edit_media_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, vlc_redirect,
     custom_catalogs_page, watch_requests_page, live_tv_page, settings_page, tools_page,
     launch_readiness_page, policy_page, admin_requests_page, public_request_page,
@@ -39,6 +40,7 @@ from Backend.fastapi.routes.api_routes import (
     search_manual_add_metadata_api, resolve_manual_add_metadata_api, get_manual_add_catalogs_api,
     list_custom_catalogs_api, create_custom_catalog_api, update_custom_catalog_api,
     get_catalog_order_api, update_catalog_order_api,
+    get_db_stats_api, setup_status_api, tag_media_api,
     delete_custom_catalog_api, get_custom_catalog_items_api, search_catalog_media_api,
     add_custom_catalog_item_api, remove_custom_catalog_item_api,
     get_media_visibility_api, set_media_visibility_api,
@@ -123,16 +125,8 @@ async def logout_route(request: Request):
     return await logout(request)
 
 @app.post("/set-theme")
-async def set_theme_route(request: Request, theme: str = Form(None), style: str = Form(None)):
-    return await set_theme(request, theme, style)
-
-@app.get("/status", response_class=HTMLResponse)
-async def public_status(request: Request):
-    return await public_status_page(request)
-
-@app.get("/stremio", response_class=HTMLResponse)
-async def stremio_guide(request: Request):
-    return await stremio_guide_page(request)
+async def set_theme_route(request: Request, theme: str = Form(None)):
+    return await set_theme(request, theme)
 
 @app.get("/vlc/{token}/{id}", response_class=HTMLResponse)
 async def vlc(request: Request, token: str, id: str):
@@ -191,8 +185,8 @@ async def admin_dashboard(request: Request, _: bool = Depends(require_auth)):
     return await admin_dashboard_page(request, _)
 
 @app.get("/media/manage", response_class=HTMLResponse)
-async def media_management(request: Request, media_type: str = "movie", _: bool = Depends(require_auth)):
-    return await media_management_page(request, media_type, _)
+async def media_management(request: Request, media_type: str = "movie", custom: str | None = None, _: bool = Depends(require_auth)):
+    return await media_management_page(request, media_type, custom, _)
 
 @app.get("/catalogs", response_class=HTMLResponse)
 async def custom_catalogs(request: Request, _: bool = Depends(require_auth)):
@@ -912,4 +906,73 @@ async def speed_test_stream(
 
 @app.exception_handler(401)
 async def auth_exception_handler(request: Request, exc):
+    # API consumers (command palette, fetches, Stremio/Nuvio endpoints) need a
+    # JSON 401, not a login redirect (upstream v5.3.3).
+    path = request.url.path
+    if any(path.startswith(p) for p in ("/api/", "/dl/", "/sub/", "/stremio/", "/thumb/", "/webdav")):
+        return JSONResponse({"detail": "Authentication required"}, status_code=401)
     return RedirectResponse(url="/login", status_code=302)
+
+
+@app.post("/api/media/tag")
+async def tag_media(tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
+    return await tag_media_api(tmdb_id, db_index, media_type)
+
+
+@app.get("/api/admin/stats")
+async def admin_db_stats(_: bool = Depends(require_auth)):
+    return await get_db_stats_api()
+
+
+@app.get("/api/admin/setup-status")
+async def admin_setup_status(_: bool = Depends(require_auth)):
+    return await setup_status_api()
+
+
+#----- PWA (upstream v5.3.3): manifest + dynamically themed icon + passthrough SW
+@app.get("/manifest.webmanifest")
+async def pwa_manifest(request: Request):
+    theme = get_theme(theme_key(request))
+    return JSONResponse(
+        {
+            "name": "Telegram Stremio",
+            "short_name": "TG Stremio",
+            "start_url": "/",
+            "display": "standalone",
+            "background_color": theme["colors"]["background"],
+            "theme_color": theme["colors"]["primary"],
+            "icons": [
+                {"src": "/pwa-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+                {"src": "/pwa-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable"},
+            ],
+        }
+    )
+
+
+@app.get("/pwa-icon.svg")
+async def pwa_icon(request: Request):
+    theme = get_theme(theme_key(request))
+    primary = theme["colors"]["primary"]
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
+        f'<rect width="512" height="512" rx="96" fill="{primary}"/>'
+        f'<path d="M200 152l176 104-176 104z" fill="{theme["colors"]["on_primary"]}"/>'
+        f'</svg>'
+    )
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.get("/sw.js")
+async def service_worker():
+    # Minimal passthrough worker (upstream ships the same): no offline cache,
+    # just registers the scope so install prompts work.
+    js = "self.addEventListener('fetch', () => {});\n"
+    return Response(
+        content=js,
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-store"},
+    )

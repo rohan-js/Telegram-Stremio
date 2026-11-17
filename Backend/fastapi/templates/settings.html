@@ -8,1069 +8,1817 @@
 .bk-desc { color: var(--text-sec); font-size: 0.85rem; margin-bottom: 1rem; }
 .bk-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
 @media (max-width: 520px) { .bk-actions { grid-template-columns: 1fr; } }
-.bk-btn { display: flex; align-items: center; gap: 0.85rem; padding: 0.9rem 1.1rem; border-radius: 0.9rem; cursor: pointer;
+.bk-btn { display: flex; align-items: center; gap: 0.85rem; padding: 0.9rem 1.1rem; border-radius: var(--radius-sm); cursor: pointer;
           text-decoration: none; text-align: left; transition: all .15s;
-          border: 1px solid var(--hairline); background: color-mix(in srgb, var(--card) 92%, var(--bg)); }
+          border: 1px solid var(--border); background: var(--bg); }
 .bk-btn:hover { transform: translateY(-1px); border-color: var(--primary); }
 .bk-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 .bk-ic { width: 2.5rem; height: 2.5rem; border-radius: 0.7rem; display: flex; align-items: center; justify-content: center; font-size: 1.05rem; flex-shrink: 0; }
 .bk-export .bk-ic { background: color-mix(in srgb, var(--primary) 18%, transparent); color: var(--primary); }
-.bk-import .bk-ic { background: #22c55e22; color: #22c55e; }
+.bk-import .bk-ic { background: color-mix(in srgb, var(--ok) 13%, transparent); color: var(--ok); }
 .bk-txt { display: flex; flex-direction: column; line-height: 1.25; }
 .bk-txt b { font-size: 0.95rem; color: var(--text); }
 .bk-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.9rem; }
-.bk-chip { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; font-weight: 700; padding: 0.35rem 0.75rem; border-radius: 9999px; color: var(--text-sec); border: 1px solid var(--hairline); background: color-mix(in srgb, var(--card) 92%, var(--bg)); }
+.bk-chip { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; font-weight: 600; padding: 0.35rem 0.75rem; border-radius: 9999px; color: var(--text-sec); border: 1px solid var(--border); background: var(--bg); }
 .bk-txt small { font-size: 0.75rem; color: var(--text-sec); }
 .bk-status { margin-top: 0.9rem; font-size: 0.85rem; color: var(--text-sec); display: flex; align-items: center; gap: 0.5rem; }
 .bk-warn { color: var(--text-sec); font-size: 0.78rem; margin-top: 0.85rem; }
-.bk-warn i { color: var(--warning, #f59e0b); }
+.bk-warn i { color: var(--warning, var(--warn)); }
 
 /* ── Toggle switch ───────────────────────────────────────────────────────── */
 .toggle-wrap { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; }
 .toggle-input { position: absolute; opacity: 0; width: 0; height: 0; }
 .toggle-track {
     display: inline-block; width: 3rem; height: 1.625rem;
-    border-radius: 9999px; background: var(--hairline-strong, var(--border));
+    border-radius: 9999px; background: var(--card-high); border: 1px solid var(--border); box-sizing: border-box;
     position: relative; transition: background 0.2s ease; flex-shrink: 0;
 }
 .toggle-track::after {
     content: ''; position: absolute;
-    top: 3px; left: 3px;
+    top: 2px; left: 2px;
     width: 20px; height: 20px;
-    border-radius: 50%; background: white;
-    transition: transform 0.2s ease;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    border-radius: 50%; background: var(--text-sec);
+    transition: transform .25s var(--spring), background-color .2s var(--ease);
 }
 .toggle-input:checked + .toggle-track { background: var(--primary); }
-.toggle-input:checked + .toggle-track::after { transform: translateX(1.375rem); }
+.toggle-input:checked + .toggle-track { border-color: var(--primary); }
+.toggle-input:checked + .toggle-track::after { transform: translateX(1.375rem); background: var(--on-primary); }
+.toggle-input:focus-visible + .toggle-track { outline: 2px solid var(--primary); outline-offset: 2px; }
 .toggle-label { font-size: 0.9rem; color: var(--text); user-select: none; }
 
 /* ── Section cards ───────────────────────────────────────────────────────── */
-.settings-card {
-    background: color-mix(in srgb, var(--card) 94%, var(--bg));
-    border: 1px solid var(--hairline);
-    border-radius: 1.5rem;
-    padding: 1.5rem 1.75rem;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.15);
-}
-.settings-card h2 {
-    font-size: 1rem; font-weight: 800;
-    letter-spacing: 0.05em; text-transform: uppercase;
-    color: var(--primary); margin-bottom: 1.25rem;
-    display: flex; align-items: center; gap: 0.5rem;
-}
+.settings-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.35rem 1.5rem; }
+.settings-card h2 { font-size: 1.05rem; font-weight: 600; color: var(--text); margin-bottom: 1rem; display: flex; align-items: center; gap: .55rem; }
+
+.settings-card h2 i { color: var(--primary); font-size: .95rem; }
+@media (max-width: 640px) { .settings-card { padding: 1.1rem 1rem; } }
 
 /* ── Inputs ──────────────────────────────────────────────────────────────── */
-.s-input {
-    width: 100%;
-    background: color-mix(in srgb, var(--bg) 70%, transparent);
-    border: 1px solid var(--hairline);
-    color: var(--text);
-    border-radius: 0.75rem;
-    padding: 0.6rem 1rem;
-    font-size: 0.88rem;
-    outline: none;
-    transition: border-color 0.2s;
-}
-.s-input:focus { border-color: var(--primary); }
-.s-input:disabled { opacity: 0.55; }
-.s-label {
-    display: block; font-size: 0.78rem; font-weight: 700;
-    color: var(--text-sec); text-transform: uppercase;
-    letter-spacing: 0.04em; margin-bottom: 0.4rem;
-}
+.s-input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-sm); padding: .65rem 1rem; font-size: .9rem; outline: none; transition: border-color .18s var(--ease), box-shadow .18s var(--ease); }
+.s-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+.s-label { display: block; font-size: .72rem; font-weight: 500; color: var(--text-sec); text-transform: uppercase; letter-spacing: .1em; margin-bottom: .45rem; }
 
 /* ── Multi-value list ────────────────────────────────────────────────────── */
 .multi-list-items { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.6rem; }
-.multi-item { display: flex; align-items: center; gap: 0.5rem; }
+.multi-item {
+    display: flex; align-items: center; gap: 0.5rem;
+}
 .multi-item .s-input { flex: 1; }
-.remove-btn {
-    width: 2rem; height: 2rem; flex-shrink: 0;
-    background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25);
-    color: #ef4444; border-radius: 0.5rem;
-    font-size: 1rem; line-height: 1;
-    cursor: pointer; transition: background 0.15s;
-    display: flex; align-items: center; justify-content: center;
+.channel-chip { flex: 1; min-width: 0; padding: .6rem .9rem; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: .88rem; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: none; cursor: default; }
+.s-input[readonly] {
+    opacity: 0.9;
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
+    cursor: default;
 }
-.remove-btn:hover { background: rgba(239,68,68,0.25); }
+.remove-btn { width: 2.25rem; height: 2.25rem; flex-shrink: 0; background: transparent; border: 1px solid var(--border); color: var(--danger); border-radius: 9999px; font-size: .9rem; line-height: 1; cursor: pointer; transition: background-color .15s var(--ease); display: flex; align-items: center; justify-content: center; }
+.remove-btn:hover { background: color-mix(in srgb, var(--danger) 25%, transparent); }
 .add-row { display: flex; gap: 0.5rem; }
-.add-btn {
-    flex-shrink: 0; padding: 0.6rem 1rem;
-    background: color-mix(in srgb, var(--primary) 15%, transparent);
-    border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
-    color: var(--primary); border-radius: 0.75rem;
-    font-size: 0.82rem; font-weight: 700; cursor: pointer;
-    transition: background 0.15s; white-space: nowrap;
+.add-btn { flex-shrink: 0; padding: .6rem 1.05rem; background: transparent; border: 1px solid var(--border); color: var(--text); border-radius: 9999px; font-size: .86rem; font-weight: 500; cursor: pointer; transition: background-color .15s var(--ease); white-space: nowrap; }
+.add-btn:hover { background: var(--card-high); }
+
+/* ── Anime channel checkbox ──────────────────────────────────────────────── */
+.auth-item .s-input { min-width: 0; }
+.anime-check {
+    display: inline-flex; align-items: center; gap: 0.35rem; flex-shrink: 0;
+    cursor: pointer; user-select: none; white-space: nowrap;
+    padding: 0.4rem 0.6rem; border-radius: 0.6rem;
+    border: 1px solid var(--border); background: transparent;
+    font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.03em; color: var(--text-sec); transition: all 0.15s;
 }
-.add-btn:hover { background: color-mix(in srgb, var(--primary) 28%, transparent); }
+.anime-check input { width: 0.95rem; height: 0.95rem; accent-color: var(--primary); cursor: pointer; margin: 0; }
+.anime-check:hover { border-color: color-mix(in srgb, var(--primary) 35%, transparent); }
+.anime-check.is-anime {
+    color: var(--primary);
+    border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
 
 /* ── Grid helpers ────────────────────────────────────────────────────────── */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
-.divider { border: none; border-top: 1px solid var(--hairline); margin: 1.25rem 0; }
-.field { margin-bottom: 1.1rem; }
-.field:last-child { margin-bottom: 0; }
-.hint { font-size: 0.78rem; color: var(--text-sec); margin-top: 0.35rem; }
+.divider { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
 
 /* ── Stats grid ──────────────────────────────────────────────────────────── */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px,1fr)); gap: 0.75rem; }
 .stat-box {
-    background: color-mix(in srgb, var(--bg) 55%, transparent);
-    border: 1px solid var(--hairline); border-radius: 0.9rem;
+    background: var(--bg);
+    border: 1px solid var(--border); border-radius: 0.9rem;
     padding: 0.75rem 0.9rem;
 }
-.stat-box .v { font-size: 1.3rem; font-weight: 800; }
-.stat-box .l { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-sec); }
-
-/* ── Buttons ─────────────────────────────────────────────────────────────── */
-.btn-ui {
-    display: inline-flex; align-items: center; justify-content: center; gap: 0.55rem;
-    border-radius: 1rem; padding: 0.82rem 1.1rem; font-size: 0.92rem; font-weight: 800;
-    transition: all 0.2s ease; border: 1px solid transparent; white-space: nowrap; cursor: pointer;
-}
-.btn-ui:hover { transform: translateY(-1px); }
-.btn-ui:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-.btn-danger { background: color-mix(in srgb, rgb(239 68 68) 16%, transparent); color: #ef4444; border-color: rgba(239,68,68,0.25); }
-
-/* ── Status pills ────────────────────────────────────────────────────────── */
-.st-pill { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; font-weight: 800; padding: 0.3rem 0.75rem; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.03em; }
-.st-ok { background: rgba(34,197,94,0.14); color: #22c55e; }
-.st-warn { background: rgba(245,158,11,0.14); color: #f59e0b; }
-.st-off { background: color-mix(in srgb, var(--text-sec) 12%, transparent); color: var(--text-sec); }
-
-/* ── Live logs ───────────────────────────────────────────────────────────── */
-.log-view {
-    width: 100%; height: 14rem; overflow: auto; white-space: pre-wrap; word-break: break-word;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.72rem; line-height: 1.5;
-    background: color-mix(in srgb, var(--bg) 75%, transparent); border: 1px solid var(--hairline);
-    border-radius: 0.9rem; padding: 0.85rem 1rem; color: var(--text);
-}
-.log-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.6rem; }
-
-/* ── Telegram session wizard ─────────────────────────────────────────────── */
-.sess-step { display: none; }
-.sess-step.active { display: block; }
-.sess-msg { font-size: 0.82rem; margin-top: 0.7rem; min-height: 1.2em; }
-.sess-msg.ok { color: #22c55e; }
-.sess-msg.err { color: #ef4444; }
-.sess-profile { display: flex; align-items: center; gap: 0.85rem; padding: 0.9rem; border-radius: 0.9rem; border: 1px solid var(--hairline); background: color-mix(in srgb, var(--bg) 55%, transparent); }
-.sess-avatar { width: 2.6rem; height: 2.6rem; border-radius: 50%; background: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 1.1rem; flex-shrink: 0; }
-.sess-rows { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
-.sess-name { font-weight: 800; font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem; }
-.sess-meta { font-size: 0.75rem; color: var(--text-sec); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sess-actions { display: flex; gap: 0.5rem; margin-top: 0.9rem; flex-wrap: wrap; }
-
-/* ── Restart overlay ─────────────────────────────────────────────────────── */
-#restart-overlay {
-    position: fixed; inset: 0; z-index: 100; display: none;
-    align-items: center; justify-content: center; text-align: center;
-    background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(6px);
-}
-#restart-overlay.show { display: flex; }
-#restart-overlay-msg { font-size: 1.05rem; font-weight: 800; color: var(--text); }
-.spinner { width: 2.4rem; height: 2.4rem; border-radius: 50%; border: 3px solid var(--hairline-strong); border-top-color: var(--primary); margin: 0 auto 1.1rem; animation: rspin 0.8s linear infinite; }
-@keyframes rspin { to { transform: rotate(360deg); } }
+.stat-box .v { font-size: 1.3rem; font-weight: 600; }
+.stat-box .l { font-size: .8rem; color: var(--text-sec); }
+.hint { font-size: 0.78rem; color: var(--text-sec); }
 </style>
 
-<div class="mx-auto max-w-5xl px-4 py-8 space-y-6">
-
-  <!-- Header -->
-  <div class="flex items-center justify-between gap-4 flex-wrap">
+<!-- Page header -->
+<div class="page-head">
     <div>
-      <h1 class="text-2xl font-black">Settings</h1>
-      <p class="text-sm text-sec mt-1">Manage server settings, channels, posters, session and backups.</p>
+        <h1 class="page-title">Settings</h1>
+        <p class="page-sub">Stored in the database. Most changes apply without a restart.</p>
     </div>
-    <div class="flex items-center gap-3">
-      <span id="save-label" class="text-sm font-bold text-sec"></span>
-      <button id="save-btn" class="btn-ui btn-primary" onclick="saveSettings()"><i class="fas fa-save"></i> Save Changes</button>
-    </div>
-  </div>
-  <p id="save-status" class="text-xs font-semibold text-amber-400 -mt-4"></p>
-
-  <!-- System & Maintenance -->
-  <section class="settings-card">
-    <h2><i class="fas fa-server"></i> System &amp; Maintenance</h2>
-    <div class="stat-grid" id="stats-grid"></div>
-    <button class="btn-ui btn-ghost mt-4 text-sm" onclick="loadDbStats(this)"><i class="fas fa-sync-alt"></i> Refresh Stats</button>
-
-    <hr class="divider">
-
-    <div class="log-bar">
-      <span class="s-label" style="margin:0">Live Logs</span>
-      <div class="flex items-center gap-3">
-        <a class="btn-ui btn-ghost text-sm" href="/api/admin/logs/download" download style="padding:.5rem .85rem"><i class="fas fa-download"></i> Download</a>
-        <label class="toggle-wrap" style="gap:.5rem">
-          <input type="checkbox" id="log-live-toggle" class="toggle-input" onchange="toggleLogs()">
-          <span class="toggle-track"></span>
-          <span class="toggle-label" style="font-size:.8rem;font-weight:700">Live</span>
-        </label>
-      </div>
-    </div>
-    <pre id="log-view" class="log-view">Loading logs…</pre>
-
-    <hr class="divider">
-
-    <div class="field">
-      <span class="s-label">Restart Server</span>
-      <p class="hint">Restarts the server process to apply settings that require a fresh boot. All saved changes are persisted.</p>
-      <button id="restart-btn" class="btn-ui btn-danger mt-3" onclick="restartApp()"><i class="fas fa-power-off"></i> Restart Now</button>
-    </div>
-  </section>
-
-  <!-- General -->
-  <section class="settings-card">
-    <h2><i class="fas fa-cog"></i> General</h2>
-    <div class="grid-2">
-      <div class="field">
-        <label class="s-label">Base URL</label>
-        <input id="base_url" class="s-input" value="{{ settings.base_url or '' }}" disabled placeholder="Set BASE_URL in config.env">
-        <p class="hint">Read from config.env. Restart required to change.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">TMDb API</label>
-        {% set tmdb_secret = namespace(found=false, configured=false) %}
-        {% for secret in settings.secret_statuses or [] %}
-          {% if secret.key == 'tmdb' %}{% set tmdb_secret.found = true %}{% set tmdb_secret.configured = secret.configured %}{% endif %}
-        {% endfor %}
-        {% if tmdb_secret.found %}
-          <span class="st-pill {% if tmdb_secret.configured %}st-ok{% else %}st-warn{% endif %}">
-            {% if tmdb_secret.configured %}Configured{% else %}Not configured{% endif %}
-          </span>
-        {% else %}
-          <span class="st-pill st-warn">Set TMDB_API_KEY in config.env</span>
-        {% endif %}
-        <p class="hint">Key is read from config.env at startup.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- Admin Authentication -->
-  <section class="settings-card">
-    <h2><i class="fas fa-lock"></i> Admin Authentication</h2>
-    <div class="grid-2">
-      <div class="field">
-        <label class="s-label">Admin Username</label>
-        <input id="admin_username" class="s-input" value="{{ settings.admin_username or '' }}" placeholder="admin">
-      </div>
-      <div class="field">
-        <label class="s-label">Admin Password</label>
-        <input id="admin_password" type="password" class="s-input" placeholder="Leave blank to keep current">
-        <p class="hint">{% if settings.admin_password_set %}Password is set and stored as a hash.{% else %}Password will be seeded from config.env on startup.{% endif %}</p>
-      </div>
-      <div class="field">
-        <label class="s-label">Session Secret</label>
-        <input id="session_secret" type="password" class="s-input" placeholder="Leave blank to keep current">
-        <p class="hint">{% if settings.session_secret_set %}Session secret is set. Changing it logs out active admin sessions after restart.{% else %}Using config.env/fallback session secret.{% endif %}</p>
-      </div>
-      <div class="field">
-        <label class="s-label">Configured Secrets</label>
-        {% for secret in settings.secret_statuses or [] %}
-          <div class="flex items-center justify-between py-1.5 border-b" style="border-color:var(--hairline)">
-            <span class="text-sm font-bold">{{ secret.label }}</span>
-            <span class="st-pill {% if secret.configured %}st-ok{% else %}st-warn{% endif %}">
-              {% if secret.configured %}Configured{% if secret.count is defined %} ({{ secret.count }}){% endif %}{% else %}Not configured{% endif %}
-            </span>
-          </div>
-        {% endfor %}
-      </div>
-    </div>
-  </section>
-
-  <!-- Telegram User Session -->
-  <section class="settings-card">
-    <h2><i class="fab fa-telegram"></i> Telegram User Session</h2>
-    <div id="sess-status" class="mb-4">
-      <div class="sess-profile">
-        <div class="sess-avatar" id="sess-avatar">?</div>
-        <div class="sess-rows">
-          <span class="sess-name" id="sess-name">Checking…</span>
-          <span class="sess-meta" id="sess-username"></span>
-          <span class="sess-meta" id="sess-meta"></span>
-        </div>
-      </div>
-      <div class="sess-actions" id="sess-actions"></div>
-    </div>
-
-    <div id="sess-wizard">
-      <div class="sess-step active" id="sess-step-phone">
-        <label class="s-label">Phone Number</label>
-        <input id="sess-phone-input" class="s-input" placeholder="+12025550123" autocomplete="off">
-        <button class="btn-ui btn-primary mt-3" onclick="sessSendCode()"><i class="fas fa-paper-plane"></i> Send Code</button>
-        <p class="sess-msg" id="sess-msg"></p>
-      </div>
-      <div class="sess-step" id="sess-step-code">
-        <label class="s-label">Verification Code</label>
-        <input id="sess-code-input" class="s-input" placeholder="12345" autocomplete="off" inputmode="numeric">
-        <div class="sess-actions" style="margin-top:.9rem">
-          <button class="btn-ui btn-primary" onclick="sessVerifyCode()"><i class="fas fa-check"></i> Verify</button>
-          <button class="btn-ui btn-ghost" onclick="sessShowStep('phone')"><i class="fas fa-arrow-left"></i> Back</button>
-        </div>
-        <p class="sess-msg" id="sess-msg-code"></p>
-      </div>
-      <div class="sess-step" id="sess-step-pass">
-        <label class="s-label">Two-Step Verification Password</label>
-        <input id="sess-pass-input" type="password" class="s-input" placeholder="Password" autocomplete="off">
-        <div class="sess-actions" style="margin-top:.9rem">
-          <button class="btn-ui btn-primary" onclick="sessVerifyPassword()"><i class="fas fa-check"></i> Submit</button>
-          <button class="btn-ui btn-ghost" onclick="sessShowStep('code')"><i class="fas fa-arrow-left"></i> Back</button>
-        </div>
-        <p class="sess-msg" id="sess-msg-pass"></p>
-      </div>
-    </div>
-    <p class="hint mt-3">Used for global search and content requests. Logging in stores an encrypted session string.</p>
-  </section>
-
-  <!-- Channels -->
-  <section class="settings-card">
-    <h2><i class="fas fa-broadcast-tower"></i> Channels</h2>
-    <div class="grid-2">
-      <div class="field">
-        <label class="s-label">Auth Channels</label>
-        <textarea id="auth_channels" rows="4" class="s-input">{{ (settings.auth_channels or []) | join('\n') }}</textarea>
-        <p class="hint">One per line. Only members of these channels can use the bot.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">Manual Add Channels</label>
-        <textarea id="manual_channels" rows="4" class="s-input">{{ (settings.manual_channels or []) | join('\n') }}</textarea>
-        <p class="hint">One per line. Media forwarded from these channels is added manually.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">Anime Channels</label>
-        <textarea id="anime_channels" rows="3" class="s-input">{{ (settings.anime_channels or []) | join('\n') }}</textarea>
-        <p class="hint">One per line. Media from these channels is tagged as anime.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">Global Search Channels</label>
-        <textarea id="global_search_channels" rows="3" class="s-input">{{ (settings.global_search_channels or []) | join('\n') }}</textarea>
-        <p class="hint">One per line. Channels searched by the global search feature.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- Media & Content -->
-  <section class="settings-card">
-    <h2><i class="fas fa-film"></i> Media &amp; Content</h2>
-    <div class="grid-2">
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="replace_mode" class="toggle-input" {% if settings.replace_mode %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Replace Mode</span>
-        </label>
-        <p class="hint">Replace existing entries with matching new uploads.</p>
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="hide_catalog" class="toggle-input" {% if settings.hide_catalog %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Hide Catalog</span>
-        </label>
-        <p class="hint">Hide the public catalog from non-authorized users.</p>
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="duplicate_protection" class="toggle-input" {% if settings.duplicate_protection %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Duplicate Protection</span>
-        </label>
-        <p class="hint">Skip media that already exists in the database.</p>
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="delete_on_metadata_fail" class="toggle-input" {% if settings.delete_on_metadata_fail %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Delete On Metadata Fail</span>
-        </label>
-        <p class="hint">Remove uploads whose metadata lookup fails.</p>
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="better_poster_enabled" class="toggle-input" {% if settings.better_poster_enabled %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Better Poster</span>
-        </label>
-        <p class="hint">Use the better poster URL template below when available.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">Better Poster URL Template</label>
-        <input id="better_poster" class="s-input" value="{{ settings.better_poster or '' }}" placeholder="https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg">
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="announce_new_content" class="toggle-input" {% if settings.announce_new_content %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Announce New Content</span>
-        </label>
-        <p class="hint">Post new content announcements to the channel below.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">Announcement Channel</label>
-        <input id="announcement_channel" class="s-input" value="{{ settings.announcement_channel or '' }}" placeholder="-100... or @channel">
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="maintenance_mode" class="toggle-input" {% if settings.maintenance_mode %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Maintenance Mode</span>
-        </label>
-        <p class="hint">Hides catalogs/streams from everyone except admin tokens while you work on the server.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">Skip Channel</label>
-        <input id="skip_channel" class="s-input" value="{{ settings.skip_channel or '' }}" placeholder="-100... or @channel">
-        <p class="hint">Uploads from this channel are skipped.</p>
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="show_proxy_and_non_proxy_both" class="toggle-input" {% if settings.show_proxy_and_non_proxy_both %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Show Proxy And Non-Proxy Both</span>
-        </label>
-        <p class="hint">Expose both proxied and direct stream links.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">HTTP Proxy URL</label>
-        <input id="http_proxy_url" class="s-input" value="{{ settings.http_proxy_url or '' }}" placeholder="http://user:pass@host:port">
-      </div>
-    </div>
-  </section>
-
-  <!-- Poster Provider -->
-  <section class="settings-card">
-    <h2><i class="fas fa-image"></i> Poster Provider</h2>
-    <div class="grid-2">
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="rpdb_enabled" class="toggle-input" {% if settings.rpdb_enabled %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">RPDB</span>
-        </label>
-        <p class="hint">Rating badges overlaid on posters from ratingposterdb.com.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">RPDB API Key</label>
-        <input id="rpdb_api_key" class="s-input" value="{{ settings.rpdb_api_key or '' }}" placeholder="Your RPDB key">
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="fanart_enabled" class="toggle-input" {% if settings.fanart_enabled %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Fanart</span>
-        </label>
-        <p class="hint">Artwork from fanart.tv.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">Fanart API Key</label>
-        <input id="fanart_api_key" class="s-input" value="{{ settings.fanart_api_key or '' }}" placeholder="Your Fanart key">
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="fanart_low_res_poster" class="toggle-input" {% if settings.fanart_low_res_poster %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Low-Resolution Poster</span>
-        </label>
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="fanart_shuffle" class="toggle-input" {% if settings.fanart_shuffle %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Shuffle Fanart</span>
-        </label>
-      </div>
-      <div class="field">
-        <label class="s-label">Shuffle Interval (minutes)</label>
-        <input id="fanart_shuffle_interval" type="number" min="0" class="s-input" value="{{ settings.fanart_shuffle_interval or 0 }}">
-      </div>
-    </div>
-  </section>
-
-  <!-- Stream Formatter -->
-  <section class="settings-card">
-    <h2><i class="fas fa-wand-magic-sparkles"></i> Stream Formatter</h2>
-    <p class="hint" style="margin-bottom:1rem">
-      How each stream's name and description look in Stremio. Uses the AIOStreams template syntax, so
-      Prism, Tamtaro and any other community formatter can be pasted into Custom as-is.
-      Empty fields are removed automatically.
-    </p>
-    <div class="field">
-      <label class="s-label" for="stream_formatter">Formatter</label>
-      <select id="stream_formatter" class="s-input" onchange="toggleFormatter()">
-        {% set fmt = settings.stream_formatter or 'default' %}
-        <option value="default" {% if fmt == 'default' %}selected{% endif %}>Default (built-in)</option>
-        <option value="prism" {% if fmt == 'prism' %}selected{% endif %}>Prism</option>
-        <option value="tamtaro" {% if fmt == 'tamtaro' %}selected{% endif %}>Tamtaro</option>
-        <option value="gdrive" {% if fmt == 'gdrive' %}selected{% endif %}>GDrive</option>
-        <option value="lightgdrive" {% if fmt == 'lightgdrive' %}selected{% endif %}>Light GDrive</option>
-        <option value="minimalisticgdrive" {% if fmt == 'minimalisticgdrive' %}selected{% endif %}>Minimalistic GDrive</option>
-        <option value="torrentio" {% if fmt == 'torrentio' %}selected{% endif %}>Torrentio</option>
-        <option value="torbox" {% if fmt == 'torbox' %}selected{% endif %}>TorBox</option>
-        <option value="custom" {% if fmt == 'custom' %}selected{% endif %}>Custom</option>
-      </select>
-    </div>
-
-    <div id="formatter-custom-wrap" style="margin-top:1rem;{% if fmt != 'custom' %}display:none{% endif %}">
-      <div class="grid-2">
-        <div class="field">
-          <label class="s-label" for="formatter_name">Name template</label>
-          <textarea id="formatter_name" class="s-input" rows="3" spellcheck="false"
-              style="font-family:monospace;font-size:0.78rem" oninput="schedulePreview()">{{ settings.formatter_name }}</textarea>
-        </div>
-        <div class="field">
-          <label class="s-label" for="formatter_copy" style="margin-bottom:0.4rem">Start from preset…</label>
-          <select id="formatter_copy" class="s-input" onchange="copyPreset(this)">
-            <option value="">Start from preset…</option>
-            {% for key in formatter_presets %}<option value="{{ key }}">{{ key }}</option>{% endfor %}
-          </select>
-        </div>
-      </div>
-      <div class="field">
-        <label class="s-label" for="formatter_description">Description template</label>
-        <textarea id="formatter_description" class="s-input" rows="8" spellcheck="false"
-            style="font-family:monospace;font-size:0.78rem" oninput="schedulePreview()">{{ settings.formatter_description }}</textarea>
-        <p class="hint" style="margin-top:0.4rem">
-          Fields: <code>{stream.resolution}</code> <code>{stream.quality}</code> <code>{stream.encode}</code>
-          <code>{stream.visualTags}</code> <code>{stream.audioTags}</code> <code>{stream.audioChannels}</code>
-          <code>{stream.languages}</code> <code>{stream.languageEmojis}</code> <code>{stream.size}</code>
-          <code>{stream.releaseGroup}</code> <code>{stream.seasonEpisode}</code> <code>{stream.indexer}</code>
-          <code>{addon.name}</code> … Wrap optional parts in <code>{?…?}</code> or <code>::exists["…"||""]</code>.
-        </p>
-      </div>
-    </div>
-
-    <div id="formatter-preview-wrap" style="margin-top:1rem;{% if fmt == 'default' %}display:none{% endif %}">
-      <div class="field">
-        <label class="s-label" for="formatter_sample">Preview filename</label>
-        <input type="text" id="formatter_sample" class="s-input" spellcheck="false" oninput="schedulePreview()"
-            value="Dune.Part.Two.2024.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1.ITA.ENG-GROUP.mkv">
-      </div>
-      <div style="display:flex;gap:0.9rem;margin-top:0.75rem;padding:0.9rem;border-radius:0.8rem;border:1px solid var(--border);background:#0f0f14;color:#e5e5e5;font-size:0.8rem">
-        <div id="formatter-preview-name" style="white-space:pre-wrap;font-weight:700;min-width:6.5rem;max-width:40%"></div>
-        <div id="formatter-preview-desc" style="white-space:pre-wrap;min-width:0;overflow-wrap:anywhere"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Requests & Announcements -->
-  <section class="settings-card">
-    <h2><i class="fas fa-clipboard-list"></i> Content Requests</h2>
-    <div class="grid-2">
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="content_requests_enabled" class="toggle-input" {% if settings.content_requests_enabled %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Enable Content Requests</span>
-        </label>
-        <p class="hint">Let users request movies and shows through the public request page.</p>
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="content_requests_beta_only" class="toggle-input" {% if settings.content_requests_beta_only %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Beta Users Only</span>
-        </label>
-        <p class="hint">Restrict requests to beta-approved users when subscription mode is on.</p>
-      </div>
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="global_search" class="toggle-input" {% if settings.global_search %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Global Search</span>
-        </label>
-        <p class="hint">Search across all channels using the Telegram user session. Requires a configured session.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- Subscription -->
-  <section class="settings-card">
-    <h2><i class="fas fa-credit-card"></i> Subscription</h2>
-    <div class="grid-2">
-      <div class="field">
-        <label class="toggle-wrap">
-          <input type="checkbox" id="subscription" class="toggle-input" {% if settings.subscription %}checked{% endif %}>
-          <span class="toggle-track"></span>
-          <span class="toggle-label">Enable Subscription Mode</span>
-        </label>
-        <p class="hint">Users need a subscription / access token to stream.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">Subscription Group ID</label>
-        <input id="subscription_group_id" class="s-input" value="{{ settings.subscription_group_id or 0 }}" inputmode="numeric">
-      </div>
-      <div class="field">
-        <label class="s-label">Approver IDs</label>
-        <textarea id="approver_ids" rows="3" class="s-input">{{ (settings.approver_ids or []) | join('\n') }}</textarea>
-        <p class="hint">Numeric Telegram user IDs, one per line. They can approve subscriptions.</p>
-      </div>
-      <div class="field">
-        <label class="s-label">Payment Instructions</label>
-        <textarea id="payment_instructions" rows="3" class="s-input">{{ settings.payment_instructions or '' }}</textarea>
-      </div>
-      <div class="field">
-        <label class="s-label">Payment QR URL</label>
-        <input id="payment_qr_url" class="s-input" value="{{ settings.payment_qr_url or '' }}" placeholder="https://...">
-      </div>
-    </div>
-  </section>
-
-  <!-- Multi-client tokens -->
-  <section class="settings-card">
-    <h2><i class="fas fa-user-friends"></i> Multi-Client Tokens</h2>
-    <div class="field">
-      <div class="flex items-center gap-3">
-        <span class="st-pill {% if settings.multi_token_count > 0 %}st-ok{% else %}st-warn{% endif %}">
-          {{ settings.multi_token_count }} token(s) configured
-        </span>
-      </div>
-      <p class="hint mt-2">Additional bot client tokens are read from config.env (MULTI_TOKEN_1, MULTI_TOKEN_2, …). Add or remove them there and restart the server.</p>
-    </div>
-  </section>
-
-  <!-- Backup & Restore -->
-  <section class="settings-card">
-    <h2><i class="fas fa-database"></i> Backup &amp; Restore</h2>
-    <p class="bk-desc">Export the full configuration, or restore a previously exported backup. Restoring replaces the current settings.</p>
-    <div class="bk-actions">
-      <a class="bk-btn bk-export" href="/api/admin/backup/export" download="telegram-stremio-config-backup.json">
-        <span class="bk-ic"><i class="fas fa-download"></i></span>
-        <span class="bk-txt"><b>Export Config</b><small>Download settings as JSON</small></span>
-      </a>
-      <button class="bk-btn bk-import" onclick="restoreConfig()" id="restore-btn">
-        <span class="bk-ic"><i class="fas fa-upload"></i></span>
-        <span class="bk-txt"><b>Restore Config</b><small>Import a JSON backup</small></span>
-      </button>
-      <a href="/api/admin/backup/library" class="bk-btn bk-export" style="grid-column:1/-1" download>
-        <span class="bk-ic"><i class="fas fa-mobile-screen"></i></span>
-        <span class="bk-txt"><b>Library for TeleStremio</b><small>Movies, series &amp; channels</small></span>
-      </a>
-    </div>
-    <div class="field" style="margin-top:.9rem">
-      <label class="s-label">Backup JSON</label>
-      <textarea id="restore-input" rows="4" class="s-input" placeholder='Paste the exported JSON here…'></textarea>
-    </div>
-    <p class="bk-status" id="restore-status"></p>
-  </section>
-
+    <button id="save-btn" data-shortcut-save onclick="saveSettings()"
+        class="btn-primary px-5 py-2.5 text-sm hidden md:inline-flex">
+        <i class="fa-solid fa-floppy-disk"></i>
+        <span id="save-label">Save Settings</span>
+    </button>
 </div>
 
-<!-- Restart overlay -->
-<div id="restart-overlay">
-  <div>
-    <div class="spinner"></div>
-    <p id="restart-overlay-msg">Restarting server…</p>
-  </div>
+<div class="space-y-6" id="settings-root">
+
+    <!-- ── System & Maintenance ─────────────────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-solid fa-server"></i> System &amp; Maintenance</h2>
+
+        <!-- DB & system stats -->
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <label class="s-label" style="margin-bottom:0">Database &amp; System Stats</label>
+            <button class="add-btn" type="button" onclick="loadDbStats(this)">
+                <i class="fa-solid fa-rotate"></i> Refresh
+            </button>
+        </div>
+        <div class="stat-grid" id="stats-grid">
+            <div class="hint" style="grid-column:1/-1"><i class="fa-solid fa-spinner fa-spin"></i> Loading stats…</div>
+        </div>
+
+        <hr class="divider">
+
+        <!-- Live logs -->
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <label class="s-label" style="margin-bottom:0">Logs</label>
+            <div class="flex items-center gap-3 flex-wrap">
+                <label class="anime-check" title="Auto-refresh the log every 2s">
+                    <input type="checkbox" id="log-live-toggle" onchange="toggleLiveLogs()">
+                    <span>Live</span>
+                </label>
+                <button class="add-btn" type="button" onclick="loadLogs(this)">
+                    <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+                <button class="add-btn" type="button" onclick="window.open('/api/admin/logs/download','_blank')">
+                    <i class="fa-solid fa-download"></i> Download
+                </button>
+            </div>
+        </div>
+        <pre id="log-view" style="background:color-mix(in srgb,var(--bg) 80%,#000);border:1px solid var(--border);
+            border-radius:0.75rem;padding:1rem;font-family:'JetBrains Mono',monospace;font-size:0.75rem;
+            line-height:1.5;color:var(--text);max-height:340px;overflow:auto;white-space:pre-wrap;
+            word-break:break-word;margin:0">Loading logs…</pre>
+
+        <hr class="divider">
+
+        <!-- Restart -->
+        <label class="s-label">Restart App</label>
+        <p style="font-size:0.83rem;color:var(--text-sec);margin-bottom:1rem">
+            Pulls the latest code from the upstream repo/branch above and restarts the server.
+            The web app becomes unreachable for a few seconds — this page will reconnect
+            automatically once it's back online.
+        </p>
+        <button id="restart-btn" onclick="restartApp()"
+            class="btn-danger px-6 py-2.5 text-sm">
+            <i class="fa-solid fa-power-off"></i>
+            <span>Restart Now</span>
+        </button>
+    </div>
+
+    <!-- ── General ─────────────────────────────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-solid fa-sliders"></i> General</h2>
+        <div class="space-y-4">
+            <label class="toggle-wrap">
+                <input type="checkbox" class="toggle-input" id="replace_mode"
+                    {% if settings.replace_mode %}checked{% endif %} onchange="toggleDuplicateProtection()">
+                <span class="toggle-track"></span>
+                <span class="toggle-label">
+                    <strong>Replace Mode</strong>
+                    <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                        Overwrite existing media entries on re-index
+                    </span>
+                </span>
+            </label>
+            <label class="toggle-wrap" id="dup-protect-wrap">
+                <input type="checkbox" class="toggle-input" id="duplicate_protection"
+                    {% if settings.duplicate_protection %}checked{% endif %}>
+                <span class="toggle-track"></span>
+                <span class="toggle-label">
+                    <strong>Duplicate Protection</strong>
+                    <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                        Skip re-indexing a file that already exists (same name &amp; size). Only active when Replace Mode is off.
+                    </span>
+                </span>
+            </label>
+            <label class="toggle-wrap">
+                <input type="checkbox" class="toggle-input" id="hide_catalog"
+                    {% if settings.hide_catalog %}checked{% endif %}>
+                <span class="toggle-track"></span>
+                <span class="toggle-label">
+                    <strong>Hide Catalog</strong>
+                    <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                        Hide the public Stremio catalog from unauthenticated users
+                    </span>
+                </span>
+            </label>
+        </div>
+    </div>
+
+    <!-- ── Authentication ──────────────────────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-solid fa-shield-halved"></i> Admin Authentication</h2>
+        <div class="grid-2">
+            <div>
+                <label class="s-label" for="admin_username">Admin Username</label>
+                <input type="text" id="admin_username" class="s-input"
+                    value="{{ settings.admin_username }}" autocomplete="off">
+            </div>
+            <div>
+                <label class="s-label" for="admin_password">Admin Password</label>
+                <div style="position:relative">
+                    <input type="password" id="admin_password" class="s-input"
+                        placeholder="Leave blank to keep current password"
+                        style="padding-right:2.5rem" autocomplete="new-password">
+                    <button type="button" onclick="togglePwdVisibility()"
+                        style="position:absolute;right:0.75rem;top:50%;transform:translateY(-50%);
+                               background:none;border:none;color:var(--text-sec);cursor:pointer">
+                        <i class="fa-solid fa-eye" id="eye-icon"></i>
+                    </button>
+                </div>
+                <p style="font-size:0.75rem;color:var(--text-sec);margin-top:0.3rem">
+                    {% if settings.admin_password_set is defined and settings.admin_password_set %}
+                        <i class="fa-solid fa-circle-check" style="color:var(--ok)"></i> Password is set
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+
+        <div style="margin-top:1rem">
+            <label class="s-label" for="session_secret">Session Secret</label>
+            <div style="position:relative">
+                <input type="password" id="session_secret" class="s-input"
+                    placeholder="Leave blank to keep current secret"
+                    style="padding-right:2.5rem" autocomplete="new-password">
+                <button type="button" onclick="generateSessionSecret()" title="Generate a random secret"
+                    style="position:absolute;right:0.75rem;top:50%;transform:translateY(-50%);
+                           background:none;border:none;color:var(--text-sec);cursor:pointer">
+                    <i class="fa-solid fa-dice"></i>
+                </button>
+            </div>
+            <p style="font-size:0.75rem;color:var(--text-sec);margin-top:0.3rem">
+                Signs admin login sessions. Changing it logs out all admins after the next restart.
+                {% if settings.session_secret_set is defined and settings.session_secret_set %}
+                    <i class="fa-solid fa-circle-check" style="color:var(--ok)"></i> Secret is set
+                {% endif %}
+            </p>
+        </div>
+
+        <hr class="divider">
+
+        <!-- Auth Channels -->
+        <label class="s-label">AUTH_CHANNELS
+            <span style="font-weight:400;text-transform:none;letter-spacing:0">
+                — users must be a member of at least one. Tick <strong>Anime</strong> on a
+                channel to index its files with Kitsu → TVDB → TMDB → Cinemeta priority.</span>
+        </label>
+        {% set anime_norm = settings.anime_channels | map('string') | map('replace', '-100', '') | list %}
+        {% set titles = settings.channel_titles or {} %}
+        <div class="multi-list-items" id="auth_channels_items">
+            {% for ch in settings.auth_channels %}
+            {% set is_anime = (ch | string | replace('-100', '')) in anime_norm %}
+            {% set t = titles.get(ch|string, ch|string) %}
+            <div class="multi-item auth-item">
+                <span class="channel-chip" data-list="auth_channels" data-id="{{ ch }}" title="{{ ch }}">{{ t }}</span>
+                <label class="anime-check {% if is_anime %}is-anime{% endif %}" title="Mark as anime channel — uses Kitsu → TVDB → TMDB → Cinemeta">
+                    <input type="checkbox" class="anime-toggle" {% if is_anime %}checked{% endif %} onchange="syncAnimeChip(this)">
+                    <span>Anime</span>
+                </label>
+                <button class="remove-btn" onclick="removeItem(this)" title="Remove">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="add-row">
+            <input type="text" id="auth_channels_new" class="s-input"
+                placeholder="-100xxxxxxxxxx (channels only)"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('auth_channels')}">
+            <button class="add-btn" onclick="addItem('auth_channels')">+ Add Channel</button>
+        </div>
+    </div>
+
+    <!-- ── Media & Content ─────────────────────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-solid fa-film"></i> Media &amp; Content</h2>
+        <div class="grid-2">
+            <div>
+                <label class="s-label" for="tmdb_api">TMDB API Key</label>
+                <input type="text" id="tmdb_api" class="s-input"
+                    value="{{ settings.tmdb_api }}" autocomplete="off"
+                    placeholder="Your TMDB v3 API key" spellcheck="false">
+            </div>
+            <div>
+                <label class="s-label" for="tvdb_api">TVDB API Key</label>
+                <input type="text" id="tvdb_api" class="s-input"
+                    value="{{ settings.tvdb_api }}" autocomplete="off"
+                    placeholder="TheTVDB v4 API key (series priority)" spellcheck="false">
+            </div>
+            <div>
+                <label class="s-label" for="base_url">Base URL</label>
+                <input type="url" id="base_url" class="s-input"
+                    value="{{ settings.base_url }}"
+                    placeholder="https://your-domain.com">
+            </div>
+        </div>
+        <hr class="divider">
+        <div class="grid-2">
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Poster Provider ─────────────────────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-solid fa-image"></i> Poster Provider</h2>
+        <p style="font-size:0.83rem;color:var(--text-sec);margin-bottom:1rem">
+            Replace catalog posters with textless artwork. Only one provider can be active at a time.
+        </p>
+
+        <label class="toggle-wrap" style="margin-bottom:0.75rem">
+            <input type="checkbox" class="toggle-input" id="better_poster_enabled"
+                {% if settings.better_poster_enabled %}checked{% endif %}
+                onchange="togglePosterProvider('better')">
+            <span class="toggle-track"></span>
+            <span class="toggle-label">
+                <strong>BetterPoster</strong>
+                <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                    Uses btttr.cc. Leave the URL empty for the default variant.
+                </span>
+            </span>
+        </label>
+        <div id="better-poster-wrap" style="margin-bottom:1.25rem;{% if not settings.better_poster_enabled %}display:none{% endif %}">
+            <label class="s-label" for="better_poster">BetterPoster URL <span style="font-weight:400;text-transform:none">(optional)</span></label>
+            <input type="text" id="better_poster" class="s-input"
+                value="{{ settings.better_poster }}" autocomplete="off" spellcheck="false"
+                placeholder="https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg">
+        </div>
+
+        <label class="toggle-wrap" style="margin-bottom:0.75rem">
+            <input type="checkbox" class="toggle-input" id="rpdb_enabled"
+                {% if settings.rpdb_enabled %}checked{% endif %}
+                onchange="togglePosterProvider('rpdb')">
+            <span class="toggle-track"></span>
+            <span class="toggle-label">
+                <strong>RPDB</strong>
+                <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                    Uses ratingposterdb.com. Leave the API key empty to use the free tier.
+                </span>
+            </span>
+        </label>
+        </div>
+
+        <label class="toggle-wrap" style="margin-bottom:0.75rem">
+            <input type="checkbox" class="toggle-input" id="fanart_enabled"
+                {% if settings.fanart_enabled %}checked{% endif %}
+                onchange="togglePosterProvider('fanart')">
+            <span class="toggle-track"></span>
+            <span class="toggle-label">
+                <strong>Fanart.tv</strong>
+                <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                    Poster, logo and backdrop from fanart.tv. An API key is required.
+                </span>
+            </span>
+        </label>
+        <div id="fanart-wrap" style="{% if not settings.fanart_enabled %}display:none{% endif %}">
+            <label class="s-label" for="fanart_api_key">Fanart.tv API Key</label>
+            <input type="text" id="fanart_api_key" class="s-input"
+                value="{{ settings.fanart_api_key }}" autocomplete="off" spellcheck="false"
+                placeholder="Your fanart.tv project API key">
+            <label class="toggle-wrap" style="margin-top:0.85rem">
+                <input type="checkbox" class="toggle-input" id="fanart_low_res_poster"
+                    {% if settings.fanart_low_res_poster %}checked{% endif %}>
+                <span class="toggle-track"></span>
+                <span class="toggle-label">
+                    <strong>Faster artwork</strong>
+                    <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                        Low-resolution posters and logos plus medium-resolution backdrops for quicker loading, ideal for phones.
+                    </span>
+                </span>
+            </label>
+            <label class="toggle-wrap" style="margin-top:0.85rem">
+                <input type="checkbox" class="toggle-input" id="fanart_shuffle"
+                    {% if settings.fanart_shuffle %}checked{% endif %}
+                    onchange="toggleFanartShuffle()">
+                <span class="toggle-track"></span>
+                <span class="toggle-label">
+                    <strong>Shuffle artwork</strong>
+                    <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                        Pick a random English artwork instead of the most liked one. Missing types fall back to the stored artwork.
+                    </span>
+                </span>
+            </label>
+            <div id="fanart-shuffle-wrap" style="margin-top:0.85rem;{% if not settings.fanart_shuffle %}display:none{% endif %}">
+                <label class="s-label" for="fanart_shuffle_interval">Shuffle interval (minutes)</label>
+                <input type="number" id="fanart_shuffle_interval" class="s-input" min="0" step="1"
+                    value="{{ settings.fanart_shuffle_interval }}"
+                    placeholder="5">
+                <span style="color:var(--text-sec);font-size:0.8rem;display:block;margin-top:0.35rem">
+                    How often the artwork changes. Use 0 for a fresh random pick on every load.
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Stream Formatter ────────────────────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-solid fa-wand-magic-sparkles"></i> Stream Formatter</h2>
+        <p style="font-size:0.83rem;color:var(--text-sec);margin-bottom:1rem">
+            How each stream's name and description look in Stremio. Uses the AIOStreams template syntax, so
+            Prism, Tamtaro and any other community formatter can be pasted into Custom as-is.
+            Empty fields are removed automatically.
+        </p>
+        <label class="s-label" for="stream_formatter">Formatter</label>
+        <select id="stream_formatter" class="s-input" onchange="toggleFormatter()">
+            {% set fmt = settings.stream_formatter or 'default' %}
+            <option value="default" {% if fmt == 'default' %}selected{% endif %}>Default (built-in)</option>
+            <option value="prism" {% if fmt == 'prism' %}selected{% endif %}>Prism</option>
+            <option value="tamtaro" {% if fmt == 'tamtaro' %}selected{% endif %}>Tamtaro</option>
+            <option value="gdrive" {% if fmt == 'gdrive' %}selected{% endif %}>GDrive</option>
+            <option value="lightgdrive" {% if fmt == 'lightgdrive' %}selected{% endif %}>Light GDrive</option>
+            <option value="minimalisticgdrive" {% if fmt == 'minimalisticgdrive' %}selected{% endif %}>Minimalistic GDrive</option>
+            <option value="torrentio" {% if fmt == 'torrentio' %}selected{% endif %}>Torrentio</option>
+            <option value="torbox" {% if fmt == 'torbox' %}selected{% endif %}>TorBox</option>
+            <option value="custom" {% if fmt == 'custom' %}selected{% endif %}>Custom</option>
+        </select>
+
+        <div id="formatter-custom-wrap" style="margin-top:1rem;{% if fmt != 'custom' %}display:none{% endif %}">
+            <div class="flex items-center justify-between gap-2" style="margin-bottom:0.4rem">
+                <label class="s-label" for="formatter_name" style="margin:0">Name template</label>
+                <select id="formatter_copy" class="s-input" style="width:auto;padding:0.3rem 0.6rem;font-size:0.78rem" onchange="copyPreset(this)">
+                    <option value="">Start from preset…</option>
+                    {% for key in formatter_presets %}<option value="{{ key }}">{{ key }}</option>{% endfor %}
+                </select>
+            </div>
+            <textarea id="formatter_name" class="s-input" rows="3" spellcheck="false"
+                style="font-family:monospace;font-size:0.78rem" oninput="schedulePreview()">{{ settings.formatter_name }}</textarea>
+            <label class="s-label" for="formatter_description" style="margin-top:0.85rem">Description template</label>
+            <textarea id="formatter_description" class="s-input" rows="8" spellcheck="false"
+                style="font-family:monospace;font-size:0.78rem" oninput="schedulePreview()">{{ settings.formatter_description }}</textarea>
+            <p style="font-size:0.75rem;color:var(--text-sec);margin-top:0.4rem">
+                Fields: <code>{stream.resolution}</code> <code>{stream.quality}</code> <code>{stream.encode}</code>
+                <code>{stream.visualTags}</code> <code>{stream.audioTags}</code> <code>{stream.audioChannels}</code>
+                <code>{stream.languages}</code> <code>{stream.languageEmojis}</code> <code>{stream.size}</code>
+                <code>{stream.releaseGroup}</code> <code>{stream.seasonEpisode}</code> <code>{stream.indexer}</code>
+                <code>{addon.name}</code> … Wrap optional parts in <code>{?…?}</code> or <code>::exists["…"||""]</code>.
+            </p>
+        </div>
+
+        <div id="formatter-preview-wrap" style="margin-top:1rem;{% if fmt == 'default' %}display:none{% endif %}">
+            <label class="s-label" for="formatter_sample">Preview filename</label>
+            <input type="text" id="formatter_sample" class="s-input" spellcheck="false" oninput="schedulePreview()"
+                value="Dune.Part.Two.2024.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1.ITA.ENG-GROUP.mkv">
+            <div style="display:flex;gap:0.9rem;margin-top:0.75rem;padding:0.9rem;border-radius:0.8rem;border:1px solid var(--border);background:#0f0f14;color:#e5e5e5;font-size:0.8rem">
+                <div id="formatter-preview-name" style="white-space:pre-wrap;font-weight: 600;min-width:6.5rem;max-width:40%"></div>
+                <div id="formatter-preview-desc" style="white-space:pre-wrap;min-width:0;overflow-wrap:anywhere"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Manual Add Channels ─────────────────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-solid fa-hand-pointer"></i> Manual Add Channels</h2>
+        <label class="s-label">MANUAL_CHANNELS
+            <span style="font-weight:400;text-transform:none;letter-spacing:0">
+                — files sent here are <strong>not</strong> auto-indexed with TMDb/IMDb.
+                Add them by hand from Media Management by pasting a message link.
+                Listing a channel here also cleans up its streams when a file is deleted.</span>
+        </label>
+        <div class="multi-list-items" id="manual_channels_items">
+            {% for ch in settings.manual_channels %}
+            {% set t = (settings.channel_titles or {}).get(ch|string, ch|string) %}
+            <div class="multi-item">
+                <span class="channel-chip" data-list="manual_channels" data-id="{{ ch }}" title="{{ ch }}">{{ t }}</span>
+                <button class="remove-btn" onclick="removeItem(this)" title="Remove">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="add-row">
+            <input type="text" id="manual_channels_new" class="s-input"
+                placeholder="-100xxxxxxxxxx (channels only)"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('manual_channels')}">
+            <button class="add-btn" onclick="addItem('manual_channels')">+ Add Channel</button>
+        </div>
+    </div>
+
+    <!-- ── Subscription ────────────────────────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-solid fa-credit-card"></i> Subscription</h2>
+        <label class="toggle-wrap" style="margin-bottom:1.25rem">
+            <input type="checkbox" class="toggle-input" id="subscription"
+                {% if settings.subscription %}checked{% endif %}
+                onchange="toggleSubFields()">
+            <span class="toggle-track"></span>
+            <span class="toggle-label">
+                <strong>Enable Subscription System</strong>
+                <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                    Restrict Stremio access to subscribed members
+                </span>
+            </span>
+        </label>
+
+        <div id="sub-fields" style="{% if not settings.subscription %}display:none{% endif %}">
+            <div style="margin-bottom:1rem">
+                <label class="s-label" for="subscription_group_id">Subscription Group ID</label>
+                <input type="number" id="subscription_group_id" class="s-input"
+                    value="{{ settings.subscription_group_id }}"
+                    placeholder="-100xxxxxxxx">
+                <span style="color:var(--text-sec);font-size:0.78rem;display:block;margin-top:0.4rem">
+                    Users are pointed back to your bot automatically for renewals and joining.
+                </span>
+            </div>
+
+            <!-- Payment method -->
+            <div style="margin-bottom:1rem">
+                <label class="s-label" for="payment_instructions">Payment Instructions
+                    <span style="font-weight:400;text-transform:none;letter-spacing:0">
+                        — shown to users when they pick a plan (UPI ID, bank details, etc.)</span>
+                </label>
+                <textarea id="payment_instructions" class="s-input" rows="4"
+                    placeholder="e.g. UPI: yourname@okhdfcbank&#10;Or PayPal: you@example.com&#10;After paying, send the screenshot here.">{{ settings.payment_instructions }}</textarea>
+            </div>
+            <div style="margin-bottom:1rem">
+                <label class="s-label" for="payment_qr_url">Payment QR Image URL
+                    <span style="font-weight:400;text-transform:none;letter-spacing:0">
+                        — optional; if set, the bot sends this QR image with the plan</span>
+                </label>
+                <input type="url" id="payment_qr_url" class="s-input"
+                    value="{{ settings.payment_qr_url }}"
+                    placeholder="https://.../upi-qr.png">
+            </div>
+
+            <!-- Approver IDs -->
+            <label class="s-label">APPROVER_IDS
+                <span style="font-weight:400;text-transform:none;letter-spacing:0">
+                    — Telegram user IDs allowed to approve subscriptions</span>
+            </label>
+            <div class="multi-list-items" id="approver_ids_items">
+                {% for uid in settings.approver_ids %}
+                <div class="multi-item">
+                    <input type="number" class="s-input" value="{{ uid }}" data-list="approver_ids">
+                    <button class="remove-btn" onclick="removeItem(this)" title="Remove">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="add-row">
+                <input type="number" id="approver_ids_new" class="s-input"
+                    placeholder="Telegram user ID (numeric)"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('approver_ids')}">
+                <button class="add-btn" onclick="addItem('approver_ids')">+ Add Approver</button>
+            </div>
+        </div>
+    </div>
+
+
+
+
+<!-- ── Telegram User Session ──────────────────────────────────────── -->
+<div class="settings-card">
+    <h2><i class="fa-solid fa-user-lock"></i> Telegram User Session</h2>
+    <p class="bk-desc">
+        Log in with your phone number to generate the User Session automatically — no manual
+        session string needed. It's encrypted and stored securely, and powers Global Search.
+    </p>
+
+    <div id="sess-loading" style="color:var(--text-sec);font-size:0.85rem">
+        <i class="fa-solid fa-spinner fa-spin"></i> Checking session…
+    </div>
+
+    <!-- Connected view -->
+    <div id="sess-connected" style="display:none">
+        <div class="sess-profile">
+            <div class="sess-avatar"><i class="fa-solid fa-user-astronaut"></i></div>
+            <div style="min-width:0;flex:1">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span id="sess-name" style="font-weight: 600"></span>
+                    <span id="sess-live" class="sess-pill"></span>
+                </div>
+                <div id="sess-username" style="color:var(--text-sec);font-size:0.82rem"></div>
+            </div>
+        </div>
+        <div class="sess-grid">
+            <div><span class="sess-k">Phone</span><span id="sess-phone" class="sess-v">—</span></div>
+            <div><span class="sess-k">Telegram ID</span><span id="sess-id" class="sess-v">—</span></div>
+        </div>
+        <div class="flex flex-wrap gap-2 mt-4">
+            <button type="button" class="sess-btn" onclick="sessAction('reconnect')"><i class="fa-solid fa-rotate"></i> Reconnect</button>
+            <button type="button" class="sess-btn warn" onclick="sessAction('disconnect')"><i class="fa-solid fa-plug-circle-xmark"></i> Disconnect</button>
+            <button type="button" class="sess-btn danger" onclick="sessRemove()"><i class="fa-solid fa-trash"></i> Remove</button>
+        </div>
+    </div>
+
+    <!-- Login flow -->
+    <div id="sess-login" style="display:none">
+        <div id="sess-step-phone">
+            <label class="s-label">Phone number (with country code)</label>
+            <div class="flex flex-col sm:flex-row gap-2">
+                <input id="sess-phone-input" class="s-input" placeholder="+12025550123" style="flex:1">
+                <button type="button" class="sess-btn primary" onclick="sessSendCode()"><i class="fa-solid fa-paper-plane"></i> Send code</button>
+            </div>
+        </div>
+        <div id="sess-step-code" style="display:none;margin-top:0.85rem">
+            <label class="s-label">Login code (sent on Telegram)</label>
+            <div class="flex flex-col sm:flex-row gap-2">
+                <input id="sess-code-input" class="s-input" inputmode="numeric" placeholder="1 2 3 4 5" style="flex:1">
+                <button type="button" class="sess-btn primary" onclick="sessVerifyCode()"><i class="fa-solid fa-check"></i> Verify</button>
+            </div>
+        </div>
+        <div id="sess-step-pass" style="display:none;margin-top:0.85rem">
+            <label class="s-label">Two-step verification password</label>
+            <div class="flex flex-col sm:flex-row gap-2">
+                <input id="sess-pass-input" type="password" class="s-input" placeholder="Your 2FA password" style="flex:1">
+                <button type="button" class="sess-btn primary" onclick="sessVerifyPassword()"><i class="fa-solid fa-lock-open"></i> Confirm</button>
+            </div>
+        </div>
+        <p id="sess-msg" style="font-size:0.8rem;margin-top:0.7rem;display:none"></p>
+    </div>
+
+    {% if userbot_configured %}
+    <hr class="divider">
+    <label class="toggle-wrap">
+        <input type="checkbox" class="toggle-input" id="default_streaming"
+            {% if settings.default_streaming == 'userbot' %}checked{% endif %}>
+        <span class="toggle-track"></span>
+        <span class="toggle-label">
+            <strong>Default Streaming: Userbot</strong>
+            <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                Off streams library files by Bots (default). On streams them by the Userbot, falling back to Bots on error.
+                Global Search files always use the Userbot.
+            </span>
+        </span>
+    </label>
+    {% endif %}
+</div>
+
+<style>
+.sess-profile { display:flex; align-items:center; gap:0.9rem; padding:1rem; border-radius:0.9rem; border:1px solid var(--border); background:color-mix(in srgb,var(--card) 90%,var(--bg)); }
+.sess-avatar { width:3rem; height:3rem; border-radius:9999px; display:flex; align-items:center; justify-content:center; font-size:1.2rem; background:color-mix(in srgb,var(--primary) 18%,transparent); color:var(--primary); flex-shrink:0; }
+.sess-grid { display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; margin-top:0.85rem; }
+@media (max-width:520px){ .sess-grid { grid-template-columns:1fr; } }
+.sess-grid > div { padding:0.7rem 0.9rem; border-radius:0.8rem; border:1px solid var(--border); background:color-mix(in srgb,var(--card) 92%,var(--bg)); }
+.sess-k { display:block; font-size:0.68rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-sec); font-weight: 600; }
+.sess-v { display:block; font-weight: 600; margin-top:0.2rem; word-break:break-all; }
+.sess-pill { font-size:0.62rem; font-weight: 600; text-transform:uppercase; letter-spacing:0.05em; padding:0.15rem 0.55rem; border-radius:9999px; }
+.sess-pill.on { background:color-mix(in srgb, var(--ok) 13%, transparent); color:var(--ok); }
+.sess-pill.off { background:color-mix(in srgb, var(--warn) 13%, transparent); color:var(--warn); }
+.sess-btn { display:inline-flex; align-items:center; gap:0.5rem; padding:0.6rem 1.1rem; border-radius:9999px; font-weight: 600; font-size:0.82rem; cursor:pointer; border:1px solid var(--border); background:color-mix(in srgb,var(--card) 92%,var(--bg)); color:var(--text); transition:all .15s; }
+.sess-btn:hover { border-color:var(--primary); }
+.sess-btn.primary { background:var(--primary); color:#fff; border-color:transparent; }
+.sess-btn.warn { color:var(--warn); }
+.sess-btn.danger { color:var(--danger); }
+</style>
+
+<script>
+let sessLoginId = null;
+
+async function sessLoadStatus() {
+    try {
+        const res = await fetch('/api/admin/settings/session');
+        const data = await res.json();
+        document.getElementById('sess-loading').style.display = 'none';
+        if (data.connected && data.profile) {
+            const p = data.profile;
+            document.getElementById('sess-name').textContent = p.name || 'Telegram User';
+            document.getElementById('sess-username').textContent = p.username ? '@' + p.username : 'No username';
+            document.getElementById('sess-phone').textContent = p.phone || '—';
+            document.getElementById('sess-id').textContent = p.user_id || '—';
+            const live = document.getElementById('sess-live');
+            live.className = 'sess-pill ' + (data.live ? 'on' : 'off');
+            live.textContent = data.live ? 'Connected' : 'Stored (restart to activate)';
+            document.getElementById('sess-connected').style.display = '';
+            document.getElementById('sess-login').style.display = 'none';
+        } else {
+            document.getElementById('sess-connected').style.display = 'none';
+            document.getElementById('sess-login').style.display = '';
+            sessShowStep('phone');
+        }
+    } catch (e) {
+        document.getElementById('sess-loading').textContent = 'Unable to load session status.';
+    }
+}
+
+function sessShowStep(step) {
+    document.getElementById('sess-step-phone').style.display = step === 'phone' ? '' : 'none';
+    document.getElementById('sess-step-code').style.display = step === 'code' ? '' : 'none';
+    document.getElementById('sess-step-pass').style.display = step === 'pass' ? '' : 'none';
+}
+
+function sessMsg(text, ok) {
+    const el = document.getElementById('sess-msg');
+    el.style.display = '';
+    el.style.color = ok ? 'var(--ok)' : 'var(--danger)';
+    el.textContent = text;
+}
+
+async function sessSendCode() {
+    const phone = document.getElementById('sess-phone-input').value.trim();
+    if (!phone) return sessMsg('Enter your phone number.', false);
+    sessMsg('Sending code…', true);
+    try {
+        const res = await fetch('/api/admin/settings/session/send-code', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to send code');
+        sessLoginId = data.login_id;
+        sessShowStep('code');
+        sessMsg('Code sent. Check your Telegram app.', true);
+    } catch (e) { sessMsg(e.message, false); }
+}
+
+async function sessVerifyCode() {
+    const code = document.getElementById('sess-code-input').value.trim();
+    if (!code) return sessMsg('Enter the login code.', false);
+    sessMsg('Verifying…', true);
+    try {
+        const res = await fetch('/api/admin/settings/session/verify-code', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login_id: sessLoginId, code })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Verification failed');
+        if (data.status === 'password_needed') {
+            sessShowStep('pass');
+            sessMsg('This account has two-step verification. Enter your password.', true);
+            return;
+        }
+        showToast('Session created successfully.', 'success', 'Telegram');
+        sessLoadStatus();
+    } catch (e) { sessMsg(e.message, false); }
+}
+
+async function sessVerifyPassword() {
+    const password = document.getElementById('sess-pass-input').value;
+    if (!password) return sessMsg('Enter your 2FA password.', false);
+    sessMsg('Confirming…', true);
+    try {
+        const res = await fetch('/api/admin/settings/session/verify-password', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login_id: sessLoginId, password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Verification failed');
+        showToast('Session created successfully.', 'success', 'Telegram');
+        sessLoadStatus();
+    } catch (e) { sessMsg(e.message, false); }
+}
+
+async function sessAction(kind) {
+    try {
+        const res = await fetch('/api/admin/settings/session/' + kind, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Action failed');
+        showToast(kind === 'reconnect' ? 'Reconnected.' : 'Disconnected.', 'info', 'Telegram');
+        sessLoadStatus();
+    } catch (e) { showToast(e.message, 'error', 'Telegram'); }
+}
+
+async function sessRemove() {
+    if (!confirm('Remove the stored Telegram session? Global Search will stop working until you log in again.')) return;
+    try {
+        const res = await fetch('/api/admin/settings/session', { method: 'DELETE' });
+        if (!res.ok) throw new Error();
+        showToast('Session removed.', 'info', 'Telegram');
+        sessLoadStatus();
+    } catch (e) { showToast('Failed to remove session.', 'error', 'Telegram'); }
+}
+
+document.addEventListener('DOMContentLoaded', sessLoadStatus);
+</script>
+
+
+<!-- ── Content Requests (fork) ────────────────────────────────────── -->
+<div class="settings-card">
+    <h2><i class="fa-solid fa-clipboard-list"></i> Content Requests</h2>
+
+    <label class="toggle-wrap">
+        <input type="checkbox" class="toggle-input" id="content_requests_enabled"
+            {% if settings.content_requests_enabled %}checked{% endif %}>
+        <span class="toggle-track"></span>
+        <span class="toggle-label">
+            <strong>Enable Content Requests</strong>
+            <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                Let users request movies and shows through the public request page.
+            </span>
+        </span>
+    </label>
+
+    <label class="toggle-wrap">
+        <input type="checkbox" class="toggle-input" id="content_requests_beta_only"
+            {% if settings.content_requests_beta_only %}checked{% endif %}>
+        <span class="toggle-track"></span>
+        <span class="toggle-label">
+            <strong>Beta Users Only</strong>
+            <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                Restrict requests to beta-approved users when subscription mode is on.
+            </span>
+        </span>
+    </label>
+</div>
+
+<!-- ── Global Search (Userbot) ────────────────────────────────────── -->
+<div class="settings-card">
+    <h2><i class="fa-solid fa-globe"></i> Global Search</h2>
+
+    <label class="toggle-wrap" style="{% if not userbot_configured %}opacity:0.5{% endif %}">
+        <input type="checkbox" class="toggle-input" id="global_search"
+            {% if settings.global_search %}checked{% endif %}
+            {% if not userbot_configured %}disabled{% endif %}
+            onchange="toggleGlobalSearchFields()">
+        <span class="toggle-track"></span>
+        <span class="toggle-label">
+            <strong>Enable Global Search</strong>
+            <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                Search media <strong>only in the channels listed below</strong>.
+                Results are tagged <strong>GLOBAL</strong> in the stream list
+                for items not in your local catalog.
+            </span>
+        </span>
+    </label>
+
+    {% if not userbot_configured %}
+    <p style="color:var(--text-sec);font-size:0.8rem;margin-top:0.75rem">
+        <i class="fa-solid fa-circle-info"></i>
+        Connect your <strong>Telegram User Session</strong> above to unlock Global Search.
+    </p>
+    {% endif %}
+
+    <div id="global-search-fields"
+         style="{% if not settings.global_search %}display:none{% endif %}">
+
+        <hr class="divider">
+
+        <div id="global-search-channels-wrap"
+             style="{% if not userbot_configured %}opacity:0.5;pointer-events:none{% endif %}">
+
+            <label class="s-label">
+                GLOBAL SEARCH CHANNELS
+                <span style="font-weight:400;text-transform:none;letter-spacing:0">
+                    — optional. If set, search is restricted to these channels. If empty, searches all channels globally (faster).
+                </span>
+            </label>
+
+            <p style="font-size:0.78rem;color:var(--text-sec);margin-bottom:0.75rem">
+                <i class="fa-solid fa-circle-info"
+                   style="color:var(--info,var(--info))"></i>
+                Leave empty to search globally across all channels the account can see.
+                Otherwise enter channel IDs in <code>-100xxxxxxxxxx</code> format only.
+            </p>
+
+            <div class="multi-list-items" id="global_search_channels_items">
+                {% for ch in settings.global_search_channels %}
+                {% set t = (settings.channel_titles or {}).get(ch|string, ch|string) %}
+                <div class="multi-item">
+                    <span class="channel-chip" data-list="global_search_channels" data-id="{{ ch }}" title="{{ ch }}">{{ t }}</span>
+                    <button class="remove-btn"
+                            onclick="removeItem(this)"
+                            title="Remove">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="add-row">
+                <input type="text"
+                       id="global_search_channels_new"
+                       class="s-input"
+                       placeholder="-100xxxxxxxxxx (channels only)"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('global_search_channels')}">
+
+                <button class="add-btn"
+                        onclick="addItem('global_search_channels')">
+                    + Add Channel
+                </button>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+
+
+
+<!-- ── New Content Announcements ──────────────────────────────────── -->
+<div class="settings-card">
+    <h2><i class="fa-solid fa-bullhorn"></i> New Content Announcements</h2>
+
+    <label class="toggle-wrap">
+        <input type="checkbox" class="toggle-input" id="announce_new_content"
+            {% if settings.announce_new_content %}checked{% endif %}
+            onchange="toggleAnnouncementFields()">
+        <span class="toggle-track"></span>
+        <span class="toggle-label">
+            <strong>Announce New Titles</strong>
+            <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                Auto-post a poster card to a Telegram channel the first time a
+                new movie or series is added. Each title is announced only once.
+            </span>
+        </span>
+    </label>
+
+    <div id="announcement-fields"
+         style="{% if not settings.announce_new_content %}display:none{% endif %}">
+        <hr class="divider">
+        <label class="s-label" for="announcement_channel">ANNOUNCEMENT CHANNEL</label>
+        <p style="font-size:0.78rem;color:var(--text-sec);margin-bottom:0.75rem">
+            <i class="fa-solid fa-circle-info"></i>
+            Channel ID only in <code>-100xxxxxxxxxx</code> format (channels only).
+            The bot must be an <strong>admin</strong> in that channel.
+        </p>
+        <div class="multi-item" style="margin-top:0.25rem">
+            {% set ac_t = (settings.channel_titles or {}).get(settings.announcement_channel|string, settings.announcement_channel) %}
+            <input type="text" id="announcement_channel" class="s-input"
+                value="{{ ac_t if settings.announcement_channel else '' }}"
+                data-id="{{ settings.announcement_channel }}"
+                {% if settings.announcement_channel %}readonly{% endif %}
+                placeholder="-100xxxxxxxxxx (channels only)"
+                oninput="if(!this.readOnly){this.dataset.id='';}">
+            <button type="button" class="remove-btn" id="announcement_channel_clear"
+                style="{% if not settings.announcement_channel %}display:none{% endif %}"
+                onclick="clearSingleChannel('announcement_channel')" title="Remove">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+    </div>
+</div>
+
+
+    <!-- ── Skip Channel (metadata failures) ────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-solid fa-inbox"></i> Skip Channel</h2>
+        <label class="s-label" for="skip_channel">SKIP CHANNEL
+            <span style="font-weight:400;text-transform:none;letter-spacing:0">
+                — when a file forwarded to an auth channel fails to index (title, quality or a
+                match is missing/wrong), the bot copies it here with a note describing what to fix.
+                Files sent to this channel are <strong>not</strong> indexed. Only one channel is
+                allowed and the bot must be an <strong>admin</strong> here.</span>
+        </label>
+        <div class="multi-item" style="margin-top:0.25rem">
+            {% set sc_t = (settings.channel_titles or {}).get(settings.skip_channel|string, settings.skip_channel) %}
+            <input type="text" id="skip_channel" class="s-input"
+                value="{{ sc_t if settings.skip_channel else '' }}"
+                data-id="{{ settings.skip_channel }}"
+                {% if settings.skip_channel %}readonly{% endif %}
+                placeholder="-100xxxxxxxxxx (channels only)"
+                oninput="if(!this.readOnly){this.dataset.id='';toggleSkipDeleteField();}">
+            <button type="button" class="remove-btn" id="skip_channel_clear"
+                style="{% if not settings.skip_channel %}display:none{% endif %}"
+                onclick="clearSingleChannel('skip_channel')" title="Remove">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <label class="toggle-wrap" id="delete_on_metadata_fail_wrap" style="margin-top:1.25rem;{% if not settings.skip_channel %}display:none{% endif %}">
+            <input type="checkbox" class="toggle-input" id="delete_on_metadata_fail"
+                {% if settings.delete_on_metadata_fail %}checked{% endif %}>
+            <span class="toggle-track"></span>
+            <span class="toggle-label">
+                <strong>Delete original on metadata fail</strong>
+                <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                    After a failed file is copied to the skip channel, remove it from the main channel.
+                </span>
+            </span>
+        </label>
+    </div>
+
+    <!-- ── Proxy ───────────────────────────────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-solid fa-network-wired"></i> Proxy Settings</h2>
+        <div style="margin-bottom:1rem">
+            <label class="s-label" for="http_proxy_url">HTTP Proxy URL</label>
+            <input type="url" id="http_proxy_url" class="s-input"
+                value="{{ settings.http_proxy_url }}"
+                placeholder="http://user:pass@host:port or leave empty"
+                oninput="toggleMediaflowFields()">
+        </div>
+
+        <div id="mediaflow-wrap" style="{% if not settings.http_proxy_url %}display:none{% endif %}">
+            <label class="toggle-wrap" style="margin-bottom:1rem">
+                <input type="checkbox" class="toggle-input" id="mediaflow_proxy"
+                    {% if settings.mediaflow_proxy %}checked{% endif %}
+                    onchange="toggleMediaflowFields()">
+                <span class="toggle-track"></span>
+                <span class="toggle-label">
+                    <strong>MediaFlow Proxy</strong>
+                    <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                        Wrap streams as <code>/proxy/stream?d=&lt;url&gt;&amp;api_password=&lt;pass&gt;</code>
+                    </span>
+                </span>
+            </label>
+            <div id="mediaflow-password-wrap"
+                 style="margin-bottom:1rem;{% if not settings.mediaflow_proxy %}display:none{% endif %}">
+                <label class="s-label" for="mediaflow_password">MediaFlow API Password</label>
+                <div style="position:relative">
+                    <input type="password" id="mediaflow_password" class="s-input"
+                        value="{{ settings.mediaflow_password }}"
+                        placeholder="api_password" style="padding-right:2.5rem"
+                        autocomplete="off" spellcheck="false">
+                    <button type="button" onclick="toggleMfPwdVisibility()"
+                        style="position:absolute;right:0.75rem;top:50%;transform:translateY(-50%);
+                               background:none;border:none;color:var(--text-sec);cursor:pointer">
+                        <i class="fa-solid fa-eye" id="mf-eye-icon"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <label class="toggle-wrap">
+            <input type="checkbox" class="toggle-input" id="show_proxy_and_non_proxy_both"
+                {% if settings.show_proxy_and_non_proxy_both %}checked{% endif %}>
+            <span class="toggle-track"></span>
+            <span class="toggle-label">
+                <strong>Show Proxy &amp; Non-Proxy Streams</strong>
+                <span style="color:var(--text-sec);font-size:0.8rem;display:block">
+                    Expose both proxied and direct stream links in Stremio
+                </span>
+            </span>
+        </label>
+    </div>
+
+
+    <!-- ── Multi-Token Clients ─────────────────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-brands fa-telegram"></i> Multi-Token Clients</h2>
+        <p style="font-size:0.83rem;color:var(--text-sec);margin-bottom:1rem">
+            Additional bot tokens used for parallel streaming. Changes reinitialise
+            the client pool immediately (no restart needed).
+        </p>
+        <div class="multi-list-items" id="multi_tokens_items">
+            {% for tok in settings.multi_tokens %}
+            <div class="multi-item">
+                <input type="text" class="s-input" value="{{ tok }}" spellcheck="false"
+                    data-list="multi_tokens" placeholder="Bot token">
+                <button class="remove-btn" onclick="removeItem(this)" title="Remove">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="add-row">
+            <input type="text" id="multi_tokens_new" class="s-input" spellcheck="false"
+                placeholder="New bot token (1234567890:ABCdef…)"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('multi_tokens')}">
+            <button class="add-btn" onclick="addItem('multi_tokens')">+ Add Token</button>
+        </div>
+    </div>
+
+    <!-- ── Restart overlay ──────────────────────────────────────────────────── -->
+<div id="restart-overlay" class="rs-overlay" role="alertdialog" aria-modal="true" aria-labelledby="rs-title" aria-describedby="restart-overlay-msg" hidden>
+    <div class="rs-card">
+        <div class="rs-spinner" aria-hidden="true"><i class="fa-solid fa-arrows-rotate"></i></div>
+        <h3 id="rs-title">Restarting the server</h3>
+        <p id="restart-overlay-msg">Pulling the latest code and restarting. This usually takes 10 to 60 seconds.</p>
+        <ol class="rs-steps">
+            <li data-step="0" class="on"><span></span>Restart requested</li>
+            <li data-step="1"><span></span>Server offline</li>
+            <li data-step="2"><span></span>Back online</li>
+        </ol>
+        <p class="rs-note">Keep this page open. It reloads by itself.</p>
+    </div>
+</div>
+<style>
+.rs-overlay { position: fixed; inset: 0; z-index: 9998; display: grid; place-items: center; padding: 16px; background: var(--scrim); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); overscroll-behavior: contain; touch-action: none; animation: rs-fade .2s var(--ease); }
+.rs-overlay[hidden] { display: none; }
+.rs-card { width: min(100%, 400px); padding: 1.75rem 1.5rem 1.4rem; border-radius: var(--radius); background: var(--card); border: 1px solid var(--border); box-shadow: var(--shadow-strong); text-align: center; color: var(--text); }
+.rs-spinner { display: grid; place-items: center; width: 56px; height: 56px; margin: 0 auto 1rem; border-radius: 99px; background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); font-size: 1.35rem; }
+.rs-spinner i { animation: fa-spin 1.1s linear infinite; }
+.rs-overlay.done .rs-spinner { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.rs-overlay.done .rs-spinner i { animation: none; }
+.rs-card h3 { font-size: 1.15rem; font-weight: 600; }
+.rs-card #restart-overlay-msg { margin-top: .4rem; font-size: .9rem; color: var(--text-sec); line-height: 1.5; }
+.rs-steps { list-style: none; margin: 1.25rem 0 0; padding: .9rem 1rem; border-radius: var(--radius-sm); background: var(--bg); border: 1px solid var(--border); display: grid; gap: .55rem; text-align: left; font-size: .88rem; color: var(--text-sec); }
+.rs-steps li { display: flex; align-items: center; gap: .65rem; }
+.rs-steps li span { width: 10px; height: 10px; border-radius: 99px; border: 2px solid var(--border); flex-shrink: 0; transition: all .25s var(--ease); }
+.rs-steps li.on { color: var(--text); }
+.rs-steps li.on span { border-color: var(--primary); background: var(--primary); }
+.rs-steps li.now span { box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 25%, transparent); }
+.rs-note { margin-top: .9rem; font-size: .78rem; color: var(--text-sec); }
+@keyframes rs-fade { from { opacity: 0; } }
+html.rs-lock, html.rs-lock body { overflow: hidden !important; }
+</style>
+
+<!-- Floating save (mobile) -->
+<div class="fixed right-4 md:hidden z-30" style="bottom:calc(84px + env(safe-area-inset-bottom))">
+    <button onclick="saveSettings()" aria-label="Save settings" data-shortcut-save
+        class="btn-primary w-14 h-14" style="box-shadow:0 8px 24px rgba(0,0,0,.35)">
+        <i class="fa-solid fa-floppy-disk text-lg"></i>
+    </button>
 </div>
 
 <script>
-/* ── Input registry ─────────────────────────────────────────────────────── */
-const INPUTS = {
-  admin_username: 'admin_username',
-  admin_password: 'admin_password',
-  session_secret: 'session_secret',
-  replace_mode: 'replace_mode',
-  hide_catalog: 'hide_catalog',
-  auth_channels: 'auth_channels',
-  manual_channels: 'manual_channels',
-  anime_channels: 'anime_channels',
-  global_search_channels: 'global_search_channels',
-  global_search: 'global_search',
-  duplicate_protection: 'duplicate_protection',
-  delete_on_metadata_fail: 'delete_on_metadata_fail',
-  better_poster_enabled: 'better_poster_enabled',
-  better_poster: 'better_poster',
-  announce_new_content: 'announce_new_content',
-  announcement_channel: 'announcement_channel',
-  skip_channel: 'skip_channel',
-  show_proxy_and_non_proxy_both: 'show_proxy_and_non_proxy_both',
-  http_proxy_url: 'http_proxy_url',
-  rpdb_enabled: 'rpdb_enabled',
-  rpdb_api_key: 'rpdb_api_key',
-  stream_formatter: 'stream_formatter',
-  formatter_name: 'formatter_name',
-  formatter_description: 'formatter_description',
-  fanart_enabled: 'fanart_enabled',
-  fanart_api_key: 'fanart_api_key',
-  fanart_low_res_poster: 'fanart_low_res_poster',
-  fanart_shuffle: 'fanart_shuffle',
-  fanart_shuffle_interval: 'fanart_shuffle_interval',
-  content_requests_enabled: 'content_requests_enabled',
-  content_requests_beta_only: 'content_requests_beta_only',
-  maintenance_mode: 'maintenance_mode',
-  subscription: 'subscription',
-  subscription_group_id: 'subscription_group_id',
-  approver_ids: 'approver_ids',
-  payment_instructions: 'payment_instructions',
-  payment_qr_url: 'payment_qr_url',
-};
-
-// Formatter templates must keep their raw newlines/indentation — the AIOStreams
-// syntax is whitespace-sensitive, so they bypass the line-splitting TEXTAREA path.
-const RAW_TEXT_KEYS = new Set(['formatter_name', 'formatter_description']);
-
-function collectInputs() {
-  const out = {};
-  for (const [key, id] of Object.entries(INPUTS)) {
-    const el = document.getElementById(id);
-    if (!el) continue;
-    if (el.type === 'checkbox') out[key] = el.checked;
-    else if (el.type === 'number') out[key] = el.value === '' ? null : Number(el.value);
-    else if (RAW_TEXT_KEYS.has(key)) out[key] = el.value;
-    else if (el.tagName === 'TEXTAREA') out[key] = el.value.split('\n').map(s => s.trim()).filter(Boolean);
-    else out[key] = el.value.trim();
-  }
-  if (out.admin_password === '') delete out.admin_password;
-  if (out.session_secret === '') delete out.session_secret;
-  return out;
+/* ── Duplicate protection only applies when Replace Mode is off ───────── */
+function toggleDuplicateProtection() {
+    const replaceOn = document.getElementById('replace_mode').checked;
+    const wrap = document.getElementById('dup-protect-wrap');
+    const input = document.getElementById('duplicate_protection');
+    input.disabled = replaceOn;
+    wrap.style.opacity = replaceOn ? '0.5' : '';
+    wrap.style.pointerEvents = replaceOn ? 'none' : '';
 }
 
-const saveLabel = document.getElementById('save-label');
-const saveStatus = document.getElementById('save-status');
-
-async function saveSettings() {
-  const btn = document.getElementById('save-btn');
-  btn.disabled = true;
-  saveLabel.textContent = 'Saving…';
-  saveLabel.style.color = 'var(--text-sec)';
-  saveStatus.textContent = '';
-  try {
-    const res = await fetch('/api/admin/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(collectInputs()),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    saveLabel.textContent = 'Saved ✓';
-    saveLabel.style.color = '#22c55e';
-    const notes = Object.values(data.results || {}).filter(Boolean).join(' | ');
-    if (notes) saveStatus.textContent = notes;
-  } catch (e) {
-    saveLabel.textContent = 'Failed';
-    saveLabel.style.color = '#ef4444';
-    saveStatus.textContent = e.message;
-  } finally {
-    btn.disabled = false;
-  }
+/* ── Toggle sub-fields visibility ─────────────────────────────────────── */
+function toggleSubFields() {
+    const enabled = document.getElementById('subscription').checked;
+    document.getElementById('sub-fields').style.display = enabled ? '' : 'none';
 }
 
-/* ── Stream formatter ───────────────────────────────────────────────────── */
+function toggleGlobalSearchFields() {
+    const enabled = document.getElementById('global_search').checked;
+    const fields = document.getElementById('global-search-fields');
+
+    if (fields) {
+        fields.style.display = enabled ? '' : 'none';
+    }
+}
+
+function toggleAnnouncementFields() {
+    const enabled = document.getElementById('announce_new_content').checked;
+    const fields = document.getElementById('announcement-fields');
+    if (fields) {
+        fields.style.display = enabled ? '' : 'none';
+    }
+}
+
+function toggleMediaflowFields() {
+    const hasProxy = document.getElementById('http_proxy_url').value.trim() !== '';
+    const wrap = document.getElementById('mediaflow-wrap');
+    const toggle = document.getElementById('mediaflow_proxy');
+    if (wrap) wrap.style.display = hasProxy ? '' : 'none';
+    if (!hasProxy && toggle) toggle.checked = false;
+    const pwdWrap = document.getElementById('mediaflow-password-wrap');
+    if (pwdWrap) pwdWrap.style.display = (hasProxy && toggle.checked) ? '' : 'none';
+}
+
+function toggleMfPwdVisibility() {
+    const input = document.getElementById('mediaflow_password');
+    const icon = document.getElementById('mf-eye-icon');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.className = 'fa-solid fa-eye-slash';
+    } else {
+        input.type = 'password';
+        icon.className = 'fa-solid fa-eye';
+    }
+}
+
+function toggleSkipDeleteField() {
+    const el = document.getElementById('skip_channel');
+    const hasChannel = !!(el && (el.dataset.id || extractChannelId(el.value.trim())));
+    const wrap = document.getElementById('delete_on_metadata_fail_wrap');
+    if (wrap) {
+        wrap.style.display = hasChannel ? '' : 'none';
+    }
+    if (!hasChannel) {
+        document.getElementById('delete_on_metadata_fail').checked = false;
+    }
+}
+
+function togglePosterProvider(which) {
+    const els = {
+        better: document.getElementById('better_poster_enabled'),
+        rpdb: document.getElementById('rpdb_enabled'),
+        fanart: document.getElementById('fanart_enabled'),
+    };
+    if (which && els[which] && els[which].checked) {
+        for (const k in els) if (k !== which) els[k].checked = false;
+    }
+    document.getElementById('better-poster-wrap').style.display = els.better.checked ? '' : 'none';
+    document.getElementById('rpdb-wrap').style.display = els.rpdb.checked ? '' : 'none';
+    document.getElementById('fanart-wrap').style.display = els.fanart.checked ? '' : 'none';
+}
+
 const FORMATTER_PRESETS = {{ formatter_presets|tojson }};
 let previewTimer = null;
 
 function toggleFormatter() {
-  const v = document.getElementById('stream_formatter').value;
-  document.getElementById('formatter-custom-wrap').style.display = v === 'custom' ? '' : 'none';
-  document.getElementById('formatter-preview-wrap').style.display = v === 'default' ? 'none' : '';
-  const name = document.getElementById('formatter_name');
-  if (v === 'custom' && !name.value.trim()) {
-    name.value = FORMATTER_PRESETS.gdrive.name;
-    document.getElementById('formatter_description').value = FORMATTER_PRESETS.gdrive.description;
-  }
-  schedulePreview();
+    const v = document.getElementById('stream_formatter').value;
+    document.getElementById('formatter-custom-wrap').style.display = v === 'custom' ? '' : 'none';
+    document.getElementById('formatter-preview-wrap').style.display = v === 'default' ? 'none' : '';
+    const name = document.getElementById('formatter_name');
+    if (v === 'custom' && !name.value.trim()) {
+        name.value = FORMATTER_PRESETS.gdrive.name;
+        document.getElementById('formatter_description').value = FORMATTER_PRESETS.gdrive.description;
+    }
+    schedulePreview();
 }
 
 function copyPreset(sel) {
-  const p = FORMATTER_PRESETS[sel.value];
-  if (p && confirm('Replace the custom templates with the ' + sel.value + ' preset?')) {
-    document.getElementById('formatter_name').value = p.name;
-    document.getElementById('formatter_description').value = p.description;
-    schedulePreview();
-  }
-  sel.value = '';
+    const p = FORMATTER_PRESETS[sel.value];
+    if (p && confirm('Replace the custom templates with the ' + sel.value + ' preset?')) {
+        document.getElementById('formatter_name').value = p.name;
+        document.getElementById('formatter_description').value = p.description;
+        schedulePreview();
+    }
+    sel.value = '';
 }
 
 function schedulePreview() {
-  clearTimeout(previewTimer);
-  previewTimer = setTimeout(renderPreview, 300);
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(renderPreview, 300);
 }
 
 async function renderPreview() {
-  const preset = document.getElementById('stream_formatter').value;
-  if (preset === 'default') return;
-  try {
-    const res = await fetch('/api/admin/settings/formatter-preview', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        preset,
-        name: document.getElementById('formatter_name').value,
-        description: document.getElementById('formatter_description').value,
-        filename: document.getElementById('formatter_sample').value,
-      }),
-    });
-    const data = await res.json();
-    document.getElementById('formatter-preview-name').textContent = data.name || '';
-    document.getElementById('formatter-preview-desc').textContent = data.description || '';
-  } catch (e) {
-    document.getElementById('formatter-preview-desc').textContent = 'Preview failed.';
-  }
+    const preset = document.getElementById('stream_formatter').value;
+    if (preset === 'default') return;
+    try {
+        const res = await fetch('/api/admin/settings/formatter-preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                preset,
+                name: document.getElementById('formatter_name').value,
+                description: document.getElementById('formatter_description').value,
+                filename: document.getElementById('formatter_sample').value,
+            }),
+        });
+        const data = await res.json();
+        document.getElementById('formatter-preview-name').textContent = data.name || '';
+        document.getElementById('formatter-preview-desc').textContent = data.description || '';
+    } catch (e) {
+        document.getElementById('formatter-preview-desc').textContent = 'Preview failed.';
+    }
 }
 
 document.addEventListener('DOMContentLoaded', schedulePreview);
 
-/* ── System stats ───────────────────────────────────────────────────────── */
-const STAT_FIELDS = [
-  { key: 'movies', label: 'Movies' },
-  { key: 'tv_shows', label: 'TV Shows' },
-  { key: 'total_databases', label: 'Databases' },
-  { key: 'storage', label: 'Storage' },
-  { key: 'connected_bots', label: 'Active Bots' },
-  { key: 'version', label: 'Version' },
-];
-
-function formatBytes(bytes) {
-  if (bytes === undefined || bytes === null || isNaN(bytes)) return '—';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  let i = 0;
-  while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
-  return `${bytes.toFixed(bytes >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+function toggleFanartShuffle() {
+    const on = document.getElementById('fanart_shuffle').checked;
+    document.getElementById('fanart-shuffle-wrap').style.display = on ? '' : 'none';
 }
 
-const statsGrid = document.getElementById('stats-grid');
-
-function renderStats(data) {
-  statsGrid.innerHTML = STAT_FIELDS.map(f => {
-    let v;
-    if (f.key === 'storage') {
-      v = formatBytes((data.databases || []).reduce((s, d) => s + (d.dataSize || 0), 0));
-    } else if (f.key === 'version') {
-      v = data.version || '—';
+/* ── Password visibility ──────────────────────────────────────────────── */
+function togglePwdVisibility() {
+    const input = document.getElementById('admin_password');
+    const icon  = document.getElementById('eye-icon');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.className = 'fa-solid fa-eye-slash';
     } else {
-      v = data[f.key] ?? '—';
+        input.type = 'password';
+        icon.className = 'fa-solid fa-eye';
     }
-    return `<div class="stat-box"><div class="v">${v}</div><div class="l">${f.label}</div></div>`;
-  }).join('');
+}
+
+/* ── Session secret generator ─────────────────────────────────────────── */
+function generateSessionSecret() {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    const input = document.getElementById('session_secret');
+    input.value = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    input.type = 'text';
+}
+
+/* ── Multi-value list helpers ─────────────────────────────────────────── */
+function authRowHTML(id, title, isAnime) {
+    const display = title ? escapeHtmlAttr(title) : escapeHtmlAttr(id);
+    return `
+        <span class="channel-chip" data-list="auth_channels" data-id="${escapeHtmlAttr(id)}" title="${escapeHtmlAttr(id)}">${display}</span>
+        <label class="anime-check ${isAnime ? 'is-anime' : ''}" title="Mark as anime channel — uses Kitsu → TVDB → TMDB → Cinemeta">
+            <input type="checkbox" class="anime-toggle" ${isAnime ? 'checked' : ''} onchange="syncAnimeChip(this)">
+            <span>Anime</span>
+        </label>
+        <button class="remove-btn" onclick="removeItem(this)" title="Remove">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    `;
+}
+
+function syncAnimeChip(cb) {
+    const chip = cb.closest('.anime-check');
+    if (chip) chip.classList.toggle('is-anime', cb.checked);
+}
+
+function isValidChannelId(value) {
+    return /^-100\d{6,}$/.test(value);
+}
+
+function addItem(listKey) {
+    const newInput = document.getElementById(listKey + '_new');
+    const value = newInput.value.trim();
+    if (!value) return;
+
+    const channelLists = ['auth_channels', 'global_search_channels', 'manual_channels'];
+    if (channelLists.includes(listKey) && !isValidChannelId(value)) {
+        alert('Only channel IDs in -100xxxxxxxxxx format are accepted (channels only).');
+        return;
+    }
+
+    const existing = collectList(listKey);
+    if (existing.includes(value)) {
+        alert('This channel is already added.');
+        return;
+    }
+
+    const container = document.getElementById(listKey + '_items');
+    const item = document.createElement('div');
+
+    if (listKey === 'auth_channels') {
+        item.className = 'multi-item auth-item';
+        item.innerHTML = authRowHTML(value, value, false);
+    } else if (channelLists.includes(listKey)) {
+        item.className = 'multi-item';
+        item.innerHTML = channelChipHTML(listKey, value, value);
+    } else {
+        const isNumeric = listKey === 'approver_ids';
+        item.className = 'multi-item';
+        item.innerHTML = `
+        <input type="${isNumeric ? 'number' : 'text'}"
+               class="s-input"
+               value="${escapeHtmlAttr(value)}"
+               data-list="${listKey}">
+        <button class="remove-btn" onclick="removeItem(this)" title="Remove">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    `;
+    }
+
+    container.appendChild(item);
+    newInput.value = '';
+    newInput.focus();
+}
+
+function channelChipHTML(listKey, id, title) {
+    const display = title ? escapeHtmlAttr(title) : escapeHtmlAttr(id);
+    return `
+        <span class="channel-chip" data-list="${listKey}" data-id="${escapeHtmlAttr(id)}" title="${escapeHtmlAttr(id)}">${display}</span>
+        <button class="remove-btn" onclick="removeItem(this)" title="Remove">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    `;
+}
+
+function extractChannelId(raw) {
+    if (!raw) return '';
+    const m = String(raw).match(/-100\d+/);
+    return m ? m[0] : raw.trim();
+}
+
+function clearSingleChannel(fieldId) {
+    const el = document.getElementById(fieldId);
+    if (!el) return;
+    el.value = '';
+    el.dataset.id = '';
+    el.readOnly = false;
+    const btn = document.getElementById(fieldId + '_clear');
+    if (btn) btn.style.display = 'none';
+    if (fieldId === 'skip_channel') toggleSkipDeleteField();
+}
+
+function collectAnimeChannels() {
+    const container = document.getElementById('auth_channels_items');
+    if (!container) return [];
+    const out = [];
+    container.querySelectorAll('.multi-item').forEach(row => {
+        const toggle = row.querySelector('.anime-toggle');
+        const el = row.querySelector('[data-list="auth_channels"]');
+        if (toggle && toggle.checked && el) {
+            const id = el.dataset.id || extractChannelId(el.value || el.textContent);
+            if (id) out.push(id);
+        }
+    });
+    return out;
+}
+
+function removeItem(btn) {
+    btn.closest('.multi-item').remove();
+}
+
+function collectList(listKey) {
+    const container = document.getElementById(listKey + '_items');
+    if (!container) return [];
+    return [...container.querySelectorAll('[data-list="' + listKey + '"]')]
+        .map(i => {
+            if (i.dataset.id) return i.dataset.id.trim();
+            if (i.value !== undefined) return extractChannelId(i.value);
+            return extractChannelId(i.textContent || '');
+        })
+        .filter(Boolean);
+}
+
+/* ── Save ──────────────────────────────────────────────────────────────── */
+
+async function saveSettings() {
+    const btn   = document.getElementById('save-btn');
+    const label = document.getElementById('save-label');
+
+    const channelFields = [
+        ...collectList('auth_channels'),
+        ...collectList('global_search_channels'),
+        ...collectList('manual_channels'),
+    ];
+    const acEl = document.getElementById('announcement_channel');
+    const scEl = document.getElementById('skip_channel');
+    const acId = (acEl.dataset.id || extractChannelId(acEl.value.trim()));
+    const scId = (scEl.dataset.id || extractChannelId(scEl.value.trim()));
+    if (acId) channelFields.push(acId);
+    if (scId) channelFields.push(scId);
+    for (const c of channelFields) {
+        if (!isValidChannelId(c)) {
+            alert('Only channel IDs in -100xxxxxxxxxx format are accepted: ' + c);
+            return;
+        }
+    }
+    if (acEl.value.trim() && !acId) {
+        alert('Announcement channel must be -100xxxxxxxxxx format.');
+        return;
+    }
+    if (scEl.value.trim() && !scId) {
+        alert('Skip channel must be -100xxxxxxxxxx format.');
+        return;
+    }
+
+    btn.disabled  = true;
+    label.textContent = 'Saving…';
+
+    const payload = {
+        replace_mode:                  document.getElementById('replace_mode').checked,
+        duplicate_protection:          document.getElementById('duplicate_protection').checked,
+        hide_catalog:                  document.getElementById('hide_catalog').checked,
+        admin_username:                document.getElementById('admin_username').value.trim(),
+        admin_password:                document.getElementById('admin_password').value,  // blank = keep
+        session_secret:                document.getElementById('session_secret').value,  // blank = keep
+        tmdb_api:                      document.getElementById('tmdb_api').value.trim(),
+        tvdb_api:                      (document.getElementById('tvdb_api') || {}).value?.trim() || '',
+        base_url:                      document.getElementById('base_url').value.trim(),
+        better_poster_enabled:         document.getElementById('better_poster_enabled').checked,
+        better_poster:                 document.getElementById('better_poster').value.trim(),
+        rpdb_enabled:                  document.getElementById('rpdb_enabled').checked,
+        rpdb_api_key:                  document.getElementById('rpdb_api_key').value.trim(),
+        stream_formatter:              document.getElementById('stream_formatter').value,
+        formatter_name:                document.getElementById('formatter_name').value,
+        formatter_description:         document.getElementById('formatter_description').value,
+        fanart_enabled:                document.getElementById('fanart_enabled').checked,
+        fanart_api_key:                document.getElementById('fanart_api_key').value.trim(),
+        fanart_shuffle:                document.getElementById('fanart_shuffle').checked,
+        fanart_shuffle_interval:       parseInt(document.getElementById('fanart_shuffle_interval').value, 10) || 0,
+        fanart_low_res_poster:         document.getElementById('fanart_low_res_poster').checked,
+        auth_channels:                 collectList('auth_channels'),
+        anime_channels:                collectAnimeChannels(),
+        subscription:                  document.getElementById('subscription').checked,
+        subscription_group_id:         parseInt(document.getElementById('subscription_group_id').value || '0', 10),
+        payment_instructions:          document.getElementById('payment_instructions').value.trim(),
+        payment_qr_url:                document.getElementById('payment_qr_url').value.trim(),
+        approver_ids:                  collectList('approver_ids').map(Number),
+        http_proxy_url:                document.getElementById('http_proxy_url').value.trim(),
+        show_proxy_and_non_proxy_both: document.getElementById('show_proxy_and_non_proxy_both').checked,
+        mediaflow_proxy:               document.getElementById('mediaflow_proxy').checked,
+        mediaflow_password:            document.getElementById('mediaflow_password').value,
+        multi_tokens:                  collectList('multi_tokens'),
+        global_search:                 document.getElementById('global_search').checked,
+        content_requests_enabled:      document.getElementById('content_requests_enabled').checked,
+        content_requests_beta_only:    document.getElementById('content_requests_beta_only').checked,
+        global_search_channels:        collectList('global_search_channels'),
+        manual_channels:               collectList('manual_channels'),
+        announce_new_content:          document.getElementById('announce_new_content').checked,
+        announcement_channel:          (function(){const el=document.getElementById('announcement_channel');return el.dataset.id||extractChannelId(el.value.trim());})(),
+        skip_channel:                  (function(){const el=document.getElementById('skip_channel');return el.dataset.id||extractChannelId(el.value.trim());})(),
+        delete_on_metadata_fail:       document.getElementById('delete_on_metadata_fail').checked,
+    };
+    const dsEl = document.getElementById('default_streaming');
+    if (dsEl) payload.default_streaming = dsEl.checked ? 'userbot' : 'bots';
+
+    try {
+        const res  = await fetch('/api/admin/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+            showToast('Settings saved successfully!', 'success', 'Saved');
+
+            // Show reinit notices
+            const reinit = data.reinit || {};
+            for (const [subsystem, msg] of Object.entries(reinit)) {
+                showToast(`${capitalize(subsystem)}: ${msg}`, 'info');
+            }
+
+            // Pull the freshly-saved state back from the server and patch
+            // the UI in place — no full page reload needed. This also
+            // picks up server-computed bits the form can't know on its
+            // own (e.g. each database's live connection-status dot).
+            await refreshSettingsFromServer();
+        } else {
+            showToast(data.detail || 'Save failed', 'error', 'Error');
+        }
+    } catch (err) {
+        showToast('Network error — could not reach server.', 'error', 'Error');
+        console.error(err);
+    } finally {
+        btn.disabled  = false;
+        label.textContent = 'Save Settings';
+    }
+}
+
+/* ── Backup & Restore ───────────────────────────────────────────────────── */
+async function restoreBackup(input) {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    if (!confirm('Restore this backup? It will replace your catalogs, plans and tokens, and reconnect databases / bot tokens.')) return;
+
+    const btn = document.getElementById('restore-btn');
+    const status = document.getElementById('restore-status');
+    if (btn) btn.disabled = true;
+    if (status) {
+        status.style.display = 'flex';
+        status.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Importing — connecting databases and starting clients…';
+    }
+    try {
+        const payload = JSON.parse(await file.text());
+        const res = await fetch('/api/admin/backup/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Restore failed');
+        if (status) status.innerHTML = '<i class="fa-solid fa-circle-check" style="color:var(--ok)"></i> Imported successfully — reloading…';
+        showToast(data.message || 'Backup restored.', 'success', 'Restored');
+        setTimeout(() => location.reload(), 1500);
+    } catch (err) {
+        if (status) status.innerHTML = '<i class="fa-solid fa-circle-xmark" style="color:var(--danger)"></i> ' + escapeHtmlAttr(err.message || 'Invalid backup file.');
+        showToast(err.message || 'Invalid backup file.', 'error', 'Error');
+        if (btn) btn.disabled = false;
+    }
+}
+
+/* ── Utilities ─────────────────────────────────────────────────────────── */
+function escapeHtmlAttr(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function capitalize(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1).replace(/_/g, ' ');
+}
+
+/* ── Post-save refresh, no page reload ──────────────────────────────────── */
+async function refreshSettingsFromServer() {
+    try {
+        const res = await fetch('/api/admin/settings');
+        if (!res.ok) return;
+        const data = await res.json();
+        renderSettings(data.settings || {});
+    } catch (err) {
+        console.error('Failed to refresh settings UI:', err);
+    }
+}
+
+function renderSettings(s) {
+    // Toggles
+    document.getElementById('replace_mode').checked = !!s.replace_mode;
+    document.getElementById('duplicate_protection').checked = !!s.duplicate_protection;
+    toggleDuplicateProtection();
+    document.getElementById('hide_catalog').checked = !!s.hide_catalog;
+    document.getElementById('subscription').checked = !!s.subscription;
+    document.getElementById('show_proxy_and_non_proxy_both').checked = !!s.show_proxy_and_non_proxy_both;
+    document.getElementById('global_search').checked = !!s.global_search;    document.getElementById('content_requests_enabled').checked = !!s.content_requests_enabled;
+    document.getElementById('content_requests_beta_only').checked = !!s.content_requests_beta_only;
+
+    const dsEl = document.getElementById('default_streaming');
+    if (dsEl) dsEl.checked = s.default_streaming === 'userbot';
+    document.getElementById('announce_new_content').checked = !!s.announce_new_content;
+    document.getElementById('delete_on_metadata_fail').checked = !!s.delete_on_metadata_fail;
+    toggleSubFields();
+    toggleGlobalSearchFields();
+    toggleAnnouncementFields();
+
+    // Plain text/number fields
+    document.getElementById('admin_username').value = s.admin_username || '';
+    document.getElementById('admin_password').value = '';  // never re-fill password
+    document.getElementById('tmdb_api').value = s.tmdb_api || '';
+    if (document.getElementById('tvdb_api')) document.getElementById('tvdb_api').value = s.tvdb_api || '';
+    document.getElementById('base_url').value = s.base_url || '';
+    document.getElementById('better_poster_enabled').checked = !!s.better_poster_enabled;
+    document.getElementById('better_poster').value = s.better_poster || '';
+    document.getElementById('rpdb_enabled').checked = !!s.rpdb_enabled;
+    document.getElementById('rpdb_api_key').value = s.rpdb_api_key || '';
+    document.getElementById('stream_formatter').value = s.stream_formatter || 'default';
+    document.getElementById('formatter_name').value = s.formatter_name || '';
+    document.getElementById('formatter_description').value = s.formatter_description || '';
+    toggleFormatter();
+    document.getElementById('fanart_enabled').checked = !!s.fanart_enabled;
+    document.getElementById('fanart_api_key').value = s.fanart_api_key || '';
+    document.getElementById('fanart_shuffle').checked = !!s.fanart_shuffle;
+    document.getElementById('fanart_shuffle_interval').value = (s.fanart_shuffle_interval ?? 5);
+    document.getElementById('fanart_low_res_poster').checked = (s.fanart_low_res_poster ?? true);
+    togglePosterProvider();
+    toggleFanartShuffle();
+    document.getElementById('subscription_group_id').value = s.subscription_group_id || 0;
+    document.getElementById('http_proxy_url').value = s.http_proxy_url || '';
+    document.getElementById('mediaflow_proxy').checked = !!s.mediaflow_proxy;
+    document.getElementById('mediaflow_password').value = s.mediaflow_password || '';
+    toggleMediaflowFields();
+
+    const titles = s.channel_titles || {};
+    rebuildAuthChannels(s.auth_channels, s.anime_channels, titles);
+    rebuildSimpleList('approver_ids_items', s.approver_ids, 'number');
+    rebuildSimpleList('multi_tokens_items', s.multi_tokens, 'text');
+    rebuildSimpleList('global_search_channels_items', s.global_search_channels, 'text', titles);
+    rebuildSimpleList('manual_channels_items', s.manual_channels, 'text', titles);
+
+    const ac = document.getElementById('announcement_channel');
+    if (ac) {
+        const acid = s.announcement_channel || '';
+        ac.dataset.id = acid;
+        ac.value = acid ? (titles[acid] || acid) : '';
+        ac.readOnly = !!acid;
+        const acBtn = document.getElementById('announcement_channel_clear');
+        if (acBtn) acBtn.style.display = acid ? '' : 'none';
+    }
+    const sc = document.getElementById('skip_channel');
+    if (sc) {
+        const scid = s.skip_channel || '';
+        sc.dataset.id = scid;
+        sc.value = scid ? (titles[scid] || scid) : '';
+        sc.readOnly = !!scid;
+        const scBtn = document.getElementById('skip_channel_clear');
+        if (scBtn) scBtn.style.display = scid ? '' : 'none';
+    }
+    toggleSkipDeleteField();
+
+}
+
+function rebuildSimpleList(containerId, values, inputType, titles) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const listKey = containerId.replace('_items', '');
+    const channelLists = ['global_search_channels', 'manual_channels'];
+    titles = titles || {};
+
+    container.innerHTML = '';
+    (values || []).forEach(val => {
+        const item = document.createElement('div');
+        item.className = 'multi-item';
+        if (channelLists.includes(listKey)) {
+            const id = String(val);
+            item.innerHTML = channelChipHTML(listKey, id, titles[id] || id);
+        } else {
+            item.innerHTML = `
+                <input type="${inputType}" class="s-input"
+                       value="${escapeHtmlAttr(val)}" data-list="${listKey}">
+                <button class="remove-btn" onclick="removeItem(this)" title="Remove">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            `;
+        }
+        container.appendChild(item);
+    });
+}
+
+function rebuildAuthChannels(values, animeValues, titles) {
+    const container = document.getElementById('auth_channels_items');
+    if (!container) return;
+    const animeNorm = (animeValues || []).map(v => String(v).replace(/^-100/, ''));
+    titles = titles || {};
+    container.innerHTML = '';
+    (values || []).forEach(val => {
+        const id = String(val);
+        const isAnime = animeNorm.includes(id.replace(/^-100/, ''));
+        const item = document.createElement('div');
+        item.className = 'multi-item auth-item';
+        item.innerHTML = authRowHTML(id, titles[id] || id, isAnime);
+        container.appendChild(item);
+    });
+}
+
+
+/* ── System & Maintenance ───────────────────────────────────────────────── */
+const STAT_FIELDS = [
+    ['movies', 'Movies'], ['tv_shows', 'TV Shows'], ['episodes', 'Episodes'],
+    ['streams', 'Streams'], ['db_size', 'DB Size'],
+    ['auth_channels', 'AUTH Channels'], ['version', 'Version'],
+];
+let logLiveTimer = null;
+
+/* Spin the clicked refresh button's icon while an async action runs */
+function spinIcon(btn, on) {
+    const icon = btn && btn.querySelector('i');
+    if (icon) icon.classList.toggle('fa-spin', on);
 }
 
 async function loadDbStats(btn) {
-  if (btn) { btn.disabled = true; const ic = btn.querySelector('i'); if (ic) ic.classList.add('fa-spin'); }
-  try {
-    const res = await fetch('/api/system/stats');
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    renderStats(data);
-  } catch (e) {
-    statsGrid.innerHTML = `<div class="stat-box" style="grid-column:1/-1"><div class="v">Error</div><div class="l">${e.message}</div></div>`;
-  } finally {
-    if (btn) { btn.disabled = false; const ic = btn.querySelector('i'); if (ic) ic.classList.remove('fa-spin'); }
-  }
-}
-
-/* ── Live logs ──────────────────────────────────────────────────────────── */
-const logView = document.getElementById('log-view');
-let logTimer = null;
-
-async function fetchLogs() {
-  try {
-    const res = await fetch('/api/admin/logs');
-    const data = await res.json();
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const text = data.text || '';
-    const atBottom = logView.scrollHeight - logView.scrollTop - logView.clientHeight < 40;
-    logView.textContent = text;
-    if (atBottom) logView.scrollTop = logView.scrollHeight;
-  } catch (_) {}
-}
-
-function toggleLogs() {
-  if (document.getElementById('log-live-toggle').checked) {
-    fetchLogs();
-    logTimer = setInterval(fetchLogs, 2500);
-  } else {
-    clearInterval(logTimer);
-    logTimer = null;
-  }
-}
-
-/* ── Restart ────────────────────────────────────────────────────────────── */
-async function restartApp() {
-  const overlay = document.getElementById('restart-overlay');
-  const msg = document.getElementById('restart-overlay-msg');
-  const btn = document.getElementById('restart-btn');
-  btn.disabled = true;
-  overlay.classList.add('show');
-  msg.textContent = 'Restarting server…';
-  try {
-    let mark = null;
+    const grid = document.getElementById('stats-grid');
+    spinIcon(btn, true);
     try {
-      const pre = await (await fetch('/api/admin/health')).json();
-      mark = pre.generated_at || null;
-    } catch (_) {}
-    await fetch('/api/admin/restart', { method: 'POST' });
-    let back = false;
-    let sawFailure = false;
-    for (let i = 0; i < 120; i++) {
-      await new Promise(r => setTimeout(r, 1500));
-      try {
-        const h = await (await fetch('/api/admin/health')).json();
-        if (sawFailure) { back = true; break; }
-        if (h.generated_at && mark && h.generated_at !== mark) { back = true; break; }
-      } catch (_) { sawFailure = true; }
+        const res = await fetch('/api/admin/stats');
+        const data = await res.json();
+        if (data.status !== 'success') throw new Error(data.message || 'failed');
+        const s = data.data;
+        grid.innerHTML = STAT_FIELDS.map(([k, label]) =>
+            `<div class="stat-box"><div class="v">${escapeHtml(String(s[k] ?? '—'))}</div><div class="l">${label}</div></div>`
+        ).join('');
+    } catch (e) {
+        grid.innerHTML = `<div class="hint" style="grid-column:1/-1;color:var(--danger)">Failed to load stats.</div>`;
+    } finally {
+        spinIcon(btn, false);
     }
-    msg.textContent = back ? 'Server is back online. Reloading…' : 'Timed out waiting. Reloading…';
-  } catch (e) {
-    msg.textContent = `Restart request failed: ${e.message}`;
-    btn.disabled = false;
-    setTimeout(() => overlay.classList.remove('show'), 2500);
-    return;
-  }
-  setTimeout(() => location.reload(), 1600);
 }
 
-/* ── Telegram user session ──────────────────────────────────────────────── */
-let sessLoginId = null;
-
-function sessSetMsg(elId, text, ok) {
-  const el = document.getElementById(elId);
-  el.textContent = text || '';
-  el.className = 'sess-msg' + (ok ? ' ok' : (text ? ' err' : ''));
-}
-
-function sessShowStep(step) {
-  document.querySelectorAll('.sess-step').forEach(s => s.classList.remove('active'));
-  document.getElementById(`sess-step-${step}`).classList.add('active');
-  sessSetMsg('sess-msg', '', true);
-  sessSetMsg('sess-msg-code', '', true);
-  sessSetMsg('sess-msg-pass', '', true);
-}
-
-async function sessSendCode() {
-  const phone = document.getElementById('sess-phone-input').value.trim();
-  if (!phone) { sessSetMsg('sess-msg', 'Enter a phone number with country code.', false); return; }
-  sessSetMsg('sess-msg', 'Sending code…', true);
-  try {
-    const res = await fetch('/api/admin/settings/session/send-code', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    sessLoginId = data.login_id;
-    sessShowStep('code');
-    document.getElementById('sess-code-input').focus();
-  } catch (e) {
-    sessSetMsg('sess-msg', e.message, false);
-  }
-}
-
-async function sessVerifyCode() {
-  const code = document.getElementById('sess-code-input').value.trim();
-  if (!code) { sessSetMsg('sess-msg-code', 'Enter the code you received.', false); return; }
-  sessSetMsg('sess-msg-code', 'Verifying…', true);
-  try {
-    const res = await fetch('/api/admin/settings/session/verify-code', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ login_id: sessLoginId, code }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    if (data.status === 'password_needed' || data.password_needed) {
-      sessShowStep('pass');
-      document.getElementById('sess-pass-input').focus();
-    } else {
-      await sessLoadStatus(true);
+async function loadLogs(btn) {
+    const view = document.getElementById('log-view');
+    spinIcon(btn, true);
+    try {
+        const res = await fetch('/api/admin/logs');
+        const data = await res.json();
+        if (data.status === 'success') {
+            const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 40;
+            view.textContent = data.log || '(log is empty)';
+            if (atBottom) view.scrollTop = view.scrollHeight;
+        } else {
+            view.textContent = data.message || 'Could not read log.';
+        }
+    } catch (e) {
+        view.textContent = 'Network error while loading logs.';
+    } finally {
+        spinIcon(btn, false);
     }
-  } catch (e) {
-    sessSetMsg('sess-msg-code', e.message, false);
-  }
 }
 
-async function sessVerifyPassword() {
-  const password = document.getElementById('sess-pass-input').value;
-  if (!password) { sessSetMsg('sess-msg-pass', 'Enter the two-step verification password.', false); return; }
-  sessSetMsg('sess-msg-pass', 'Verifying…', true);
-  try {
-    const res = await fetch('/api/admin/settings/session/verify-password', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ login_id: sessLoginId, password }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    await sessLoadStatus(true);
-  } catch (e) {
-    sessSetMsg('sess-msg-pass', e.message, false);
-  }
+function toggleLiveLogs() {
+    const on = document.getElementById('log-live-toggle').checked;
+    if (logLiveTimer) { clearInterval(logLiveTimer); logLiveTimer = null; }
+    if (on) { loadLogs(); logLiveTimer = setInterval(loadLogs, 2000); }
 }
 
-async function sessLoadStatus(justLoggedIn) {
-  try {
-    const res = await fetch('/api/admin/settings/session');
-    const data = await res.json();
-    const connected = !!data.connected;
-    document.getElementById('sess-avatar').textContent = connected ? (data.profile?.name || '?').slice(0, 1).toUpperCase() : '?';
-    document.getElementById('sess-name').innerHTML = connected
-      ? `${escapeHtml(data.profile?.name || 'Connected')} ${data.live ? '<span class="st-pill st-ok" style="font-size:.6rem">live</span>' : '<span class="st-pill st-warn" style="font-size:.6rem">not live</span>'}`
-      : 'No session configured';
-    document.getElementById('sess-username').textContent = connected ? `@${data.profile?.username || '-'}` : '';
-    document.getElementById('sess-meta').textContent = connected
-      ? `${data.profile?.phone || ''}${data.profile?.user_id ? ' · ' + data.profile.user_id : ''}`.trim()
-      : '';
-    const actions = document.getElementById('sess-actions');
-    actions.innerHTML = connected
-      ? `<button class="btn-ui btn-ghost text-sm" onclick="sessReconnect()"><i class="fas fa-sync-alt"></i> Reconnect</button>
-         <button class="btn-ui btn-danger text-sm" onclick="sessDisconnect()"><i class="fas fa-plug"></i> Disconnect</button>`
-      : `<button class="btn-ui btn-primary text-sm" onclick="sessShowStep('phone')"><i class="fas fa-sign-in-alt"></i> Log In</button>`;
-    if (connected) {
-      document.getElementById('sess-wizard').style.display = 'none';
-    } else {
-      document.getElementById('sess-wizard').style.display = '';
+async function restartApp() {
+    if (!confirm('Restart the app now? It will pull the latest code and be unreachable for a few seconds.')) return;
+
+    let before = null;
+    try { before = (await (await fetch('/api/admin/health')).json()).start_time; } catch (e) {}
+
+    try {
+        const res = await fetch('/api/admin/restart', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { showToast(data.detail || 'Could not restart.', 'error', 'Error'); return; }
+        showToast(data.message || 'Restart initiated.', 'info', 'Restart');
+    } catch (e) {
+        showToast('Network error.', 'error', 'Error'); return;
     }
-  } catch (_) {}
-}
 
-async function sessDisconnect() {
-  await fetch('/api/admin/settings/session/disconnect', { method: 'POST' });
-  sessLoginId = null;
-  await sessLoadStatus(false);
-}
-
-async function sessReconnect() {
-  try {
-    const res = await fetch('/api/admin/settings/session/reconnect', { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    await sessLoadStatus(false);
-  } catch (e) {
-    document.getElementById('sess-msg').textContent = e.message;
-    document.getElementById('sess-msg').className = 'sess-msg err';
-  }
-}
-
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
-/* ── Backup & restore ───────────────────────────────────────────────────── */
-async function restoreConfig() {
-  const btn = document.getElementById('restore-btn');
-  const status = document.getElementById('restore-status');
-  btn.disabled = true;
-  status.textContent = 'Restoring…';
-  status.style.color = 'var(--text-sec)';
-  try {
-    const payload = JSON.parse(document.getElementById('restore-input').value.trim());
-    const res = await fetch('/api/admin/backup/import', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+    // Web app goes down during restart — poll health until start_time changes, then reload.
+    if (logLiveTimer) { clearInterval(logLiveTimer); logLiveTimer = null; }
+    const overlay = document.getElementById('restart-overlay');
+    overlay.hidden = false;
+    document.documentElement.classList.add('rs-lock');
+    document.activeElement?.blur();
+    const msg = document.getElementById('restart-overlay-msg');
+    const step = n => overlay.querySelectorAll('[data-step]').forEach(li => {
+        li.classList.toggle('on', +li.dataset.step <= n);
+        li.classList.toggle('now', +li.dataset.step === n);
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    status.textContent = 'Backup restored ✓ — reloading…';
-    status.style.color = '#22c55e';
-    setTimeout(() => location.reload(), 1200);
-  } catch (e) {
-    status.textContent = `Restore failed: ${e.message}`;
-    status.style.color = '#ef4444';
-  } finally {
-    btn.disabled = false;
-  }
+    step(0);
+    let wasDown = false;
+
+    const poll = setInterval(async () => {
+        try {
+            const res = await fetch('/api/admin/health', { cache: 'no-store' });
+            if (!res.ok) throw new Error('not ready');
+            const d = await res.json();
+            if (wasDown || (before && d.start_time && d.start_time !== before)) {
+                clearInterval(poll);
+                msg.textContent = 'The server is back. Reloading the page…';
+                document.getElementById('rs-title').textContent = 'Restart complete';
+                overlay.classList.add('done');
+                step(2);
+                // Persist a flag so the success notice survives the page reload below.
+                sessionStorage.setItem('restartSuccess', '1');
+                setTimeout(() => window.location.reload(), 900);
+            }
+        } catch (e) {
+            wasDown = true;   // server is down — it's restarting
+            msg.textContent = 'The server is offline while it restarts. Waiting for it to come back…';
+            step(1);
+        }
+    }, 2000);
 }
 
-/* ── Init ───────────────────────────────────────────────────────────────── */
-document.addEventListener('DOMContentLoaded', () => {
-  loadDbStats(null);
-  fetchLogs();
-  sessLoadStatus(false);
+/* Run after DOMContentLoaded so base.html helpers (showToast) are defined —
+   the base script that defines showToast is parsed after this block, so calling
+   it at parse time would throw and abort the initial stats/log load. */
+window.addEventListener('DOMContentLoaded', () => {
+    // Post-restart success notice (survives the reload) for ~8s
+    if (sessionStorage.getItem('restartSuccess')) {
+        sessionStorage.removeItem('restartSuccess');
+        showToast('The app restarted successfully and is back online.', 'success', 'Restart complete', 8000);
+    }
+    toggleDuplicateProtection();
+    toggleMediaflowFields();
+    loadDbStats();
+    loadLogs();
 });
 </script>
 

@@ -1,107 +1,104 @@
-"""Tests: UI style axis (default / glassy / neo_brutal) ported from upstream v5.0.2."""
+"""Tests: flat theme system (upstream v5.3.3 adoption).
 
+The 13-theme × 3-style registry was retired on purpose — the fork now ships
+upstream's 3 flat themes (Ink/Paper/Night) with Ink as the fork default, a
+cookie→session theme key, and a single-field /set-theme.
+"""
+
+import asyncio
 import unittest
 from types import SimpleNamespace
 
+from starlette.requests import Request
+
 from Backend.fastapi.themes import (
-    THEMES,
-    DEFAULT_STYLE,
     DEFAULT_THEME,
-    STYLES,
-    get_all_styles,
+    THEMES,
+    get_all_themes,
     get_theme,
+    theme_key,
 )
 from Backend.fastapi.routes import template_routes
 
 
-class StyleRegistryTests(unittest.TestCase):
-    def test_three_styles_registered(self):
-        self.assertEqual(
-            set(STYLES.keys()), {"default", "glassy", "neo_brutal"}
-        )
+def _request(theme_cookie=None, session=None):
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [(b"cookie", f"theme={theme_cookie}".encode())] if theme_cookie else [],
+        "session": session or {},
+    }
+    return Request(scope)
 
-    def test_get_theme_injects_style(self):
-        theme = get_theme(DEFAULT_THEME, "glassy")
-        self.assertEqual(theme["style"], "glassy")
-        self.assertEqual(theme["name"], THEMES[DEFAULT_THEME]["name"])
 
-    def test_bad_style_falls_back_to_default(self):
-        self.assertEqual(get_theme(DEFAULT_THEME, "bogus")["style"], "default")
-        self.assertEqual(get_theme(DEFAULT_THEME)["style"], "default")
+class ThemeRegistryTests(unittest.TestCase):
+    def test_flat_theme_set(self):
+        self.assertEqual(set(THEMES.keys()), {"ink", "paper", "night"})
 
-    def test_registry_not_mutated(self):
-        get_theme(DEFAULT_THEME, "neo_brutal")
-        self.assertNotIn("style", THEMES[DEFAULT_THEME])
-        # colors dict still shared reference — but theme dict itself is a copy
-        theme = get_theme(DEFAULT_THEME, "glassy")
-        theme["colors"] = None
-        self.assertIsNotNone(THEMES[DEFAULT_THEME]["colors"])
+    def test_fork_default_is_ink(self):
+        self.assertEqual(DEFAULT_THEME, "ink")
+        self.assertEqual(get_theme(), THEMES["ink"])
+        self.assertTrue(THEMES["ink"]["is_dark"])
+        self.assertFalse(THEMES["paper"]["is_dark"])
 
-    def test_theme_keys_unchanged(self):
-        # bridal_blush stays (fork-specific); all themes keep 8 color keys
-        self.assertIn("bridal_blush", THEMES)
-        for name, data in THEMES.items():
-            self.assertEqual(
-                set(data["colors"].keys()),
-                {"primary", "secondary", "accent", "background", "card",
-                 "border", "text", "text_secondary"},
-                f"theme {name} color keys drifted",
-            )
+    def test_theme_dict_shape(self):
+        for key, theme in THEMES.items():
+            self.assertIn("is_dark", theme)
+            for color in (
+                "primary", "on_primary", "background", "card", "card_high",
+                "border", "text", "text_secondary", "danger", "ok",
+            ):
+                self.assertIn(color, theme["colors"], f"{key} missing {color}")
+
+    def test_unknown_theme_falls_back(self):
+        self.assertEqual(get_theme("does-not-exist"), THEMES[DEFAULT_THEME])
+
+    def test_get_all_themes_is_registry(self):
+        self.assertIs(get_all_themes(), THEMES)
+
+
+class ThemeKeyTests(unittest.TestCase):
+    def test_cookie_wins(self):
+        self.assertEqual(theme_key(_request(theme_cookie="night")), "night")
+
+    def test_session_fallback(self):
+        self.assertEqual(theme_key(_request(session={"theme": "paper"})), "paper")
+
+    def test_default_when_neither(self):
+        self.assertEqual(theme_key(_request()), DEFAULT_THEME)
+
+    def test_invalid_value_falls_back(self):
+        self.assertEqual(theme_key(_request(theme_cookie="graphite_amber")), DEFAULT_THEME)
 
 
 class SetThemeTests(unittest.IsolatedAsyncioTestCase):
-    def _request(self):
-        class FakeSession(dict):
-            pass
-        req = SimpleNamespace(session=FakeSession(), headers={"referer": "/"})
-        return req
+    async def test_set_theme_writes_session_and_cookie(self):
+        session = {}
+        request = SimpleNamespace(session=session, headers={"referer": "/admin/settings"})
+        response = await template_routes.set_theme(request, "paper")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(session.get("theme"), "paper")
+        cookie_headers = [v for k, v in response.raw_headers if k == b"set-cookie"]
+        self.assertTrue(any(b"theme=paper" in c for c in cookie_headers))
 
-    async def test_stores_style_and_theme(self):
-        req = self._request()
-        await template_routes.set_theme(req, "graphite_amber", "glassy")
-        self.assertEqual(req.session["theme"], "graphite_amber")
-        self.assertEqual(req.session["style"], "glassy")
-
-    async def test_style_only_change_keeps_theme(self):
-        req = self._request()
-        req.session["theme"] = "amoled_midnight"
-        await template_routes.set_theme(req, "", "neo_brutal")
-        self.assertEqual(req.session["theme"], "amoled_midnight")
-        self.assertEqual(req.session["style"], "neo_brutal")
-
-    async def test_theme_only_change_keeps_style(self):
-        req = self._request()
-        req.session["style"] = "glassy"
-        await template_routes.set_theme(req, "royal_violet", "")
-        self.assertEqual(req.session["theme"], "royal_violet")
-        self.assertEqual(req.session["style"], "glassy")
-
-    async def test_invalid_style_ignored(self):
-        req = self._request()
-        await template_routes.set_theme(req, None, "bogus_style")
-        self.assertNotIn("style", req.session)
-
-    async def test_base_context_exposes_styles(self):
-        req = SimpleNamespace(
-            session={"theme": "graphite_amber", "style": "glassy"},
-            headers={"referer": "/"},
-        )
-        ctx = template_routes._base_context(req)
-        self.assertEqual(ctx["current_style"], "glassy")
-        self.assertEqual(ctx["theme"]["style"], "glassy")
-        self.assertIn("styles", ctx)
-        self.assertEqual(set(ctx["styles"].keys()), {"default", "glassy", "neo_brutal"})
+    async def test_set_theme_ignores_unknown(self):
+        session = {}
+        request = SimpleNamespace(session=session, headers={"referer": "/"})
+        response = await template_routes.set_theme(request, "nope")
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("theme", session)
 
 
-class BaseTemplateStyleClassTests(unittest.TestCase):
-    def test_html_tag_emits_style_class(self):
-        from pathlib import Path
-
-        src = (Path("Backend/fastapi/templates/base.html")).read_text(encoding="utf-8")
-        self.assertIn("style-{{ theme.style|default('default') }}", src.splitlines()[1])
-        self.assertIn("html.style-glassy .glass-panel", src)
-        self.assertIn("html.style-neo_brutal .glass-panel", src)
-        self.assertIn("function selectStyle(", src)
+class BaseContextTests(unittest.TestCase):
+    def test_base_context_shape(self):
+        ctx = template_routes._base_context(_request())
+        self.assertIn("theme", ctx)
+        self.assertIn("themes", ctx)
+        self.assertIn("current_theme", ctx)
+        self.assertIn("current_user", ctx)
+        self.assertNotIn("styles", ctx)
+        self.assertNotIn("current_style", ctx)
 
 
 if __name__ == "__main__":
