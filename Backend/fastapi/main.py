@@ -38,6 +38,7 @@ from Backend.fastapi.routes.api_routes import (
     resolve_telegram_api, manual_add_media_api,
     search_manual_add_metadata_api, resolve_manual_add_metadata_api, get_manual_add_catalogs_api,
     list_custom_catalogs_api, create_custom_catalog_api, update_custom_catalog_api,
+    get_catalog_order_api, update_catalog_order_api,
     delete_custom_catalog_api, get_custom_catalog_items_api, search_catalog_media_api,
     add_custom_catalog_item_api, remove_custom_catalog_item_api,
     get_media_visibility_api, set_media_visibility_api,
@@ -802,6 +803,14 @@ async def list_custom_catalogs(
     _: bool = Depends(require_auth),
 ):
     return await list_custom_catalogs_api(tmdb_id, db_index, media_type)
+
+@app.get("/api/custom-catalogs-order")
+async def get_catalog_order_route(_: bool = Depends(require_auth)):
+    return await get_catalog_order_api()
+
+@app.put("/api/custom-catalogs-order")
+async def update_catalog_order_route(payload: dict, _: bool = Depends(require_auth)):
+    return await update_catalog_order_api(payload)
 
 @app.post("/api/custom-catalogs")
 async def create_custom_catalog(payload: dict, _: bool = Depends(require_auth)):

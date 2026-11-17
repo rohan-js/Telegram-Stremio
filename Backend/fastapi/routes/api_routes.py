@@ -2421,6 +2421,56 @@ def _clean_visibility(payload: dict) -> tuple[str | None, list[str]]:
     return visibility, tokens
 
 
+#----- Every manifest-visible catalog for the admin visibility/order page
+#----- (upstream v5.3.4): the four builtins plus every custom/auto catalog
+#----- expanded per media type. Admin view — visibility filtering NOT applied.
+_CATALOG_ENTRIES = [
+    {"id": "latest_movies", "name": "Latest Movies", "group": "Built-in", "type": "movie"},
+    {"id": "latest_series", "name": "Latest Series", "group": "Built-in", "type": "series"},
+    {"id": "top_movies", "name": "Popular Movies", "group": "Built-in", "type": "movie"},
+    {"id": "top_series", "name": "Popular Series", "group": "Built-in", "type": "series"},
+]
+
+
+async def get_catalog_order_api():
+    try:
+        entries = [dict(e) for e in _CATALOG_ENTRIES]
+        for catalog in await db.get_custom_catalogs():
+            cid = f"custom_{catalog.get('_id')}"
+            name = catalog.get("name") or "Custom Catalog"
+            group = "Auto" if catalog.get("auto") else "Custom"
+            items = catalog.get("items") or []
+            if any(i.get("media_type") == "movie" for i in items):
+                entries.append({"id": cid, "name": name, "group": group, "type": "movie"})
+            if any(i.get("media_type") == "tv" for i in items):
+                entries.append({"id": cid, "name": name, "group": group, "type": "series"})
+        order = await db.get_catalog_order()
+        rank = {k: i for i, k in enumerate(order)}
+        for e in entries:
+            e["key"] = f"{e['id']}::{e['type']}"
+            e["rank"] = rank.get(e["key"], rank.get(e["id"], len(order) + 1))
+        entries.sort(key=lambda e: e["rank"])
+        hidden = set(await db.get_hidden_catalogs())
+        for e in entries:
+            e["hidden"] = e["key"] in hidden
+        return {"entries": entries, "order": order}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def update_catalog_order_api(payload: dict):
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="payload must be an object.")
+    order = payload.get("order")
+    if order is not None and not isinstance(order, list):
+        raise HTTPException(status_code=400, detail="order must be a list.")
+    if order is not None:
+        await db.save_catalog_order(order)
+    if isinstance(payload.get("hidden"), list):
+        await db.save_hidden_catalogs(payload["hidden"])
+    return {"ok": True, "message": "Catalog visibility saved."}
+
+
 async def list_custom_catalogs_api(
     tmdb_id: int | None = None,
     db_index: int | None = None,

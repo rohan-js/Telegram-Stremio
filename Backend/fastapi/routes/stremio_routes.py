@@ -671,15 +671,28 @@ async def get_manifest(request: Request, token: str, response: Response, token_d
         except Exception:
             pass
 
-    #----- Per-token addon config: hide catalogs and reorder the manifest list
+    #----- Catalog visibility + order (upstream v5.3.4): admin-global hidden
+    #----- merges with per-token config; a token's own order replaces the
+    #----- global one. Rank keys are id::type with bare-id fallback.
     _token_config = token_data.get("config") or {}
     _hidden_catalogs = set(_token_config.get("hidden_catalogs") or [])
     _catalog_order = _token_config.get("catalog_order") or []
+    try:
+        _hidden_catalogs |= set(await db.get_hidden_catalogs())
+    except Exception:
+        pass
     if _hidden_catalogs:
-        catalogs = [c for c in catalogs if c["id"] not in _hidden_catalogs]
-    if _catalog_order:
-        rank = {cid: i for i, cid in enumerate(_catalog_order)}
-        catalogs.sort(key=lambda c: rank.get(c["id"], len(_catalog_order) + 1))
+        catalogs = [
+            c for c in catalogs
+            if c["id"] not in _hidden_catalogs and f"{c['id']}::{c['type']}" not in _hidden_catalogs
+        ]
+    try:
+        _effective_order = _catalog_order or await db.get_catalog_order()
+    except Exception:
+        _effective_order = _catalog_order
+    if _effective_order:
+        rank = {k: i for i, k in enumerate(_effective_order)}
+        catalogs.sort(key=lambda c: rank.get(f"{c['id']}::{c['type']}", rank.get(c["id"], len(_effective_order) + 1)))
 
     # Build dynamic name/description/version with subscription info
     addon_name = ADDON_NAME
@@ -825,9 +838,9 @@ async def configure_addon(request: Request, token: str):
 
 
 #----- Per-token addon configuration (quality filter/sort, hidden catalogs, catalog order)
-@router.get("/{token}/addon-config")
-async def get_addon_config(token: str, token_data: dict = Depends(verify_token)):
-    config = await db.get_token_config(token)
+#----- Catalogs this token can see, in effective (token or admin-global)
+#----- order, minus admin-hidden entries (upstream v5.3.4).
+async def _addon_catalogs_for_token(token_data: dict) -> list:
     catalogs = [
         {"id": "latest_movies", "name": "Latest Movies", "type": "movie"},
         {"id": "latest_series", "name": "Latest Series", "type": "series"},
@@ -850,9 +863,28 @@ async def get_addon_config(token: str, token_data: dict = Depends(verify_token))
             catalogs.append({"id": IPTV_ALL_CATALOG_ID, "name": "Live TV - All", "type": "tv"})
     except Exception:
         pass
+    try:
+        admin_hidden = set(await db.get_hidden_catalogs())
+        catalogs = [
+            c for c in catalogs
+            if c["id"] not in admin_hidden and f"{c['id']}::{c['type']}" not in admin_hidden
+        ]
+        token_order = (token_data.get("config") or {}).get("catalog_order") or []
+        effective = token_order or await db.get_catalog_order()
+        if effective:
+            rank = {k: i for i, k in enumerate(effective)}
+            catalogs.sort(key=lambda c: rank.get(f"{c['id']}::{c['type']}", rank.get(c["id"], len(effective) + 1)))
+    except Exception:
+        pass
+    return catalogs
+
+
+@router.get("/{token}/addon-config")
+async def get_addon_config(token: str, token_data: dict = Depends(verify_token)):
+    config = await db.get_token_config(token)
     return {
         "config": config,
-        "catalogs": catalogs,
+        "catalogs": await _addon_catalogs_for_token(token_data),
         "quality_options": ["4K", "1080p", "720p", "480p", "360p", "other"],
     }
 
@@ -917,6 +949,18 @@ async def get_catalog(token: str, media_type: str, id: str, response: Response, 
                     stremio_skip = 0
 
     page = (stremio_skip // PAGE_SIZE) + 1
+
+    #----- Admin-hidden catalogs (upstream v5.3.4) serve nothing
+    try:
+        if {id, f"{id}::{media_type}"} & set(await db.get_hidden_catalogs()):
+            return {
+                "metas": [],
+                "cacheMaxAge": 0,
+                "staleRevalidate": 0,
+                "staleError": 0,
+            }
+    except Exception:
+        pass
 
     if media_type == "tv":
         if id in {IPTV_CATALOG_ID, IPTV_ALL_CATALOG_ID}:

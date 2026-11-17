@@ -312,6 +312,20 @@
     </div>
   </div>
 
+  <div class="glass-card rounded-3xl p-5 sm:p-6 mt-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+      <div>
+        <h2 class="section-title text-2xl">Catalog visibility &amp; order</h2>
+        <p class="muted text-sm mt-1">
+          Applies to every viewer: hidden catalogs drop from the Stremio manifest, Nuvio collections and the configure page;
+          the list order is the default order for all tokens (per-token order still overrides it).
+        </p>
+      </div>
+      <button id="save-catalog-order-btn" onclick="saveCatalogOrder()" class="btn-ui btn-primary md:w-auto">💾 Save visibility &amp; order</button>
+    </div>
+    <div id="catalog-order-list" class="grid grid-cols-1 gap-2"></div>
+  </div>
+
   <div class="grid grid-cols-1 xl:grid-cols-[0.88fr_1.12fr] gap-6">
     <div class="space-y-6">
       <div class="glass-card rounded-3xl p-5 sm:p-6">
@@ -876,6 +890,75 @@ async function runAutoSync(fullRebuild = false) {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => { loadCatalogs(); loadAutoSyncStatus(); loadAutoCatalogSettings(); });
+/* ── Catalog visibility & order (upstream v5.3.4) ─────────────────────── */
+let catalogOrderEntries = [];
+
+async function loadCatalogOrder() {
+  const box = document.getElementById('catalog-order-list');
+  try {
+    const res = await fetch('/api/custom-catalogs-order');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    catalogOrderEntries = data.entries || [];
+    renderCatalogOrder();
+  } catch (error) {
+    box.innerHTML = `<div class="pill">⚠ ${error.message || 'Failed to load catalog visibility'}</div>`;
+  }
+}
+
+function renderCatalogOrder() {
+  const box = document.getElementById('catalog-order-list');
+  if (!catalogOrderEntries.length) {
+    box.innerHTML = '<div class="pill">No catalogs yet.</div>';
+    return;
+  }
+  box.innerHTML = catalogOrderEntries.map((e, i) => `
+    <div class="glass-card rounded-2xl px-4 py-3 flex flex-wrap items-center gap-3">
+      <span class="pill">${e.group || 'Custom'}</span>
+      <span class="font-semibold text-sm flex-1 min-w-[10rem]">${e.name}</span>
+      <span class="pill">${e.type}</span>
+      <label class="flex items-center gap-1.5 text-sm muted" title="Hide this catalog for every viewer">
+        <input type="checkbox" class="co-hide" data-key="${e.key}" ${e.hidden ? 'checked' : ''}> Hide
+      </label>
+      <button class="btn-ui btn-ghost px-2 py-1 text-xs" onclick="moveCatalogOrder(${i}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
+      <button class="btn-ui btn-ghost px-2 py-1 text-xs" onclick="moveCatalogOrder(${i}, 1)" ${i === catalogOrderEntries.length - 1 ? 'disabled' : ''}>↓</button>
+    </div>
+  `).join('');
+}
+
+function moveCatalogOrder(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= catalogOrderEntries.length) return;
+  const [row] = catalogOrderEntries.splice(index, 1);
+  catalogOrderEntries.splice(target, 0, row);
+  renderCatalogOrder();
+}
+
+async function saveCatalogOrder() {
+  const btn = document.getElementById('save-catalog-order-btn');
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Saving...';
+  try {
+    const order = catalogOrderEntries.map(e => e.key);
+    const hidden = Array.from(document.querySelectorAll('#catalog-order-list .co-hide:checked')).map(el => el.dataset.key);
+    const res = await fetch('/api/custom-catalogs-order', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order, hidden }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    showToast('Catalog visibility saved.', 'success', 'Saved');
+    loadCatalogs();
+  } catch (error) {
+    showToast(error.message || 'Save failed', 'error', 'Error');
+  } finally {
+    btn.textContent = old;
+    btn.disabled = false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => { loadCatalogs(); loadAutoSyncStatus(); loadAutoCatalogSettings(); loadCatalogOrder(); });
 </script>
 {% endblock %}

@@ -55,6 +55,12 @@ async def build_nuvio_collection_data(token: str, collection_type: str = "full",
 
     try:
         custom_catalogs = await db.get_custom_catalogs(slim=True)
+        #----- Admin-hidden catalogs drop from Nuvio too (fork improvement:
+        #----- upstream's builder ignores its own global hide).
+        try:
+            admin_hidden = set(await db.get_hidden_catalogs())
+        except Exception:
+            admin_hidden = set()
         for catalog in custom_catalogs:
             # Check visibility and items
             raw_items = catalog.get("items") or []
@@ -63,10 +69,18 @@ async def build_nuvio_collection_data(token: str, collection_type: str = "full",
                 if _nuvio_item_visible(catalog, i, token_data)
             ]
 
-            has_movie = any(i.get("media_type") == "movie" for i in visible_items)
-            has_series = any(i.get("media_type") == "tv" for i in visible_items)
-
             cid = f"custom_{catalog.get('_id')}"
+            has_movie = (
+                any(i.get("media_type") == "movie" for i in visible_items)
+                and cid not in admin_hidden
+                and f"{cid}::movie" not in admin_hidden
+            )
+            has_series = (
+                any(i.get("media_type") == "tv" for i in visible_items)
+                and cid not in admin_hidden
+                and f"{cid}::series" not in admin_hidden
+            )
+
             name = (catalog.get("name") or "").lower().strip()
             auto_key = (catalog.get("auto_key") or "").lower().strip()
 
