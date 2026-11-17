@@ -327,9 +327,6 @@
             </div>
         </div>
         <hr class="divider">
-        <div class="grid-2">
-            </div>
-        </div>
     </div>
 
     <!-- ── Poster Provider ─────────────────────────────────────────────── -->
@@ -370,6 +367,11 @@
                 </span>
             </span>
         </label>
+        <div id="rpdb-wrap" style="margin-bottom:1.25rem;{% if not settings.rpdb_enabled %}display:none{% endif %}">
+            <label class="s-label" for="rpdb_api_key">RPDB API Key <span style="font-weight:400;text-transform:none">(optional)</span></label>
+            <input type="text" id="rpdb_api_key" class="s-input"
+                value="{{ settings.rpdb_api_key }}" autocomplete="off" spellcheck="false"
+                placeholder="Leave empty for free tier (t0-free-rpdb)">
         </div>
 
         <label class="toggle-wrap" style="margin-bottom:0.75rem">
@@ -1068,8 +1070,9 @@ document.addEventListener('DOMContentLoaded', sessLoadStatus);
             <button class="add-btn" onclick="addItem('multi_tokens')">+ Add Token</button>
         </div>
     </div>
+</div><!-- /settings-root -->
 
-    <!-- ── Restart overlay ──────────────────────────────────────────────────── -->
+<!-- ── Restart overlay ──────────────────────────────────────────────────── -->
 <div id="restart-overlay" class="rs-overlay" role="alertdialog" aria-modal="true" aria-labelledby="rs-title" aria-describedby="restart-overlay-msg" hidden>
     <div class="rs-card">
         <div class="rs-spinner" aria-hidden="true"><i class="fa-solid fa-arrows-rotate"></i></div>
