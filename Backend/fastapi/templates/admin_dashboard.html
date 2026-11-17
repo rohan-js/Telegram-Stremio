@@ -1,49 +1,4 @@
-{% extends "base.html" %}
-
-{% block title %}Admin Dashboard - Telegram Stremio
-<script>
-    async function fetchWarpStatus() {
-        try {
-            const res = await fetch('/api/admin/warp/status');
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || 'Unable to load WARP status');
-            document.getElementById('warp-mode').textContent = data.mode || '-';
-            document.getElementById('warp-mode-pill').textContent = data.mode || '-';
-            document.getElementById('warp-proxy').textContent = `${data.proxy_scheme || ''}://${data.proxy_host || '-'}:${data.proxy_port || '-'}`;
-            document.getElementById('warp-active').textContent = data.active_streams ?? 0;
-            document.getElementById('warp-control').textContent = data.control_available ? 'Configured' : 'Not configured';
-            const result = document.getElementById('warp-result');
-            if (data.last_result && Object.keys(data.last_result).length) {
-                result.classList.remove('hidden');
-                result.textContent = JSON.stringify(data.last_result, null, 2);
-            }
-        } catch (err) {
-            document.getElementById('warp-control').textContent = 'Status error';
-        }
-    }
-
-    async function applyWarp(enable, force) {
-        const useForce = force || document.getElementById('warp-force').checked;
-        if (useForce && !confirm('Force switching can interrupt active Telegram streams. Continue?')) return;
-        try {
-            const res = await fetch('/api/admin/warp/apply', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({enable, force: useForce})
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.detail || data.message || 'WARP switch failed');
-            showToast(data.message || 'WARP switch command completed', 'success', 'WARP');
-            await fetchWarpStatus();
-        } catch (err) {
-            showToast(err.message || 'WARP switch failed', 'error', 'WARP');
-            await fetchWarpStatus();
-        }
-
-document.addEventListener('DOMContentLoaded', fetchWarpStatus);
-</script>
-
-{% endblock %}
+{% block title %}Admin Dashboard - Telegram Stremio{% endblock %}
 
 {% block content %}
 <style>
@@ -685,5 +640,48 @@ document.addEventListener('DOMContentLoaded', fetchWarpStatus);
         setInterval(fetchHealthReport, 20000);  // infra checks (cached server-side)
         setInterval(fetchAnalytics, 15000);
     });
+</script>
+
+<script>
+    async function fetchWarpStatus() {
+        try {
+            const res = await fetch('/api/admin/warp/status');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Unable to load WARP status');
+            document.getElementById('warp-mode').textContent = data.mode || '-';
+            document.getElementById('warp-mode-pill').textContent = data.mode || '-';
+            document.getElementById('warp-proxy').textContent = `${data.proxy_scheme || ''}://${data.proxy_host || '-'}:${data.proxy_port || '-'}`;
+            document.getElementById('warp-active').textContent = data.active_streams ?? 0;
+            document.getElementById('warp-control').textContent = data.control_available ? 'Configured' : 'Not configured';
+            const result = document.getElementById('warp-result');
+            if (data.last_result && Object.keys(data.last_result).length) {
+                result.classList.remove('hidden');
+                result.textContent = JSON.stringify(data.last_result, null, 2);
+            }
+        } catch (err) {
+            document.getElementById('warp-control').textContent = 'Status error';
+        }
+    }
+
+    async function applyWarp(enable, force) {
+        const useForce = force || document.getElementById('warp-force').checked;
+        if (useForce && !confirm('Force switching can interrupt active Telegram streams. Continue?')) return;
+        try {
+            const res = await fetch('/api/admin/warp/apply', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enable, force: useForce})
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || data.message || 'WARP switch failed');
+            showToast(data.message || 'WARP switch command completed', 'success', 'WARP');
+            await fetchWarpStatus();
+        } catch (err) {
+            showToast(err.message || 'WARP switch failed', 'error', 'WARP');
+            await fetchWarpStatus();
+        }
+    }
+
+document.addEventListener('DOMContentLoaded', fetchWarpStatus);
 </script>
 {% endblock %}

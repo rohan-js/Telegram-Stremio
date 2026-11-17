@@ -821,6 +821,12 @@
                 document.body.removeChild(temp);
                 if (!ok) throw new Error('copy failed');
             }
+            showToast('Manifest URL copied to clipboard.', 'success', 'Copied');
+        } catch (error) {
+            console.error(error);
+            showToast('Failed to copy manifest URL.', 'error', 'Copy failed');
+        }
+    }
 
     (function tokenUsageRefresh() {
         async function refresh() {

@@ -461,9 +461,13 @@ async def import_config_api(payload: dict) -> dict:
 #----- TVDB pipeline, so that check is omitted)
 async def setup_status_api() -> dict:
     from Backend.helper.passwords import verify_password
+    # Fork: the TMDB key is env-sourced (Telegram.TMDB_API); the Mongo settings
+    # document only carries it if an upstream-style field was written directly.
+    from Backend.config import Telegram
     s = SettingsManager.current()
+    tmdb_key = str(Telegram.TMDB_API or "").strip() or str(s.to_dict().get("tmdb_api") or "").strip()
     checks = [
-        {"key": "tmdb", "label": "TMDB API key", "done": bool(s.tmdb_api),
+        {"key": "tmdb", "label": "TMDB API key", "done": bool(tmdb_key),
          "hint": "Powers automatic poster & metadata matching."},
         {"key": "channels", "label": "AUTH channel added", "done": len(s.auth_channels) > 0,
          "hint": "The channel(s) the bot indexes and streams from."},

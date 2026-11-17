@@ -1,5 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Tokens & Access
+{% block title %}Tokens & Access{% endblock %}
+
+{% block content %}
+
+<!-- Per-token viewer activity (Insights) — fork feature re-mounted -->
 <!-- Per-token viewer activity (Insights) -->
 <div id="token-activity-modal" class="modal-overlay hidden">
     <div class="modal-content glass-panel rounded-3xl w-[min(94vw,60rem)] max-h-[84vh] overflow-y-auto p-6">
@@ -12,6 +16,7 @@
         <div id="token-activity-body"><p class="text-soft text-sm">Loading…</p></div>
     </div>
 </div>
+
 
 <script>
     function closeTokenActivity() {
@@ -55,6 +60,7 @@
         } catch (error) {
             body.innerHTML = `<p class="text-red-400 text-sm">Could not load activity: ${escHtml(error.message || 'error')}</p>`;
         }
+    }
 
     async function toggleLifetime(token, enable) {
         if (!confirm(enable ? 'Make this token lifetime?' : 'Remove lifetime access from this token?')) return;
@@ -110,29 +116,12 @@
                 showToast(grantData.message, 'success', 'Preflight');
                 loadTokens();
             }
-
-    async function runSubscriptionPreflight() {
-        try {
-            const resp = await fetch('/api/admin/subscriptions/preflight');
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Preflight failed');
-            if (!data.uncovered.length) {
-                showToast('Every current token has an access path.', 'success', 'Preflight'); return;
-            }
-            const names = data.uncovered.slice(0, 8).map(item => item.name).join(', ');
-            const grant = confirm(`${data.uncovered.length} token(s) would be uncovered: ${names}.\n\nMark all unlinked tokens as lifetime now?`);
-            if (grant) {
-                const grantResp = await fetch('/api/admin/access/grant-lifetime', {method: 'POST'});
-                const grantData = await grantResp.json();
-                if (!grantResp.ok) throw new Error(grantData.detail || 'Lifetime grant failed');
-                showToast(grantData.message, 'success', 'Preflight');
-                loadTokens();
-            }
+        } catch (err) {
+            showToast(err.message, 'error', 'Preflight');
+        }
+    }
 </script>
 
-{% endblock %}
-
-{% block content %}
 <style>
     .access-shell { display: flex; flex-direction: column; gap: 2rem; }
     .section-panel, .stat-card, .mobile-token-card, .modal-glass { background: var(--card); border: 1px solid var(--border); }
