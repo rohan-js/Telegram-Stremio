@@ -1797,10 +1797,27 @@ async def get_admin_stats_api() -> dict:
             "status": status
         })
         
+    # Union shape (2026-11-17): the fork's bot-workload consumers AND the
+    # upstream-shape Overview fields (egress/VPS outbound/token usage) share
+    # this endpoint since the UI adoption.
+    try:
+        overview = await get_system_stats_api()
+    except Exception as exc:
+        LOGGER.error(f"[Stats] overview merge failed: {exc}")
+        overview = {}
+
     return {
         "cache_size": cache_size,
         "total_bots": len(multi_clients),
-        "bot_workloads": bot_stats
+        "bot_workloads": bot_stats,
+        "egress": overview.get("egress") or {},
+        "vps_outbound": overview.get("vps_outbound") or {},
+        "api_tokens": overview.get("api_tokens") or [],
+        "movies": overview.get("movies") or 0,
+        "tv_shows": overview.get("tv_shows") or 0,
+        "databases": overview.get("databases") or [],
+        "uptime": overview.get("uptime") or "",
+        "server_status": overview.get("server_status") or "unknown",
     }
 
 async def clear_cache_api() -> dict:

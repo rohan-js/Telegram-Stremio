@@ -33,22 +33,44 @@
                 <div class="min-w-0"><p class="text-xl font-semibold tabular"><span id="sys-bots-count">{{ system_stats.connected_bots|default(0) }}</span></p><p class="text-sm text-text-secondary">Bots</p></div>
                 <div class="min-w-0"><p class="text-xl font-semibold tabular"><span id="sys-live-streams">{{ system_stats.total_active_streams }}</span></p><p class="text-sm text-text-secondary">Live streams</p></div>
                 <div class="min-w-0"><p id="sys-version" class="text-xl font-semibold tabular truncate">v{{ system_stats.version }}</p><p class="text-sm text-text-secondary">Version</p></div>
-
-        <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                <i class="fa-solid fa-cloud-arrow-up"></i>
             </div>
-            <div class="min-w-0">
-                <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">HTTP Egress</p>
-                <p id="sys-egress-today" class="text-lg font-bold text-text" data-bytes="{{ system_stats.egress.today.bytes|default(0) }}"></p>
-                <p class="text-[10px] text-text-secondary">
-                    Month: <span id="sys-egress-month" data-bytes="{{ system_stats.egress.month.bytes|default(0) }}"></span>
-                </p>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                        <i class="fa-solid fa-cloud-arrow-up"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">HTTP Egress</p>
+                        <p id="sys-egress-today" class="text-lg font-bold text-text" data-bytes="{{ system_stats.egress.today.bytes|default(0) }}"></p>
+                        <p class="text-[10px] text-text-secondary">
+                            Month: <span id="sys-egress-month" data-bytes="{{ system_stats.egress.month.bytes|default(0) }}"></span>
+                        </p>
+                    </div>
+                </div>
+
+                <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center text-sky-500">
+                        <i class="fa-solid fa-network-wired"></i>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">VPS TX Outbound</p>
+                        <p id="sys-vps-outbound-month" class="text-lg font-bold text-text" data-bytes="{{ system_stats.vps_outbound.month.bytes|default(0) }}"></p>
+                        <p class="text-[10px] text-text-secondary">
+                            Today: <span id="sys-vps-outbound-today" data-bytes="{{ system_stats.vps_outbound.today.bytes|default(0) }}"></span>
+                        </p>
+                        <div class="mt-2 h-1.5 bg-surface rounded-full overflow-hidden">
+                            <div id="sys-vps-outbound-progress" class="h-full bg-sky-400 transition-all duration-700" style="width: {{ [system_stats.vps_outbound.month.percent|default(0), 100]|min }}%"></div>
+                        </div>
+                        <p class="mt-1 text-[9px] text-text-secondary">
+                            <span id="sys-vps-outbound-percent">{{ "%.1f"|format(system_stats.vps_outbound.month.percent|default(0)) }}%</span> of 10 TB
+                        </p>
+                    </div>
+                </div>
             </div>
         </div>
+    </section>
 
-            </div>
-        </div>
     </section>
 
     <section>
