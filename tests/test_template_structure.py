@@ -93,6 +93,24 @@ class TemplateBalanceTests(unittest.TestCase):
         # the stray close that popped the containers is gone
         self.assertNotIn("</label>\n        </div>\n\n        <label", src)
 
+    def test_content_templates_extend_base(self):
+        """Every template with a content block must extend base.html.
+
+        A repair script once dropped ``{% extends %}`` from admin_dashboard.html;
+        the page then rendered standalone (no shell, no <title>) without any
+        render error.
+        """
+        for path in sorted(TEMPLATES_DIR.glob("*.html")):
+            if path.name in ("base.html", "nuvio_open.html", "stremio_configure.html"):
+                continue  # base defines the blocks; the two are standalone pages
+            src = path.read_text(encoding="utf-8")
+            if "{% block content %}" in src:
+                self.assertIn("{% extends", src, f"{path.name} must extend base.html")
+                self.assertTrue(
+                    src.lstrip().startswith('{% extends "base.html" %}'),
+                    f"{path.name} must be the child template (extends first)",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
